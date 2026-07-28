@@ -87,8 +87,7 @@ Linux_post_install/
 │   ├── ssh-load-all → pos# Backward-compat wrapper
 │   └── autostart.sh      # Boot-time script (via systemd)
 ├── config/                 # User config files (gitignored)
-│   ├── authorized_keys     # SSH public keys (gitignored — add your own)
-│   └── rclone.conf         # rclone config (gitignored — add your own)
+│   └── authorized_keys     # SSH public keys (gitignored — add your own)
 ├── lib/
 │   └── common.sh         # Shared library (colors, logging, spinner, timer)
 ├── systemd/
