@@ -269,39 +269,53 @@ fi
 
 ## Docker Compose / ScaleTail
 
-The installer clones [ScaleTail](https://github.com/tailscale-dev/ScaleTail) templates to `/usr/local/share/linux_post_install/scale-tail/` — 119+ self-hosted services with a Tailscale sidecar pattern.
+The installer clones [ScaleTail](https://github.com/tailscale-dev/ScaleTail) templates to `/usr/local/share/linux_post_install/scale-tail/` — 119+ self-hosted services with a Tailscale sidecar pattern. Each service gets a `tail-xxxxx.ts.net` URL via `network_mode: service:tailscale`.
 
-### Deployed Layout
+### Config Strategy — Three Layers
+
+Values cascade from least to most specific:
 
 ```
-/usr/local/share/linux_post_install/scale-tail/   # Templates (git repo)
-└── services/<name>/
-    ├── compose.yaml
-    └── .env
-
-~/.config/linux_post_install/compose.env           # Global defaults
-
-/srv/<service>/                                    # Active deployment
-    ├── compose.yaml     # Refreshed on update (preserves .env)
-    ├── .env             # Your config — preserved across updates
-    ├── config/
-    └── data/
+Template .env          (per-service defaults from ScaleTail)
+       ↓
+Global config          (~/.config/linux_post_install/compose.env)
+       ↓
+Per-service .env       (/srv/<service>/.env) — created on first deploy, NEVER overwritten
 ```
+
+On first `pos docker compose up <service>`:
+1. Template `.env` is copied to `/srv/<service>/.env`
+2. Matching keys from global config are filled in
+3. If `TS_AUTHKEY` is still empty, you're prompted to enter it
+4. After that, the per-service `.env` is **never touched** — not even by `update`
+
+### Layout
+
+| Path | Purpose | Mutability |
+|------|---------|------------|
+| `/usr/local/share/linux_post_install/scale-tail/services/<name>/` | ScaleTail templates (git repo) | Read-only |
+| `~/.config/linux_post_install/compose.env` | Your global defaults | Edit via `config set` or `config edit` |
+| `/srv/<service>/` | Active deployment | Per-service `.env` preserved forever |
 
 ### Key Commands
 
 | Command | Behaviour |
 |---------|-----------|
-| `pos docker compose up <service>` | Deploys to `$SERVICES_BASE/<service>/`, creates `config/` + `data/`, generates `.env` |
+| `pos docker compose up <service>` | Deploys to `$SERVICES_BASE/<service>/`, creates `config/` + `data/`, generates `.env` from global defaults |
 | `pos docker compose down <service>` | Stops the stack |
-| `pos docker compose update` | `git pull` templates + refreshes `compose.yaml` for all deployed services |
-| `pos docker compose config set K=V` | Sets global default in `~/.config/linux_post_install/compose.env` |
+| `pos docker compose update` | `git pull` templates + refreshes `compose.yaml` for all deployed services (`.env` untouched) |
+| `pos docker compose config set K=V` | Sets a global default in `~/.config/linux_post_install/compose.env` |
+| `pos docker compose config show` | Displays current global config and `SERVICES_BASE` |
+| `pos docker compose config edit` | Opens global config in `$EDITOR` |
 
-### .env Design
+### Global Config Keys
 
-- **Global config**: `~/.config/linux_post_install/compose.env` — one place for `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`
-- **Per-service**: `<SERVICES_BASE>/<service>/.env` — generated from template, filled from global config
-- **Updates**: `compose.yaml` refreshes from template but `.env` is never overwritten
+| Key | Required | Default | Purpose |
+|-----|----------|---------|---------|
+| `TS_AUTHKEY` | Yes | — | Tailscale auth key for sidecar networking |
+| `TZ` | No | `Europe/Amsterdam` | Timezone for services |
+| `DNS_SERVER` | No | `9.9.9.9` | Custom DNS server |
+| `SERVICES_BASE` | No | `/srv` | Root directory for all deployments |
 
 ---
 

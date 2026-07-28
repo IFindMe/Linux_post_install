@@ -76,23 +76,63 @@ pos network scan 192.168.8.0/24              # Fast parallel ping sweep
 ```bash
 pos docker ps                                # List containers with health, IPs, ports
 pos docker health                            # Health dashboard (exits 1 if unhealthy)
-pos docker compose ls                        # List 119+ available services
-pos docker compose up jellyfin               # Deploy with Tailscale HTTPS
-pos docker compose down actual-budget        # Stop a stack
-pos docker compose logs home-assistant -f    # Tail logs
-pos docker compose update                    # Pull latest templates
-pos docker compose config set TS_AUTHKEY=x   # Set global defaults
 ```
 
-**First run with compose:**
+#### Compose (ScaleTail — 119+ self-hosted services)
+
+Each service runs with a Tailscale sidecar and gets its own `tail-xxxxx.ts.net` URL.
+
+**Quick start:**
 
 ```bash
+# 1. Set your Tailscale auth key (required once)
 pos docker compose config set TS_AUTHKEY=tskey-auth-xxxxx
+
+# 2. Deploy a service
 pos docker compose up jellyfin
-# Open https://jellyfin.tail-xxxxx.ts.net
+
+# 3. Open https://jellyfin.tail-xxxxx.ts.net
 ```
 
-Services are deployed to `/srv/<service>/` by default.
+**All commands:**
+
+```bash
+pos docker compose ls                        # List available service templates
+pos docker compose installed                 # List deployed services
+pos docker compose up jellyfin               # Deploy or start a service
+pos docker compose down actual-budget        # Stop a service
+pos docker compose logs home-assistant -f    # Tail logs
+pos docker compose restart home-assistant    # Restart a service
+pos docker compose update                    # Pull latest templates + refresh deployed compose files
+pos docker compose config                    # Show current configuration
+pos docker compose config set TZ=Asia/Tokyo  # Set a global default
+pos docker compose config edit               # Open config in editor
+```
+
+**Config strategy — three layers:**
+
+| Layer | File | Purpose |
+|-------|------|---------|
+| Template defaults | `/usr/local/share/linux_post_install/scale-tail/services/<name>/.env` | Per-service defaults from ScaleTail |
+| Global config | `~/.config/linux_post_install/compose.env` | Your defaults — applies to all services |
+| Per-service | `/srv/<service>/.env` | Actual config — created on first deploy, **never overwritten** |
+
+Set global defaults once, then every `up` fills them into the new service's `.env`.
+
+**Paths:**
+
+- Templates: `/usr/local/share/linux_post_install/scale-tail/services/`
+- Deployments: `/srv/<service>/` (configurable via `SERVICES_BASE`)
+- Global config: `~/.config/linux_post_install/compose.env`
+
+**Config keys:**
+
+| Key | What it does |
+|-----|-------------|
+| `TS_AUTHKEY` | Tailscale auth key (required for sidecar networking) |
+| `TZ` | Timezone for the service |
+| `DNS_SERVER` | Custom DNS server |
+| `SERVICES_BASE` | Where services are deployed (default: `/srv`)
 
 ### VBox (disposable Docker containers)
 
