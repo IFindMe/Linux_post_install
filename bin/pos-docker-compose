@@ -203,7 +203,11 @@ EOF
                 sed -i "s|^TS_AUTHKEY=.*|TS_AUTHKEY=$key|" "$env_file"
             fi
         fi
-        log ".env created at $env_file — edit it if needed before continuing"
+        log ".env created at $env_file"
+        if confirm "Edit .env before starting?" Y; then
+            "${EDITOR:-nano}" "$env_file"
+            log "Continuing with startup..."
+        fi
     fi
 
     log "Starting $svc..."
