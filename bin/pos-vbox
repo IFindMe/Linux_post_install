@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage:
+  pos vbox create <name> [image] [--dir <path>]
+  pos vbox enter  <name>
+  pos vbox stop   <name>
+  pos vbox start  <name>
+  pos vbox rm     <name>
+  pos vbox ls
+
+Manage disposable Docker containers as lightweight VMs.
+
+Each container gets a bind-mounted host directory so files persist
+on the host even after the container is removed.
+
+Options:
+  --dir <path>   Use custom directory instead of default ~/<name>
+                 Use "." for current directory
+
+Examples:
+  pos vbox create lab1
+  pos vbox create lab1 --dir .
+  pos vbox create lab1 --dir /mnt/data/lab1
+  pos vbox create kali kalilinux/kali-rolling
+  pos vbox enter lab1
+  pos vbox stop lab1
+  pos vbox start lab1
+  pos vbox rm lab1
+  pos vbox ls
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+cmd="${1:-}"
+[ -z "$cmd" ] && usage
+
+container_exists() {
+    docker container inspect "$1" &>/dev/null
+}
+
+container_running() {
+    [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" == "true" ]]
+}
+
+case "$cmd" in
+    create)
+        name="${2:-}"
+        [ -z "$name" ] && usage
+
+        # Parse remaining args: [image] [--dir <path>]
+        image="ubuntu:22.04"
+        custom_dir=""
+        shift 2 || true
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --dir)
+                    [ -z "${2:-}" ] && { echo "Missing value for --dir"; exit 1; }
+                    custom_dir="$2"
+                    shift 2
+                    ;;
+                *)
+                    image="$1"
+                    shift
+                    ;;
+            esac
+        done
+
+        if container_exists "$name"; then
+            echo "[!] Container already exists: $name"
+            exit 0
+        fi
+
+        if [ -n "$custom_dir" ]; then
+            lab_dir="$(cd "$custom_dir" 2>/dev/null && pwd)" || { echo "[!] Directory not found: $custom_dir"; exit 1; }
+        else
+            lab_dir="$HOME/$name"
+        fi
+        mkdir -p "$lab_dir"
+        echo "[+] Lab directory: $lab_dir"
+
+        echo "[+] Pulling image: $image"
+        docker pull "$image"
+
+        echo "[+] Creating: $name"
+        docker create \
+            -it \
+            --name "$name" \
+            --label mylinux.vbox=true \
+            -v "$lab_dir:$lab_dir" \
+            -w "$lab_dir" \
+            "$image" \
+            bash >/dev/null
+        echo "[+] Done"
+
+        if confirm "Enter now?"; then
+            docker start "$name" >/dev/null
+            exec docker exec -it -w "$lab_dir" "$name" bash
+        fi
+        ;;
+
+    enter)
+        name="${2:-}"
+        [ -z "$name" ] && usage
+
+        if ! container_exists "$name"; then
+            echo "[!] Container not found: $name"
+            exit 1
+        fi
+
+        if ! container_running "$name"; then
+            docker start "$name" >/dev/null
+        fi
+
+        # Detect working dir from container mounts
+        lab_dir=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination .Destination}}{{.Source}}{{end}}{{end}}' "$name" 2>/dev/null | head -1)
+        if [ -n "$lab_dir" ] && [ -d "$lab_dir" ]; then
+            exec docker exec -it -w "$lab_dir" "$name" bash
+        else
+            exec docker exec -it "$name" bash
+        fi
+        ;;
+
+    start)
+        name="${2:-}"
+        [ -z "$name" ] && usage
+        docker start "$name"
+        ;;
+
+    stop)
+        name="${2:-}"
+        [ -z "$name" ] && usage
+        docker stop "$name"
+        ;;
+
+    rm)
+        name="${2:-}"
+        [ -z "$name" ] && usage
+        docker rm -f "$name"
+        ;;
+
+    ls)
+        docker ps -a --filter label=mylinux.vbox=true --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+        ;;
+
+    *)
+        usage
+        ;;
+esac

@@ -1,0 +1,3 @@
+[submodule "compose/scale-tail"]
+	path = compose/scale-tail
+	url = https://github.com/tailscale-dev/ScaleTail.git

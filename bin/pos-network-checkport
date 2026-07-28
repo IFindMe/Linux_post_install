@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: pos network checkport <ip:port>
+
+Check if a TCP port is open on a remote host.
+
+Examples:
+  pos network checkport 192.168.1.1:80
+  pos network checkport 10.0.0.5:443
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+target="$1"
+
+if [[ "$target" != *:* ]]; then
+    echo "ERROR: Expected <ip:port> format, got '$target'"
+    echo "Usage: pos network checkport <ip:port>"
+    exit 1
+fi
+
+ip="${target%:*}"
+port="${target#*:}"
+
+if [[ -z "$ip" || -z "$port" ]]; then
+    echo "ERROR: Invalid target '$target'"
+    exit 1
+fi
+
+echo "Checking $ip:$port ..."
+echo
+
+if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$ip/$port" 2>/dev/null; then
+    echo "OPEN ✔ $ip:$port"
+else
+    echo "CLOSED ✖ $ip:$port"
+fi

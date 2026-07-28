@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: pos ssh load-keys
+
+Load all SSH private keys into the ssh-agent.
+
+Requires ssh-agent.service running (socket at /run/ssh-agent/socket).
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+export SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-/run/ssh-agent/socket}"
+
+for key in ~/.ssh/id_*; do
+    [ -f "$key" ] || continue
+    case "$key" in
+        *.pub|known_hosts|authorized_keys|config) continue ;;
+    esac
+    ssh-keygen -y -f "$key" &>/dev/null || continue
+    ssh-add "$key" 2>/dev/null
+done
+
+ssh-add -l

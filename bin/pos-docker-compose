@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+SCALE_DIR="/usr/local/share/mylinux/scale-tail/services"
+CONFIG_ENV="${HOME}/.config/mylinux/compose.env"
+
+usage() {
+    cat <<EOF
+Usage:
+  pos docker compose ls                          List available ScaleTail services
+  pos docker compose installed                   List deployed services
+  pos docker compose up       <service>          Deploy a service
+  pos docker compose down     <service>          Stop a service
+  pos docker compose restart  <service>          Restart a service
+  pos docker compose logs     <service> [-f]     View service logs
+  pos docker compose update                      Pull latest ScaleTail + refresh compose files
+  pos docker compose config                      Show global config
+  pos docker compose config set KEY=VALUE        Set a global config value
+  pos docker compose config edit                 Open global config in editor
+  -h, --help                                     Show this help
+
+Examples:
+  pos docker compose up jellyfin
+  pos docker compose down actual-budget
+  pos docker compose logs home-assistant -f
+  pos docker compose config set TS_AUTHKEY=tskey-auth-xxxxx
+EOF
+    exit 0
+}
+
+check_deps() {
+    command -v docker &>/dev/null || err "docker not found — run 'install.sh --apps' and install Docker first"
+}
+
+check_templates() {
+    [ -d "$SCALE_DIR" ] || err "ScaleTail templates not found at $SCALE_DIR — run 'install.sh' to set them up"
+}
+
+check_service() {
+    local svc="$1"
+    [ -d "$SCALE_DIR/$svc" ] || err "Unknown service '$svc' — run 'pos docker compose ls' to see available services"
+}
+
+load_global_config() {
+    mkdir -p "$(dirname "$CONFIG_ENV")"
+    [ -f "$CONFIG_ENV" ] && source "$CONFIG_ENV"
+    SERVICES_BASE="${SERVICES_BASE:-/srv}"
+}
+
+service_dir() {
+    local svc="$1"
+    echo "$SERVICES_BASE/$svc"
+}
+
+###############################################################################
+# Commands
+###############################################################################
+
+cmd_ls() {
+    check_templates
+    local names=()
+    for svc in "$SCALE_DIR"/*/; do
+        names+=("$(basename "$svc")")
+    done
+    IFS=$'\n' names=($(sort <<<"${names[*]}")); unset IFS
+
+    echo "${CYAN}Available ScaleTail services:${RESET}"
+    echo "${BLUE}────────────────────────────────────────${RESET}"
+    local name
+    for name in "${names[@]}"; do
+        printf "  ${GREEN}%s${RESET}\n" "$name"
+    done
+    echo "${BLUE}────────────────────────────────────────${RESET}"
+    echo "  ${#names[@]} services total"
+}
+
+cmd_installed() {
+    load_global_config
+    local count=0
+
+    echo "${CYAN}Deployed services:${RESET}"
+    echo "${BLUE}────────────────────────────────────────${RESET}"
+
+    [ -d "$SERVICES_BASE" ] || { echo "  (none — $SERVICES_BASE does not exist)"; echo "${BLUE}────────────────────────────────────────${RESET}"; echo "  0 services deployed"; return; }
+
+    for svc in "$SERVICES_BASE"/*/; do
+        [ -d "$svc" ] || continue
+        local name
+        name=$(basename "$svc")
+        local status=""
+        if [ -f "$svc/compose.yaml" ] || [ -f "$svc/compose.yml" ]; then
+            status=$(docker compose ls --format json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    if not isinstance(data, list):
+        data = [data]
+    for e in data:
+        if e.get('Name') == '$name':
+            print(e.get('Status', 'unknown'))
+            break
+except: pass
+" 2>/dev/null || echo "unknown")
+        fi
+        printf "  ${GREEN}%-28s${RESET} %s\n" "$name" "${status:-unknown}"
+        count=$((count + 1))
+    done
+    echo "${BLUE}────────────────────────────────────────${RESET}"
+    echo "  $count services deployed"
+}
+
+cmd_up() {
+    local svc="$1"
+    [ -z "$svc" ] && usage
+    check_deps
+    check_templates
+    check_service "$svc"
+    load_global_config
+
+    local target
+    target=$(service_dir "$svc")
+
+    if [ ! -d "$target" ]; then
+        log "Creating $svc at $target"
+        mkdir -p "$target/config" "$target/data"
+        if [ -f "$SCALE_DIR/$svc/compose.yaml" ]; then
+            cp "$SCALE_DIR/$svc/compose.yaml" "$target/"
+        fi
+        if [ -f "$SCALE_DIR/$svc/compose.yml" ]; then
+            cp "$SCALE_DIR/$svc/compose.yml" "$target/"
+        fi
+    else
+        mkdir -p "$target/config" "$target/data"
+    fi
+
+    local env_file="$target/.env"
+    if [ ! -f "$env_file" ]; then
+        if [ -f "$SCALE_DIR/$svc/.env" ]; then
+            cp "$SCALE_DIR/$svc/.env" "$env_file"
+        else
+            cat > "$env_file" <<-EOF
+SERVICE=$svc
+IMAGE_URL=
+SERVICEPORT=
+DNS_SERVER=${DNS_SERVER:-9.9.9.9}
+TS_AUTHKEY=${TS_AUTHKEY:-}
+TZ=${TZ:-Europe/Amsterdam}
+EOF
+        fi
+
+        if [ -n "${TS_AUTHKEY:-}" ]; then
+            sed -i "s|^TS_AUTHKEY=.*|TS_AUTHKEY=$TS_AUTHKEY|" "$env_file" 2>/dev/null || true
+        fi
+        if [ -n "${TZ:-}" ]; then
+            sed -i "s|^TZ=.*|TZ=$TZ|" "$env_file" 2>/dev/null || true
+        fi
+        if [ -n "${DNS_SERVER:-}" ]; then
+            sed -i "s|^DNS_SERVER=.*|DNS_SERVER=$DNS_SERVER|" "$env_file" 2>/dev/null || true
+        fi
+
+        if grep -q "^TS_AUTHKEY=$" "$env_file" 2>/dev/null; then
+            warn "TS_AUTHKEY is not set"
+            local key
+            read -rp "  Enter your Tailscale auth key (or press Enter to skip): " key
+            if [ -n "$key" ]; then
+                sed -i "s|^TS_AUTHKEY=.*|TS_AUTHKEY=$key|" "$env_file"
+            fi
+        fi
+        log ".env created at $env_file — edit it if needed before continuing"
+    fi
+
+    log "Starting $svc..."
+    (cd "$target" && docker compose up -d)
+    ok "$svc is running"
+}
+
+cmd_down() {
+    local svc="$1"
+    [ -z "$svc" ] && usage
+    check_deps
+    load_global_config
+    local target
+    target=$(service_dir "$svc")
+    [ -d "$target" ] || err "$svc is not deployed at $target"
+    log "Stopping $svc..."
+    (cd "$target" && docker compose down)
+    ok "$svc stopped"
+}
+
+cmd_restart() {
+    local svc="$1"
+    [ -z "$svc" ] && usage
+    check_deps
+    load_global_config
+    local target
+    target=$(service_dir "$svc")
+    [ -d "$target" ] || err "$svc is not deployed"
+    log "Restarting $svc..."
+    (cd "$target" && docker compose restart)
+    ok "$svc restarted"
+}
+
+cmd_logs() {
+    local svc="$1"
+    shift 2>/dev/null || true
+    [ -z "$svc" ] && usage
+    check_deps
+    load_global_config
+    local target
+    target=$(service_dir "$svc")
+    [ -d "$target" ] || err "$svc is not deployed"
+    (cd "$target" && exec docker compose logs "$@")
+}
+
+cmd_update() {
+    check_templates
+
+    log "Updating ScaleTail templates..."
+    sudo git -C "/usr/local/share/mylinux/scale-tail" pull
+    ok "Templates updated"
+
+    load_global_config
+    local refreshed=0
+
+    [ -d "$SERVICES_BASE" ] || { ok "$refreshed compose files refreshed (.env preserved)"; return; }
+
+    for svc in "$SERVICES_BASE"/*/; do
+        [ -d "$svc" ] || continue
+        local name
+        name=$(basename "$svc")
+        if [ -f "$SCALE_DIR/$name/compose.yaml" ]; then
+            cp "$SCALE_DIR/$name/compose.yaml" "$svc/compose.yaml"
+            refreshed=$((refreshed + 1))
+        fi
+        if [ -f "$SCALE_DIR/$name/compose.yml" ]; then
+            cp "$SCALE_DIR/$name/compose.yml" "$svc/compose.yml"
+            refreshed=$((refreshed + 1))
+        fi
+    done
+
+    ok "$refreshed compose files refreshed (.env preserved)"
+}
+
+cmd_config() {
+    local action="${1:-show}"
+    shift 2>/dev/null || true
+
+    case "$action" in
+        show)
+            load_global_config
+            if [ -f "$CONFIG_ENV" ]; then
+                echo "${CYAN}Global compose config:${RESET}"
+                echo "${BLUE}────────────────────────────────────────${RESET}"
+                cat "$CONFIG_ENV"
+                echo "${BLUE}────────────────────────────────────────${RESET}"
+                echo "SERVICES_BASE=$SERVICES_BASE"
+            else
+                warn "No config file found at $CONFIG_ENV"
+                echo "Default SERVICES_BASE=/srv"
+            fi
+            ;;
+        set)
+            local pair="${1:-}"
+            [ -z "$pair" ] && usage
+            local key="${pair%%=*}"
+            local val="${pair#*=}"
+            mkdir -p "$(dirname "$CONFIG_ENV")"
+            if [ -f "$CONFIG_ENV" ] && grep -q "^${key}=" "$CONFIG_ENV" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$CONFIG_ENV"
+            else
+                echo "${key}=${val}" >> "$CONFIG_ENV"
+            fi
+            ok "Set ${key}=${val}"
+            ;;
+        edit)
+            mkdir -p "$(dirname "$CONFIG_ENV")"
+            if [ ! -f "$CONFIG_ENV" ]; then
+                cat > "$CONFIG_ENV" <<-EOF
+TS_AUTHKEY=
+TZ=Europe/Amsterdam
+DNS_SERVER=9.9.9.9
+SERVICES_BASE=/srv
+EOF
+            fi
+            "${EDITOR:-nano}" "$CONFIG_ENV"
+            ;;
+        *)
+            usage
+            ;;
+    esac
+}
+
+###############################################################################
+# CLI dispatch
+###############################################################################
+
+[ $# -eq 0 ] && usage
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+cmd="${1:-}"
+shift
+
+case "$cmd" in
+    ls)        cmd_ls ;;
+    installed) cmd_installed ;;
+    up)        cmd_up "${1:-}" ;;
+    down)      cmd_down "${1:-}" ;;
+    restart)   cmd_restart "${1:-}" ;;
+    logs)      cmd_logs "$@" ;;
+    update)    cmd_update ;;
+    config)    cmd_config "$@" ;;
+    *)         usage ;;
+esac

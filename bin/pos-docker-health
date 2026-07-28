@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos docker health
+
+Quick one-glance health dashboard for all Docker containers.
+Shows health status, uptime, and exits with code 1 if any container is unhealthy.
+
+Exit codes:
+  0   All containers healthy (or no healthcheck configured)
+  1   One or more containers unhealthy
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+if ! command -v docker &>/dev/null; then
+    echo "docker not found"
+    exit 1
+fi
+
+if ! container_ids=$(docker ps -a -q 2>/dev/null) || [[ -z "$container_ids" ]]; then
+    echo "No containers."
+    exit 0
+fi
+
+healthy=0
+unhealthy=0
+no_check=0
+other=0
+
+echo "── Docker Health ─────────────────────────────────"
+
+for cid in $container_ids; do
+    info=$(docker inspect "$cid" 2>/dev/null) || continue
+
+    name=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['Name'].lstrip('/'))" 2>/dev/null)
+    health=$(echo "$info" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)[0]
+h=d.get('State',{}).get('Health',{})
+print(h.get('Status','') if h else '')
+" 2>/dev/null || true)
+    started_at=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['State']['StartedAt'])" 2>/dev/null)
+    status=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['State']['Status'])" 2>/dev/null)
+
+    # Calculate uptime
+    uptime="-"
+    if start_ts=$(date -d "$started_at" +%s 2>/dev/null); then
+        now_ts=$(date +%s)
+        diff=$((now_ts - start_ts))
+        days=$((diff / 86400))
+        hours=$(((diff % 86400) / 3600))
+        mins=$(((diff % 3600) / 60))
+        if [ "$days" -gt 0 ]; then
+            uptime="${days}d ${hours}h"
+        elif [ "$hours" -gt 0 ]; then
+            uptime="${hours}h ${mins}m"
+        else
+            uptime="${mins}m"
+        fi
+    fi
+
+    # Determine health display
+    if [ -n "$health" ]; then
+        case "$health" in
+            healthy)
+                health_display="${GREEN}healthy${RESET}"
+                healthy=$((healthy + 1))
+                ;;
+            unhealthy)
+                health_display="${RED}unhealthy${RESET}"
+                unhealthy=$((unhealthy + 1))
+                ;;
+            starting)
+                health_display="${YELLOW}starting${RESET}"
+                other=$((other + 1))
+                ;;
+            *)
+                health_display="${YELLOW}${health}${RESET}"
+                other=$((other + 1))
+                ;;
+        esac
+    elif [ "$status" != "running" ]; then
+        health_display="${RED}${status}${RESET}"
+        other=$((other + 1))
+    else
+        health_display="${YELLOW}no healthcheck${RESET}"
+        no_check=$((no_check + 1))
+    fi
+
+    printf "  %-24s %b%-20s${RESET} %s\n" "$name" "" "$health_display" "$uptime"
+done
+
+total=$((healthy + unhealthy + no_check + other))
+echo "──────────────────────────────────────────────────"
+echo "  Total: $total  ${GREEN}healthy: $healthy${RESET}  ${RED}unhealthy: $unhealthy${RESET}  no check: $no_check"
+
+if [ "$unhealthy" -gt 0 ]; then
+    echo
+    echo "${RED}Unhealthy containers detected${RESET}"
+    exit 1
+fi

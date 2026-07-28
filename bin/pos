@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+self="$(cd "$(dirname "$0")" && pwd)"
+
+# ── Colors (auto-off when not a TTY) ───────────────────────────
+if [ -t 1 ]; then
+    BOLD=$(tput bold 2>/dev/null || true)
+    CYAN=$(tput setaf 6 2>/dev/null || true)
+    DIM=$(tput dim 2>/dev/null || true)
+    RESET=$(tput sgr0 2>/dev/null || true)
+else
+    BOLD=""; CYAN=""; DIM=""; RESET=""
+fi
+
+# ── Collect available commands ─────────────────────────────────
+_pos_commands() {
+    local cmds=()
+    local f
+    for f in "$self"/pos-*; do
+        [ -x "$f" ] || continue
+        local name="${f##*/pos-}"
+        cmds+=("$name")
+    done
+    echo "${cmds[*]}"
+}
+
+# ── Help text ──────────────────────────────────────────────────
+usage() {
+    cat <<'EOF'
+pos — Personal OS Toolkit
+
+  A unified CLI for network, docker, media, system,
+  and SSH tools on Debian/Ubuntu.
+
+USAGE
+  pos <category> <command> [args]
+
+CATEGORIES
+  network    ip | checkport | scan
+  docker     ps | compose
+  media      mp3 | mp4
+  system     firewall
+  ssh        load-keys
+  vbox       create | enter | stop | start | rm | ls
+
+EXAMPLES
+  pos network ip                          Show interfaces, routes, public IP
+  pos network checkport 10.0.0.1:80       Check if a TCP port is open
+  pos network scan 192.168.1.0/24         Fast parallel ping sweep
+
+  pos docker ps                           List containers (health, IPs, ports)
+  pos docker compose ls                   List available ScaleTail services
+  pos docker compose up jellyfin          Deploy a service with Tailscale
+
+  pos media mp3 <url>                     Download audio as MP3
+  pos media mp4 <url>                     Download video as MP4
+
+  pos system firewall                     Interactive UFW manager
+
+  pos ssh load-keys                       Load all SSH keys into agent
+
+  pos vbox create lab1                    Create disposable Docker VM
+  pos vbox create lab1 --dir .            Create VM using current directory
+  pos vbox enter lab1                     Shell into a Docker VM
+  pos vbox ls                             List Docker VMs
+
+HELP
+  pos help <command>    Show help for a command
+  pos --help            Show this help
+
+LEGACY WRAPPERS
+  wr-ip, wr-checkport, wr-scan-ping, wr-docker,
+  wr-compose, wr-ufw, mp3, mp4, vbox, ssh-load-all
+  still work and forward to pos.
+EOF
+    exit 0
+}
+
+# ── Handle --help / -h ─────────────────────────────────────────
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+# ── pos help <command> ─────────────────────────────────────────
+if [ "${1:-}" = "help" ]; then
+    shift
+    [ $# -eq 0 ] && usage
+    cmd="pos-${1// /-}"
+    if command -v "$cmd" &>/dev/null; then
+        exec "$cmd" --help
+    fi
+    [ -x "$self/$cmd" ] && exec "$self/$cmd" --help
+    echo "pos: unknown command '$1'" >&2
+    echo "Run 'pos --help' to see available commands." >&2
+    exit 1
+fi
+
+# ── Dispatch ───────────────────────────────────────────────────
+args=("$@")
+n=${#args[@]}
+
+# ── Logging setup ──────────────────────────────────────────────
+LOG_DIR="$HOME/.local/share/mylinux/logs"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+CMD_SAFE=$(echo "${args[*]}" | tr ' /' '__')
+LOG_FILE="$LOG_DIR/$(date +%Y%m%d_%H%M%S)_pos_${CMD_SAFE}.log"
+MAIN_LOG="$LOG_DIR/pos.log"
+log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
+
+# Commands that read from stdin interactively — only log invocation
+INTERACTIVE_CMDS="system-firewall media-mp4"
+
+for ((i=n-1; i>=0; i--)); do
+    cmd="pos"
+    for ((j=0; j<=i; j++)); do
+        cmd="${cmd}-${args[$j]}"
+    done
+
+    resolved=""
+    if command -v "$cmd" &>/dev/null; then
+        resolved="$cmd"
+    elif [ -x "$self/$cmd" ]; then
+        resolved="$self/$cmd"
+    fi
+
+    [ -z "$resolved" ] && continue
+
+    sub="${cmd#pos-}"
+    if [[ " $INTERACTIVE_CMDS " == *" $sub "* ]]; then
+        # Interactive: log invocation only, then exec normally
+        log_cmd "pos $*" "" 0
+        exec "$resolved" "${args[@]:i+1}"
+    else
+        # Non-interactive: capture full output
+        "$resolved" "${args[@]:i+1}" 2>&1 | tee "$LOG_FILE"
+        rc=${PIPESTATUS[0]}
+        log_cmd "pos $*" "$LOG_FILE" "$rc"
+        exit "$rc"
+    fi
+done
+
+echo "pos: unknown command '${args[0]}'" >&2
+echo "Run 'pos --help' to see available commands." >&2
+exit 1

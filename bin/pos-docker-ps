@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos docker ps
+
+Display enhanced Docker container overview with health status,
+uptime, IPs, and port mappings.
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+if ! command -v docker &>/dev/null; then
+    echo "docker not found"
+    exit 1
+fi
+
+if ! container_ids=$(docker ps -q 2>/dev/null) || [[ -z "$container_ids" ]]; then
+    echo "No running containers."
+    exit 0
+fi
+
+healthy_count=0
+unhealthy_count=0
+running_count=0
+total_count=0
+
+printf "%-28s %-35s %-22s %-10s %-35s %-20s %s\n" \
+    "NAME" "IMAGE" "STATUS(HEALTH)" "UPTIME" "IPS" "PORTS" "CONTAINER ID"
+
+for cid in $container_ids; do
+    total_count=$((total_count + 1))
+
+    info=$(docker inspect "$cid" 2>/dev/null) || continue
+
+    name=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['Name'].lstrip('/'))" 2>/dev/null)
+    image=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['Config']['Image'])" 2>/dev/null)
+    status=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['State']['Status'])" 2>/dev/null)
+    health=$(echo "$info" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)[0]
+h=d.get('State',{}).get('Health',{})
+print(h.get('Status','') if h else '')
+" 2>/dev/null || true)
+    started_at=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['State']['StartedAt'])" 2>/dev/null)
+    ip_data=$(echo "$info" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)[0]
+nets=d.get('NetworkSettings',{}).get('Networks',{})
+out=' '.join(f'{k}:{v.get(\"IPAddress\",\"\")}' for k,v in nets.items() if v.get('IPAddress'))
+print(out or '-')
+" 2>/dev/null)
+    port_data=$(echo "$info" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)[0]
+ports=d.get('NetworkSettings',{}).get('Ports',{}) or {}
+parts=[]
+for container_port, bindings in ports.items():
+    if bindings:
+        for b in bindings:
+            hp=b.get('HostPort','')
+            hi=b.get('HostIp','')
+            if hi and hp:
+                parts.append(f'{hi}:{hp}->{container_port}')
+            elif hp:
+                parts.append(f'{hp}->{container_port}')
+            else:
+                parts.append(container_port)
+    else:
+        parts.append(container_port)
+print(', '.join(parts) if parts else '-')
+" 2>/dev/null)
+
+    [ "${#image}" -gt 35 ] && image="${image:0:32}..."
+
+    if [ "$status" = "running" ]; then
+        running_count=$((running_count + 1))
+    fi
+
+    if [ -n "$health" ]; then
+        case "$health" in
+            healthy)   healthy_count=$((healthy_count + 1)); status_display="${GREEN}${status} (${health})${RESET}" ;;
+            unhealthy) unhealthy_count=$((unhealthy_count + 1)); status_display="${RED}${status} (${health})${RESET}" ;;
+            *)         status_display="${YELLOW}${status} (${health})${RESET}" ;;
+        esac
+    else
+        status_display="${YELLOW}${status}${RESET}"
+    fi
+
+    uptime="-"
+    if start_ts=$(date -d "$started_at" +%s 2>/dev/null); then
+        now_ts=$(date +%s)
+        diff=$((now_ts - start_ts))
+        days=$((diff / 86400))
+        hours=$(((diff % 86400) / 3600))
+        mins=$(((diff % 3600) / 60))
+        if [ "$days" -gt 0 ]; then
+            uptime="${days}d ${hours}h"
+        elif [ "$hours" -gt 0 ]; then
+            uptime="${hours}h ${mins}m"
+        else
+            uptime="${mins}m"
+        fi
+    fi
+
+    printf "%-28s %-35s %-22b %-10s %-35s %-20s %s\n" \
+        "$name" "$image" "$status_display" "$uptime" "$ip_data" "$port_data" "$cid"
+done
+
+echo
+printf '%*s\n' 120 '' | tr ' ' '-'
+
+echo "Containers : $total_count"
+echo "Healthy    : $healthy_count"
+echo "Unhealthy  : $unhealthy_count"
+echo "Running    : $running_count"
+
+if [ "$unhealthy_count" -gt 0 ]; then
+    echo
+    echo "${RED}Warning: unhealthy containers detected${RESET}"
+fi

@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: Please run as root (sudo)."
+    echo "Usage: sudo pos system firewall"
+    exit 1
+fi
+
+HISTORY=()
+DRY_RUN=0
+
+if [[ "${1:-}" == "--dry-run" ]]; then
+    DRY_RUN=1
+fi
+
+log()  { echo "[+] $*"; }
+warn() { echo "[!] $*"; }
+err()  { echo "ERROR: $*" >&2; exit 1; }
+
+run_cmd() {
+    local -a cmd=("$@")
+    printf "\n>>> %s\n" "${cmd[*]}"
+    read -rp "Execute this command? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            echo "(dry-run) skipping execution"
+        else
+            "${cmd[@]}"
+        fi
+        HISTORY+=("${cmd[*]}")
+    else
+        echo "Cancelled."
+    fi
+}
+
+build_ufw_cmd() {
+    local action="$1"
+    local direction="$2"
+    local proto="$3"
+    local from="$4"
+    local to="$5"
+    local port="$6"
+    local onif="$7"
+    local logmode="$8"
+    local comment="$9"
+    local insert_pos="${10:-}"
+    local suffix="${11:-}"
+
+    local -a cmd=(ufw)
+
+    if [[ -n "$insert_pos" ]]; then
+        if [[ "$insert_pos" == "prepend" ]]; then
+            cmd+=(prepend)
+        else
+            cmd+=(insert "$insert_pos")
+        fi
+    fi
+
+    cmd+=("$action")
+
+    [[ -n "$direction" ]] && cmd+=("$direction")
+    [[ -n "$onif" ]]      && cmd+=(on "$onif")
+    [[ -n "$proto" ]]     && cmd+=(proto "$proto")
+    [[ -n "$from" ]]      && cmd+=(from "$from")
+    cmd+=(to "$to")
+    [[ -n "$port" ]]      && cmd+=(port "$port")
+    [[ -n "$logmode" ]]   && cmd+=("$logmode")
+    if [[ -n "$comment" ]]; then
+        local safe="${comment// /_}"
+        cmd+=(comment "$safe")
+    fi
+    [[ "$suffix" == "v6" ]] && cmd+=(v6)
+
+    run_cmd "${cmd[@]}"
+}
+
+prompt_ipver() {
+    local ver
+    read -rp "IP version (4 / 6 / both): " ver
+    echo "$ver"
+}
+
+apply_for_versions() {
+    local action="$1" direction="$2" proto="$3" from="$4" to="$5"
+    local port="$6" onif="$7" logmode="$8" comment="$9"
+    local insert_pos="${10:-}"
+    local ipver
+    ipver=$(prompt_ipver)
+
+    case "$ipver" in
+        4)    build_ufw_cmd "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos" "" ;;
+        6)    build_ufw_cmd "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos" "v6" ;;
+        both)
+            build_ufw_cmd "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos" ""
+            build_ufw_cmd "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos" "v6"
+            ;;
+        *)  echo "Invalid choice. Choose 4, 6 or both." ;;
+    esac
+}
+
+add_rule() {
+    echo
+    echo "Choose rule type:"
+    echo "1) Port/service (eg: port 8080 or 'ssh')"
+    echo "2) IP-based (from X to Y)"
+    echo "3) Directional port rule (in/out to any port ...)"
+    read -rp "Choice: " rtype
+
+    case "$rtype" in
+        1)
+            read -rp "Action (allow/deny/reject/limit) [allow]: " action
+            action=${action:-allow}
+            read -rp "Enter port number or service name (eg 'ssh' or '8080'): " port_or_svc
+
+            if [[ "$port_or_svc" =~ ^[0-9]+$ ]]; then
+                read -rp "Protocol (tcp/udp/any) [tcp]: " proto
+                proto=${proto:-tcp}
+                [[ "$proto" == "any" ]] && proto=""
+                read -rp "Interface (leave empty for any): " onif
+                read -rp "Log? (none/log/log-all) [none]: " logmode
+                [[ "$logmode" == "none" ]] && logmode=""
+                read -rp "Comment (optional): " comment
+
+                apply_for_versions "$action" "" "$proto" "" "any" "$port_or_svc" "$onif" "$logmode" "$comment"
+            else
+                read -rp "IP version (4 / 6 / both) [4]: " ipver
+                ipver=${ipver:-4}
+                case "$ipver" in
+                    4)    run_cmd ufw "$action" "$port_or_svc" ;;
+                    6)    run_cmd ufw "$action" "$port_or_svc" v6 ;;
+                    both) run_cmd ufw "$action" "$port_or_svc"
+                          run_cmd ufw "$action" "$port_or_svc" v6 ;;
+                    *)    echo "invalid ipver" ;;
+                esac
+            fi
+            ;;
+
+        2)
+            read -rp "Action (allow/deny/reject) [deny]: " action
+            action=${action:-deny}
+            read -rp "From address/CIDR (eg 192.168.1.5 or 10.0.0.0/24): " from
+            read -rp "To address (leave empty for 'any') [any]: " to
+            to=${to:-any}
+            read -rp "Direction (in/out) [in]: " direction
+            direction=${direction:-in}
+            read -rp "Port (leave empty if not applicable): " port
+            read -rp "Protocol (tcp/udp/any) [any]: " proto
+            [[ "$proto" == "any" ]] && proto=""
+            read -rp "Interface (leave empty for any): " onif
+            read -rp "Log? (none/log/log-all) [none]: " logmode
+            [[ "$logmode" == "none" ]] && logmode=""
+            read -rp "Comment (optional): " comment
+
+            apply_for_versions "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment"
+            ;;
+
+        3)
+            read -rp "Action (allow/deny/reject/limit) [allow]: " action
+            action=${action:-allow}
+            read -rp "Direction (in/out) [in]: " direction
+            direction=${direction:-in}
+            read -rp "Port number: " port
+            read -rp "Protocol (tcp/udp/any) [tcp]: " proto
+            [[ "$proto" == "any" ]] && proto=""
+            read -rp "On interface (leave empty for any): " onif
+            read -rp "From address (optional): " from
+            from=${from:-}
+            read -rp "To address [any]: " to
+            to=${to:-any}
+            read -rp "Log? (none/log/log-all) [none]: " logmode
+            [[ "$logmode" == "none" ]] && logmode=""
+            read -rp "Comment (optional): " comment
+            read -rp "Insert position (number/prepend/empty): " insert_pos
+
+            apply_for_versions "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos"
+            ;;
+
+        *)  echo "Unknown choice." ;;
+    esac
+}
+
+delete_rule() {
+    echo
+    echo "Delete rule by:"
+    echo "1) rule number (use 'ufw status numbered' to see numbers)"
+    echo "2) rule text (eg: 'allow 22/tcp')"
+    read -rp "Choice: " dch
+
+    case "$dch" in
+        1)
+            ufw status numbered
+            read -rp "Number to delete: " num
+            run_cmd ufw delete "$num"
+            ;;
+        2)
+            read -rp "Exact rule text to delete (eg: deny 80/tcp): " ruletext
+            run_cmd ufw delete $ruletext
+            ;;
+        *)  echo "Unknown choice." ;;
+    esac
+}
+
+show_status() {
+    echo
+    echo "1) Simple status"
+    echo "2) Verbose status"
+    echo "3) Numbered status (useful for delete)"
+    read -rp "Choice: " sc
+    case "$sc" in
+        1) run_cmd ufw status ;;
+        2) run_cmd ufw status verbose ;;
+        3) run_cmd ufw status numbered ;;
+        *) echo "Unknown choice." ;;
+    esac
+}
+
+while true; do
+    cat <<'MENU'
+
+==============================
+   UFW POWER — human friendly
+==============================
+1) Add rule (port/service/ip/directional)
+2) Delete rule (by number or text)
+3) Show status (simple / verbose / numbered)
+4) Enable UFW
+5) Disable UFW
+6) Reset UFW (delete all rules)
+7) Set default policy (incoming/outgoing)
+8) Show executed commands history (so far)
+0) Exit
+------------------------------
+MENU
+    read -rp "Choose: " opt
+
+    case "$opt" in
+        1) add_rule ;;
+        2) delete_rule ;;
+        3) show_status ;;
+        4) run_cmd ufw enable ;;
+        5) run_cmd ufw disable ;;
+        6)
+            echo "WARNING: ufw reset will disable and remove all rules."
+            read -rp "Type 'RESET' to confirm: " c
+            [[ "$c" == "RESET" ]] && run_cmd ufw reset || echo "Reset aborted."
+            ;;
+        7)
+            read -rp "Default incoming policy (allow/deny/reject) [deny]: " defin
+            defin=${defin:-deny}
+            read -rp "Default outgoing policy (allow/deny/reject) [allow]: " defout
+            defout=${defout:-allow}
+            run_cmd ufw default "$defin" incoming
+            run_cmd ufw default "$defout" outgoing
+            ;;
+        8)
+            echo
+            echo "Executed commands so far:"
+            echo
+            if [[ "${#HISTORY[@]}" -eq 0 ]]; then
+                echo "(none yet)"
+            else
+                for c in "${HISTORY[@]}"; do echo " - $c"; done
+            fi
+            ;;
+        0)
+            echo
+            echo "Final executed commands summary:"
+            if [[ "${#HISTORY[@]}" -eq 0 ]]; then
+                echo "(no commands executed)"
+            else
+                for c in "${HISTORY[@]}"; do echo " - $c"; done
+            fi
+            echo "Goodbye — firewall remains watchful."
+            exit 0
+            ;;
+        *) echo "Unknown option." ;;
+    esac
+
+    echo
+    read -rp "Press Enter to continue..."
+    clear
+done

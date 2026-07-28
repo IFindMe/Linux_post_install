@@ -1,0 +1,426 @@
+# AGENT Context — myLinux Project
+
+> **Purpose:** Single-source context document so any AI agent can understand the project, navigate the codebase, and make correct contributions.
+
+---
+
+## 1. Project Overview
+
+**myLinux** is a personal bootstrap and homelab toolkit for Debian/Ubuntu. One command turns a bare install into a fully productive machine:
+
+- Automated system package installation (25+ packages)
+- A unified CLI (`pos`) for network, Docker, media, system, and SSH tasks
+- Optional desktop application installers (15 apps)
+- Docker Compose service management via ScaleTail templates (119+ self-hosted services with Tailscale sidecar)
+- Systemd service management for boot-time automation
+
+**Repository:** `https://github.com/IFindMe/myLinux`
+**Target OS:** Debian / Ubuntu (uses `apt`)
+**Shell:** Bash (`#!/usr/bin/env bash`)
+
+---
+
+## 2. Directory Structure
+
+```
+myLinux/
+├── install.sh              # Main orchestrator — entry point
+├── preinstall.sh           # Phase 1: system packages via apt + yt-dlp
+├── postinstall.sh          # Phase 3: PATH, bash completion, systemd services
+│
+├── lib/
+│   └── common.sh           # Shared library (colors, logging, spinner, timer, run)
+│
+├── bin/                    # CLI tools — installed to /usr/local/bin/
+│   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
+│   ├── pos-network-ip      # Show interfaces, routes, public IP
+│   ├── pos-network-checkport  # TCP port checker
+│   ├── pos-network-scan    # Parallel ping sweep of CIDR subnet
+│   ├── pos-docker-ps       # Enhanced docker ps (health, IPs, ports, uptime)
+│   ├── pos-docker-health   # Quick one-glance health dashboard
+│   ├── pos-docker-compose  # Docker Compose service manager (largest script, 317 lines)
+│   ├── pos-media-mp3       # Audio downloader (yt-dlp → MP3)
+│   ├── pos-media-mp4       # Video downloader (yt-dlp → MP4, interactive format select)
+│   ├── pos-system-firewall # Interactive UFW manager (menu-driven, 284 lines)
+│   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
+│   ├── pos-vbox            # Disposable Docker-based "VMs"
+│   ├── autostart.sh        # Boot-time script (via systemd)
+│   ├── wr-*                # Legacy wrappers → pos (backward compat)
+│   ├── mp3, mp4, vbox      # Legacy convenience wrappers → pos
+│   └── ssh-load-all        # Legacy wrapper → pos ssh load-keys
+│
+├── apps/                   # Optional desktop app installers (by category)
+│   ├── install.sh          # Interactive picker / orchestrator
+│   ├── browsers/
+│   │   └── brave.sh       # Brave Browser (APT repo)
+│   ├── development/
+│   │   ├── opencode.sh    # opencode AI agent (official script)
+│   │   └── vscode.sh      # VS Code (Microsoft APT repo)
+│   ├── media/
+│   │   ├── obs.sh         # OBS Studio (apt)
+│   │   ├── scrcpy.sh      # scrcpy Android mirror (GitHub release)
+│   │   └── vlc.sh         # VLC media player (apt)
+│   ├── networking/
+│   │   ├── netbird.sh     # NetBird VPN (official script)
+│   │   ├── tailscale.sh   # Tailscale VPN (official script)
+│   │   └── zerotier.sh    # ZeroTier VPN (official script)
+│   ├── remote-access/
+│   │   ├── termius.sh     # Termius SSH client (.deb)
+│   │   └── vnc-viewer.sh  # TigerVNC Viewer (apt)
+│   ├── system/
+│   │   ├── docker.sh      # Docker Engine (get.docker.com)
+│   │   └── qemu.sh        # QEMU + libvirt + KVM (apt)
+│   └── utilities/
+│       ├── affine.sh      # AFFiNE knowledge base (AppImage)
+│       ├── btop.sh        # btop resource monitor (apt)
+│       └── localsend.sh   # LocalSend (flatpak)
+│
+├── completions/
+│   └── pos.bash            # Bash tab-completion for the pos CLI
+│
+├── compose/
+│   └── scale-tail/         # Git submodule → ScaleTail templates (119+ services)
+│
+├── systemd/
+│   ├── autostart.service   # Runs autostart.sh on boot
+│   └── ssh-agent.service   # System-wide SSH agent socket
+│
+├── README.md               # User-facing documentation
+├── DEV.md                  # Developer guide
+├── .gitignore              # Excludes secrets, Python artifacts, OS files
+└── .gitmodules             # Submodule: compose/scale-tail → ScaleTail
+```
+
+---
+
+## 3. Installation Flow
+
+```
+User runs: ./install.sh [--apps|--full|--dry-run|--skip <phase>|--steps <spec>]
+│
+├─ Phase 1: preinstall.sh        (requires root)
+│   └─ apt update + installs 25+ packages + yt-dlp + fail2ban
+│
+├─ Phase 2: install.sh           (requires root)
+│   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
+│   └─ Copies lib/common.sh → /usr/local/bin/common.sh (chmod 644)
+│
+├─ Phase 3: postinstall.sh       (runs as user)
+│   └─ Configures fail2ban (SSH jail: 5 retries, 1h ban)
+│   └─ PATH export in ~/.bashrc
+│   └─ Bash completion for pos CLI
+│   └─ Copies systemd/*.service → /etc/systemd/system/, enables them
+│
+├─ Phase 4: ScaleTail clone
+│   └─ Shallow-clones ScaleTail templates to /usr/local/share/mylinux/scale-tail
+│
+└─ [if --apps or --full]: apps/install.sh
+    └─ Interactive picker (or --all for non-interactive)
+```
+
+**After install, the repo can be deleted** — all tools live in `/usr/local/bin/` and templates in `/usr/local/share/mylinux/`.
+
+### install.sh Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--apps` | Run interactive app picker after core install |
+| `--full` | Core install + all apps (non-interactive) |
+| `--dry-run` | Preview without executing |
+| `--skip <phase>` | Skip a phase (repeatable): `preinstall`, `scripts`, `postinstall`, `scalepoint`, `apps` |
+| `--steps <spec>` | Run only specific phases. Format: `1,3,4` or `1-3` |
+| `--no-color` | Disable colored output |
+
+### pos Output Logging
+
+All non-interactive `pos` commands log output to `~/.local/share/mylinux/logs/`:
+- Per-command files: `YYYYMMDD_HHMMSS_pos_<cmd>.log` (full stdout+stderr)
+- Main log: `pos.log` (command + timestamp + exit code for every invocation)
+- Interactive commands (`system-firewall`, `media-mp4`) only log invocation, not output
+
+---
+
+## 4. The `pos` CLI System
+
+### How It Works
+
+`bin/pos` is the main dispatcher. It:
+1. Scans its own directory for all executable `pos-*` files
+2. Extracts category-subcommand names from filenames
+3. Uses variable-length argument matching to find the right script
+
+**Example:** `pos docker compose up jellyfin`
+- Tries `pos-docker-compose-up-jellyfin` (not found)
+- Tries `pos-docker-compose-up` (not found)
+- Finds `pos-docker-compose` (runs with args `up jellyfin`)
+
+### Available Commands
+
+| Category | Command | Script | Description |
+|----------|---------|--------|-------------|
+| network | ip | `pos-network-ip` | Show interfaces, routes, public IP |
+| network | checkport | `pos-network-checkport` | Check TCP port connectivity |
+| network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
+| docker | ps | `pos-docker-ps` | Enhanced container overview |
+| docker | health | `pos-docker-health` | Quick health dashboard (exits 1 if unhealthy) |
+| docker | compose | `pos-docker-compose` | Service manager (ls/up/down/restart/logs/update/config) |
+| media | mp3 | `pos-media-mp3` | Download audio as MP3 |
+| media | mp4 | `pos-media-mp4` | Download video with format select |
+| system | firewall | `pos-system-firewall` | Interactive UFW management |
+| ssh | load-keys | `pos-ssh-load-keys` | Load SSH keys into agent |
+| vbox | create | `pos-vbox create` | Create disposable VM (asks "Enter now?") |
+| vbox | enter | `pos-vbox enter` | Start and exec into container |
+| vbox | ls | `pos-vbox ls` | List vbox-managed containers only (label-filtered) |
+| vbox | start/stop/rm | `pos-vbox start/stop/rm` | Lifecycle management |
+
+### Legacy Wrappers
+
+These forward to `pos` transparently: `wr-ip`, `wr-checkport`, `wr-scan-ping`, `wr-docker`, `wr-compose`, `wr-ufw`, `mp3`, `mp4`, `vbox`, `ssh-load-all`.
+
+### pos vbox Details
+
+`pos-vbox` manages disposable Docker containers as lightweight VMs:
+
+- **Container labeling:** All created containers get `mylinux.vbox=true` label
+- **`ls` filtering:** `docker ps --filter label=mylinux.vbox=true` — only shows vbox-managed containers
+- **Post-create prompt:** After `create`, asks "Enter now? [Y/n]" using `confirm` helper
+- **Working dir detection:** `enter` auto-detects bind mount path from container labels
+- **Custom dirs:** `--dir <path>` or `--dir .` for current directory
+
+---
+
+## 5. Shared Library — `lib/common.sh`
+
+Sourced by most scripts. Provides:
+
+| Function | Purpose |
+|----------|---------|
+| `log "msg"` | Green `[+]` status message |
+| `warn "msg"` | Yellow `[!]` warning |
+| `err "msg"` | Red `ERROR:` + exit 1 |
+| `ok "msg"` | Green `OK` prefix |
+| `section "title"` | Cyan-bordered section header |
+| `step N T "msg"` | Numbered step header (e.g., `[1/4] Installing`) |
+| `run cmd` | Executes command, respects `$DRY_RUN` |
+| `spawn "msg" cmd` | Runs with animated braille spinner, elapsed time, OK/FAIL status |
+| `timer_start` / `timer_stop` | Elapsed time tracking |
+| `confirm "prompt" [default]` | y/N or Y/n prompt |
+
+**Auto-detects TTY** — disables colors when piped.
+
+**Source pattern:**
+```bash
+source "$(dirname "$0")/../lib/common.sh"
+```
+
+**Scripts that do NOT source common.sh** (self-contained): `bin/pos`, `pos-network-ip`, `pos-network-checkport`, `pos-network-scan`, `pos-media-mp3`, `pos-media-mp4`, `pos-ssh-load-keys`, `pos-system-firewall`.
+
+---
+
+## 6. Docker Compose / ScaleTail
+
+### Architecture
+
+ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar pattern (`network_mode: service:tailscale`). Each service gets a `tail-xxxxx.ts.net` URL with optional automatic HTTPS.
+
+```
+/usr/local/share/mylinux/scale-tail/    # Templates (git repo)
+└── services/<name>/
+    ├── compose.yaml
+    └── .env
+
+~/.config/mylinux/compose.env           # Global defaults (TS_AUTHKEY, TZ, DNS_SERVER, SERVICES_BASE)
+
+/srv/<service>/                         # Active deployments (default base)
+    ├── compose.yaml                    # From template (refreshed on update)
+    ├── .env                            # User config (preserved across updates)
+    ├── config/
+    └── data/
+```
+
+### Key Commands
+
+| Command | Description |
+|---------|-------------|
+| `pos docker compose ls` | List all available ScaleTail services |
+| `pos docker compose up <svc>` | Deploy service to SERVICES_BASE |
+| `pos docker compose down <svc>` | Stop a deployed service |
+| `pos docker compose restart <svc>` | Restart a service |
+| `pos docker compose logs <svc> [-f]` | View/follow logs |
+| `pos docker compose update` | Pull latest templates, refresh compose.yaml (preserves .env) |
+| `pos docker compose config set K=V` | Set global config value |
+| `pos docker compose config show` | Display current config |
+
+### Global Config Keys
+
+- `TS_AUTHKEY` — Tailscale auth key (required)
+- `TZ` — Timezone
+- `DNS_SERVER` — Custom DNS
+- `SERVICES_BASE` — Deployment root (default: `/srv`)
+
+---
+
+## 7. Optional Apps (`apps/`)
+
+### How They Work
+
+- `apps/install.sh` auto-discovers all `apps/<category>/*.sh` files (excluding itself)
+- Three modes: interactive (default), `--all`, or specific app names as arguments
+- Interactive TUI groups apps by category with section headers
+- Each app script is standalone, idempotent, sources `lib/common.sh`
+
+### Installation Methods
+
+| Method | Apps |
+|--------|------|
+| `apt install` | btop, obs, vlc, vnc-viewer, qemu |
+| APT repo (GPG + repo) | brave, vscode |
+| Official `curl \| sh` | docker, tailscale, netbird, zerotier, opencode |
+| AppImage | affine |
+| GitHub release binary | scrcpy |
+| Flatpak | localsend |
+| .deb package | termius |
+
+### Adding a New App
+
+1. Create `apps/<name>.sh` following the template in DEV.md
+2. It auto-appears in the interactive picker — no registration needed
+
+---
+
+## 8. Systemd Services
+
+| Service | File | Purpose |
+|---------|------|---------|
+| `ssh-agent.service` | `systemd/ssh-agent.service` | System-wide SSH agent, socket at `/run/ssh-agent/socket` |
+| `autostart.service` | `systemd/autostart.service` | Runs `autostart.sh` on boot |
+
+All `.service` files in `systemd/` are automatically copied to `/etc/systemd/system/` and enabled by `postinstall.sh`.
+
+---
+
+## 9. Configuration Files
+
+### Gitignored Secrets
+
+- `config/rclone.conf` — rclone remote config (OAuth tokens)
+- `config/authorized_keys` — SSH public keys
+
+### Runtime Config
+
+- `~/.config/mylinux/compose.env` — Docker Compose global defaults
+- `~/.bashrc` — Modified by postinstall (PATH, bash completion)
+
+---
+
+## 10. Coding Conventions
+
+### Script Standards
+
+- **Shebang:** `#!/usr/bin/env bash`
+- **Strict mode:** `set -euo pipefail`
+- **Help:** Every script accepts `-h`/`--help` via `case` pattern
+- **Idempotency:** Check existence before creating/modifying
+- **Exit codes:** 0 = success, 1 = error
+
+### Naming Conventions
+
+- `pos-<category>-<command>` — canonical tool names
+- `wr-*` — legacy wrappers
+- `apps/<category>/<name>.sh` — optional app installers
+- Hyphens for word separation, lowercase always
+
+### Error Handling
+
+- `command -v <tool> &>/dev/null` to check tool availability
+- `set -euo pipefail` for fail-fast
+- `err()` for fatal errors, `warn()` for non-fatal
+- Confirmation prompts for destructive actions
+
+### Security
+
+- Never hardcode secrets in scripts
+- Use `chmod 600` for sensitive files
+- Validate user input before shell commands
+- Use `sudo` only where necessary
+
+---
+
+## 11. Development Workflow
+
+### Adding a New App
+
+1. Create `apps/<category>/<name>.sh` following the template in DEV.md
+2. It auto-appears in the interactive picker — no registration needed
+
+### Adding a New Tool
+
+1. Create `bin/pos-<category>-<command>` following conventions
+2. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed)
+3. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets)
+4. Update `README.md`
+5. Test: `bash -n bin/your-tool && shellcheck bin/your-tool`
+
+### Testing
+
+```bash
+# Syntax check all scripts
+for f in bin/* apps/*/*.sh lib/common.sh install.sh preinstall.sh postinstall.sh; do
+    bash -n "$f" || echo "FAIL: $f"
+done
+
+# ShellCheck linting
+shellcheck bin/my-script
+
+# Test in Docker
+docker run --rm -it -v $PWD:/repo ubuntu:22.04 bash
+# inside: cd /repo && ./install.sh
+
+# Test apps interactively
+./apps/install.sh --all
+./apps/install.sh docker vscode
+```
+
+### Commit Conventions
+
+Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
+
+---
+
+## 12. Key File Quick Reference
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `install.sh` | ~120 | Main orchestrator — 4 phases with CLI flags |
+| `preinstall.sh` | ~52 | System packages + yt-dlp + fail2ban |
+| `postinstall.sh` | ~65 | fail2ban config, PATH, bash completion, systemd |
+| `lib/common.sh` | 121 | Shared library |
+| `bin/pos` | ~130 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos-docker-compose` | 317 | Largest script — full compose management |
+| `bin/pos-system-firewall` | 284 | Interactive UFW manager |
+| `bin/pos-docker-ps` | 127 | Enhanced container overview |
+| `bin/pos-docker-health` | ~90 | Quick health dashboard |
+| `bin/pos-vbox` | ~160 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
+| `completions/pos.bash` | 118 | Dynamic bash completion |
+| `apps/install.sh` | 99 | App picker/orchestrator |
+
+---
+
+## 13. Common Tasks for Agents
+
+| Task | Where to Edit |
+|------|---------------|
+| Add a new CLI tool | Create `bin/pos-<cat>-<cmd>`, add deps in `preinstall.sh` |
+| Add a new app installer | Create `apps/<name>.sh` (auto-discovered) |
+| Add a systemd service | Create `systemd/<name>.service` (auto-installed by postinstall) |
+| Modify package list | Edit `PACKAGES` array in `preinstall.sh` |
+| Change PATH or bash config | Edit `postinstall.sh` |
+| Modify fail2ban config | Edit jail.local section in `postinstall.sh` |
+| Add bash completion | Edit `completions/pos.bash` |
+| Modify Docker Compose logic | Edit `bin/pos-docker-compose` |
+| Modify Docker health check | Edit `bin/pos-docker-health` |
+| Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
+| Modify pos logging | Edit log setup in `bin/pos` |
+| Modify install phases/flags | Edit arg parsing in `install.sh` |
+| Update documentation | Edit `README.md` and/or `DEV.md` |
+| Add a secret config file | Add to `config/`, update `.gitignore`, add copy logic in `postinstall.sh` |

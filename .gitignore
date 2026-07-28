@@ -1,0 +1,21 @@
+
+# Python (if src/ or pyinstaller is ever used)
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec
+*.egg-info/
+
+# Editors
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker Compose — user's active stacks and secrets
+compose/custom/
+compose/config.env

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: pos network ip
+
+Display network interfaces, default route, and public IP.
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+SEP() { printf '\u2550%.0s' $(seq 1 47); echo; }
+
+SEP
+echo "Network Interfaces"
+SEP
+
+ip -o -4 addr show | while read -r _ ifname _ ipaddr _; do
+    printf "%-20s %s\n" "$ifname" "${ipaddr%%/*}"
+done
+
+echo
+
+SEP
+echo "Default Route"
+SEP
+
+gateway=$(ip route | awk '/default/ {print $3; exit}')
+iface=$(ip route | awk '/default/ {print $5; exit}')
+
+printf "%-20s %s\n" "Interface" "${iface:-N/A}"
+printf "%-20s %s\n" "Gateway" "${gateway:-N/A}"
+
+echo
+
+SEP
+echo "Public IP"
+SEP
+
+curl -4 -s --max-time 5 https://ifconfig.me 2>/dev/null || echo "Unavailable"
+echo

@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: pos network scan <cidr> [--full] [--retries N]
+
+Two-phase network scan using nmap.
+
+Phase 1: Fast host discovery (finds alive hosts)
+Phase 2: Full metadata scan on alive hosts only (--full only)
+
+Options:
+  --full        Detailed scan: OS, ports, services, NSE scripts (slower)
+  --retries N   Retries per host in discovery (default: 1)
+
+Examples:
+  pos network scan 192.168.1.0/24
+  pos network scan 10.0.0.0/28 --full
+  pos network scan 172.1.1.104
+  pos network scan 192.168.1.0/24 --retries 3
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+net=""
+full=0
+retries=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --full)    full=1; shift ;;
+        --retries)
+            if [[ -z "${2:-}" || "$2" == --* ]]; then
+                echo "ERROR: --retries requires a number"
+                exit 1
+            fi
+            retries="$2"; shift 2 ;;
+        *)         net="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$net" ]]; then
+    echo "ERROR: Missing CIDR (e.g. 192.168.1.0/24)"
+    exit 1
+fi
+
+# ── Input validation ───────────────────────────────────────────
+# Bare IP → /32
+if [[ "$net" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    net="${net}/32"
+# Valid CIDR
+elif [[ "$net" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+    : # ok
+else
+    echo "ERROR: Invalid target '$net'"
+    echo "Expected: IP (172.1.1.104) or CIDR (192.168.1.0/24)"
+    exit 1
+fi
+
+if ! command -v nmap &>/dev/null; then
+    echo "ERROR: nmap is required. Install with: sudo apt install nmap"
+    exit 1
+fi
+
+# ── Estimate host count ────────────────────────────────────────
+cidr_bits="${net##*/}"
+if [[ "$cidr_bits" -ge 24 ]]; then
+    host_estimate=$(( 1 << (32 - cidr_bits) ))
+elif [[ "$cidr_bits" -ge 16 ]]; then
+    host_estimate="$(( 1 << (32 - cidr_bits) ))+"
+else
+    host_estimate="many"
+fi
+
+is_root=0
+[[ $EUID -eq 0 ]] && is_root=1
+
+can_sudo=0
+if [[ "$is_root" -eq 1 ]]; then
+    can_sudo=1
+elif sudo -n nmap -V &>/dev/null; then
+    can_sudo=1
+elif [[ "$full" -eq 1 && -t 0 ]]; then
+    can_sudo=1
+fi
+
+tmpfile=$(mktemp /tmp/scan-XXXXXX.txt)
+trap 'rm -f "$tmpfile"' EXIT
+
+# ── Phase 1: Fast host discovery ───────────────────────────────
+nmap_cmd="nmap"
+[[ "$can_sudo" -eq 1 ]] && nmap_cmd="sudo nmap"
+
+echo "Discovering hosts in $net (~$host_estimate) ..."
+echo
+
+$nmap_cmd -sn -T5 -n \
+    --min-rate 1000 \
+    --min-parallelism 1024 \
+    --min-hostgroup 1024 \
+    --max-retries "$retries" \
+    --host-timeout 5s \
+    "$net" 2>/dev/null | awk '/^Nmap scan report for/ {
+    ip = $(NF);
+    gsub(/[()]/, "", ip);
+    print ip;
+}' > "$tmpfile"
+
+host_count=$(wc -l < "$tmpfile")
+
+if [[ "$host_count" -eq 0 ]]; then
+    echo "No hosts found."
+    exit 0
+fi
+
+echo "Found $host_count host(s)."
+echo
+
+if [[ "$full" -eq 0 ]]; then
+    cat "$tmpfile"
+    echo
+    echo "Done."
+    exit 0
+fi
+
+# ── Phase 2: Full metadata scan ────────────────────────────────
+echo "Scanning $host_count host(s) (full) ..."
+echo
+
+nmap_args="-sV --version-intensity 9 -sC -T4 -n"
+nmap_args="$nmap_args --min-parallelism 256 --max-parallelism 512"
+nmap_args="$nmap_args --min-hostgroup 256 --max-hostgroup 512"
+nmap_args="$nmap_args --min-rate 1000 --max-retries 1"
+nmap_args="$nmap_args --host-timeout 60s --max-rtt-timeout 200ms"
+nmap_args="$nmap_args --script ssh-hostkey,ssl-cert,http-title,http-server-header,smb-os-discovery,nbstat,rpcinfo"
+[[ "$can_sudo" -eq 1 ]] && nmap_args="$nmap_args -O --osscan-guess"
+
+# shellcheck disable=SC2086
+$nmap_cmd $nmap_args -iL "$tmpfile" 2>/dev/null | awk '
+BEGIN { ip_count = 0; has_os = 0 }
+
+/^Nmap scan report for/ {
+    ip = $(NF);
+    gsub(/[()]/, "", ip);
+    hostname = "";
+    if ($(NF) ~ /^\(/) {
+        hostname = $(NF-1);
+    } else if (NF > 4) {
+        if (ip != $(NF-1) && $(NF-1) !~ /^(for|[0-9])/) {
+            hostname = $(NF-1);
+        }
+    }
+    if (ip_count > 0) printf "\n";
+    ip_count++;
+    has_os = 0;
+    if (hostname != "" && hostname != ip)
+        printf "\033[1;36m%s\033[0m  (%s)\n", ip, hostname;
+    else
+        printf "\033[1;36m%s\033[0m\n", ip;
+}
+
+/^MAC Address/ {
+    vendor = $0;
+    sub(/.*\(/, "", vendor);
+    sub(/\).*/, "", vendor);
+    printf "  \033[2m%-10s\033[0m %s  %s\n", "MAC:", $3, vendor;
+}
+
+/^Aggressive OS guesses:/ {
+    has_os = 1;
+    line = $0;
+    sub(/.*guesses: /, "", line);
+    gsub(/\s*\(.*/, "", line);
+    printf "  \033[2m%-10s\033[0m %s\n", "OS:", line;
+}
+
+/^OS details:/ {
+    has_os = 1;
+    sub(/.*OS details: /, "");
+    printf "  \033[2m%-10s\033[0m %s\n", "OS:", $0;
+}
+
+/^Running:/ {
+    sub(/.*Running: /, "");
+    printf "  \033[2m%-10s\033[0m %s\n", "OS:", $0;
+}
+
+/^Service Info:/ {
+    line = $0;
+    sub(/.*Service Info:/, "", line);
+    gsub(/^ +/, "", line);
+    if (has_os == 0)
+        printf "  \033[2m%-10s\033[0m %s\n", "Info:", line;
+}
+
+/^\| ssh-hostkey:/ {
+    line = $0;
+    sub(/.*ssh-hostkey:/, "", line);
+    gsub(/^ +/, "", line);
+    if (line ~ /SHA256/) {
+        match(line, /SHA256:[A-Za-z0-9+\/=]+/);
+        key = substr(line, RSTART, RLENGTH);
+        printf "  \033[2m%-10s\033[0m %s\n", "SSH:", key;
+    }
+}
+
+/^\| http-title:/ {
+    line = $0;
+    sub(/.*http-title:/, "", line);
+    gsub(/^ +/, "", line);
+    gsub(/\s*\[.*$/, "", line);
+    if (line != "" && line !~ /^No/)
+        printf "  \033[2m%-10s\033[0m %s\n", "HTTP Title:", line;
+}
+
+/^\| http-server-header:/ {
+    line = $0;
+    sub(/.*http-server-header:/, "", line);
+    gsub(/^ +/, "", line);
+    printf "  \033[2m%-10s\033[0m %s\n", "HTTP Server:", line;
+}
+
+/^\|_?NetBIOS name:/ {
+    line = $0;
+    sub(/.*NetBIOS name:/, "", line);
+    sub(/,.*$/, "", line);
+    gsub(/^ +/, "", line);
+    printf "  \033[2m%-10s\033[0m %s\n", "NetBIOS:", line;
+}
+
+/^\|_?SMB OS:/ {
+    line = $0;
+    sub(/.*SMB OS:/, "", line);
+    gsub(/^ +/, "", line);
+    printf "  \033[2m%-10s\033[0m %s\n", "SMB:", line;
+}
+
+/^\|_?Domain:/ {
+    line = $0;
+    sub(/.*Domain:/, "", line);
+    gsub(/^ +/, "", line);
+    if (line != "" && line !~ /^WORKGROUP/)
+        printf "  \033[2m%-10s\033[0m %s\n", "Domain:", line;
+}
+
+/^\|   [0-9]+\/tcp/ {
+    line = $0;
+    gsub(/^ *\| */, "", line);
+    printf "  \033[2m%-10s\033[0m %s\n", "RPC:", line;
+}
+
+/^[0-9]+\/tcp[[:space:]]+open/ {
+    port = $1; service = $3;
+    version = "";
+    for (i = 4; i <= NF; i++) version = version " " $i;
+    gsub(/^ +/, "", version);
+    if (version != "")
+        printf "  \033[2m%-10s\033[0m %s — %s\n", port, service, version;
+    else
+        printf "  \033[2m%-10s\033[0m %s\n", port, service;
+}
+'
+
+echo
+echo "Done."
