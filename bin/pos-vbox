@@ -93,7 +93,7 @@ case "$cmd" in
         docker create \
             -it \
             --name "$name" \
-            --label mylinux.vbox=true \
+            --label linux_post_install.vbox=true \
             -v "$lab_dir:$lab_dir" \
             -w "$lab_dir" \
             "$image" \
@@ -147,7 +147,7 @@ case "$cmd" in
         ;;
 
     ls)
-        docker ps -a --filter label=mylinux.vbox=true --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+        docker ps -a --filter label=linux_post_install.vbox=true --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
         ;;
 
     *)

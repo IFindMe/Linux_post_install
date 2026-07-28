@@ -80,7 +80,7 @@ should_run() {
     return 0
 }
 
-section "myLinux Bootstrap"
+section "Linux_post_install Bootstrap"
 timer_start
 
 # ── Phase 1: preinstall ────────────────────────────────────────
@@ -117,7 +117,7 @@ fi
 # ── Phase 4: ScaleTail templates ────────────────────────────────
 if should_run 4 scalepoint; then
     step 4 4 "Cloning ScaleTail templates"
-    scale_dest="/usr/local/share/mylinux/scale-tail"
+    scale_dest="/usr/local/share/linux_post_install/scale-tail"
     if [ ! -d "$scale_dest" ]; then
         spawn "Cloning ScaleTail" sudo git clone --depth 1 \
             https://github.com/tailscale-dev/ScaleTail.git "$scale_dest"

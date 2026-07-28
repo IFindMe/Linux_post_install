@@ -1,4 +1,4 @@
-# myLinux — Personal Bootstrap & Homelab Toolkit
+# Linux_post_install — Personal Bootstrap & Homelab Toolkit
 
 > One command to turn a bare Debian/Ubuntu install into a usable machine.
 
@@ -13,8 +13,8 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/IFindMe/myLinux.git
-cd myLinux
+git clone https://gitea.skink-platy.ts.net/admin/Linux_post_install.git
+cd Linux_post_install
 ./install.sh              # core bootstrap + ScaleTail templates
 ./install.sh --apps        # core + interactive app picker
 ./install.sh --full        # core + all apps (non-interactive)
@@ -29,7 +29,7 @@ cd myLinux
 ./install.sh --apps --dry-run                       # preview without executing
 ```
 
-The machine returns to a productive state with minimal manual work. The installer copies all tools to `/usr/local/bin/` and clones ScaleTail templates to `/usr/local/share/mylinux/` — you can delete the repo after install, everything still works.
+The machine returns to a productive state with minimal manual work. The installer copies all tools to `/usr/local/bin/` and clones ScaleTail templates to `/usr/local/share/linux_post_install/` — you can delete the repo after install, everything still works.
 
 ---
 
@@ -47,7 +47,7 @@ The machine returns to a productive state with minimal manual work. The installe
 ## Repository Structure
 
 ```
-myLinux/
+Linux_post_install/
 ├── apps/                 # Optional desktop applications (by category)
 │   ├── install.sh        # Interactive selector (y/n per app)
 │   ├── browsers/
@@ -86,15 +86,9 @@ myLinux/
 │   ├── vbox → pos        # Backward-compat wrapper
 │   ├── ssh-load-all → pos# Backward-compat wrapper
 │   └── autostart.sh      # Boot-time script (via systemd)
-<<<<<<< HEAD
-├── config/
-│   ├── authorized_keys   # SSH public keys (read by postinstall)
-│   └── rclone.conf       # rclone Google Drive config (gitignored)
-=======
 ├── config/                 # User config files (gitignored)
 │   ├── authorized_keys     # SSH public keys (gitignored — add your own)
 │   └── rclone.conf         # rclone config (gitignored — add your own)
->>>>>>> bba577c (Initial commit)
 ├── lib/
 │   └── common.sh         # Shared library (colors, logging, spinner, timer)
 ├── systemd/
@@ -249,8 +243,8 @@ Applied by `postinstall.sh`:
 After reinstalling Debian or Ubuntu:
 
 ```bash
-git clone https://github.com/IFindMe/myLinux.git
-cd myLinux
+git clone https://gitea.skink-platy.ts.net/admin/Linux_post_install.git
+cd Linux_post_install
 ./install.sh
 ```
 

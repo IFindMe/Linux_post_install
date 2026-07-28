@@ -2,8 +2,8 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
-SCALE_DIR="/usr/local/share/mylinux/scale-tail/services"
-CONFIG_ENV="${HOME}/.config/mylinux/compose.env"
+SCALE_DIR="/usr/local/share/linux_post_install/scale-tail/services"
+CONFIG_ENV="${HOME}/.config/linux_post_install/compose.env"
 
 usage() {
     cat <<EOF
@@ -217,7 +217,7 @@ cmd_update() {
     check_templates
 
     log "Updating ScaleTail templates..."
-    sudo git -C "/usr/local/share/mylinux/scale-tail" pull
+    sudo git -C "/usr/local/share/linux_post_install/scale-tail" pull
     ok "Templates updated"
 
     load_global_config

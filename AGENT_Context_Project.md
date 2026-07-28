@@ -1,4 +1,4 @@
-# AGENT Context — myLinux Project
+# AGENT Context — Linux_post_install Project
 
 > **Purpose:** Single-source context document so any AI agent can understand the project, navigate the codebase, and make correct contributions.
 
@@ -6,7 +6,7 @@
 
 ## 1. Project Overview
 
-**myLinux** is a personal bootstrap and homelab toolkit for Debian/Ubuntu. One command turns a bare install into a fully productive machine:
+**Linux_post_install** is a personal bootstrap and homelab toolkit for Debian/Ubuntu. One command turns a bare install into a fully productive machine:
 
 - Automated system package installation (25+ packages)
 - A unified CLI (`pos`) for network, Docker, media, system, and SSH tasks
@@ -14,7 +14,7 @@
 - Docker Compose service management via ScaleTail templates (119+ self-hosted services with Tailscale sidecar)
 - Systemd service management for boot-time automation
 
-**Repository:** `https://github.com/IFindMe/myLinux`
+**Repository:** `https://gitea.skink-platy.ts.net/admin/Linux_post_install`
 **Target OS:** Debian / Ubuntu (uses `apt`)
 **Shell:** Bash (`#!/usr/bin/env bash`)
 
@@ -23,7 +23,7 @@
 ## 2. Directory Structure
 
 ```
-myLinux/
+Linux_post_install/
 ├── install.sh              # Main orchestrator — entry point
 ├── preinstall.sh           # Phase 1: system packages via apt + yt-dlp
 ├── postinstall.sh          # Phase 3: PATH, bash completion, systemd services
@@ -112,13 +112,13 @@ User runs: ./install.sh [--apps|--full|--dry-run|--skip <phase>|--steps <spec>]
 │   └─ Copies systemd/*.service → /etc/systemd/system/, enables them
 │
 ├─ Phase 4: ScaleTail clone
-│   └─ Shallow-clones ScaleTail templates to /usr/local/share/mylinux/scale-tail
+│   └─ Shallow-clones ScaleTail templates to /usr/local/share/linux_post_install/scale-tail
 │
 └─ [if --apps or --full]: apps/install.sh
     └─ Interactive picker (or --all for non-interactive)
 ```
 
-**After install, the repo can be deleted** — all tools live in `/usr/local/bin/` and templates in `/usr/local/share/mylinux/`.
+**After install, the repo can be deleted** — all tools live in `/usr/local/bin/` and templates in `/usr/local/share/linux_post_install/`.
 
 ### install.sh Flags
 
@@ -133,7 +133,7 @@ User runs: ./install.sh [--apps|--full|--dry-run|--skip <phase>|--steps <spec>]
 
 ### pos Output Logging
 
-All non-interactive `pos` commands log output to `~/.local/share/mylinux/logs/`:
+All non-interactive `pos` commands log output to `~/.local/share/linux_post_install/logs/`:
 - Per-command files: `YYYYMMDD_HHMMSS_pos_<cmd>.log` (full stdout+stderr)
 - Main log: `pos.log` (command + timestamp + exit code for every invocation)
 - Interactive commands (`system-firewall`, `media-mp4`) only log invocation, not output
@@ -181,8 +181,8 @@ These forward to `pos` transparently: `wr-ip`, `wr-checkport`, `wr-scan-ping`, `
 
 `pos-vbox` manages disposable Docker containers as lightweight VMs:
 
-- **Container labeling:** All created containers get `mylinux.vbox=true` label
-- **`ls` filtering:** `docker ps --filter label=mylinux.vbox=true` — only shows vbox-managed containers
+- **Container labeling:** All created containers get `linux_post_install.vbox=true` label
+- **`ls` filtering:** `docker ps --filter label=linux_post_install.vbox=true` — only shows vbox-managed containers
 - **Post-create prompt:** After `create`, asks "Enter now? [Y/n]" using `confirm` helper
 - **Working dir detection:** `enter` auto-detects bind mount path from container labels
 - **Custom dirs:** `--dir <path>` or `--dir .` for current directory
@@ -224,12 +224,12 @@ source "$(dirname "$0")/../lib/common.sh"
 ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar pattern (`network_mode: service:tailscale`). Each service gets a `tail-xxxxx.ts.net` URL with optional automatic HTTPS.
 
 ```
-/usr/local/share/mylinux/scale-tail/    # Templates (git repo)
+/usr/local/share/linux_post_install/scale-tail/    # Templates (git repo)
 └── services/<name>/
     ├── compose.yaml
     └── .env
 
-~/.config/mylinux/compose.env           # Global defaults (TS_AUTHKEY, TZ, DNS_SERVER, SERVICES_BASE)
+~/.config/linux_post_install/compose.env           # Global defaults (TS_AUTHKEY, TZ, DNS_SERVER, SERVICES_BASE)
 
 /srv/<service>/                         # Active deployments (default base)
     ├── compose.yaml                    # From template (refreshed on update)
@@ -308,7 +308,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 
 ### Runtime Config
 
-- `~/.config/mylinux/compose.env` — Docker Compose global defaults
+- `~/.config/linux_post_install/compose.env` — Docker Compose global defaults
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ---

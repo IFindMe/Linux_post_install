@@ -45,7 +45,6 @@ else
     warn "completions/pos.bash not found, skipping"
 fi
 
-<<<<<<< HEAD
 # ── SSH authorized keys ────────────────────────────────────────
 SSH_DIR="$HOME/.ssh"
 AUTH_FILE="$SSH_DIR/authorized_keys"
@@ -73,9 +72,6 @@ if [ -f "$KEY_FILE" ]; then
 else
     warn "config/authorized_keys not found, skipping SSH setup"
 fi
-
-=======
->>>>>>> bba577c (Initial commit)
 # ── systemd services ───────────────────────────────────────────
 if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
     run sudo cp systemd/*.service /etc/systemd/system/

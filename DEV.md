@@ -34,26 +34,16 @@ Each phase is independent and is only run if the corresponding file exists.
 | `bin/` | Daily-use tools and wrappers | `/usr/local/bin/` |
 | `apps/<category>/` | Optional desktop apps (by category) | run on demand |
 | `lib/` | Shared library (`common.sh`) | sourced at build time |
-<<<<<<< HEAD
-| `config/` | Static config files + SSH authorized_keys | `~/.config/<app>/` (via postinstall) |
-=======
 | `config/` | Static config files (gitignored — user adds their own) | `~/.config/<app>/` (via postinstall) |
->>>>>>> bba577c (Initial commit)
-| `compose/` | ScaleTail templates (dev reference only) | cloned to `/usr/local/share/mylinux/scale-tail` on install |
+| `compose/` | ScaleTail templates (dev reference only) | cloned to `/usr/local/share/linux_post_install/scale-tail` on install |
 | `systemd/` | Systemd service unit files | `/etc/systemd/system/` (via postinstall) |
 
 ### Key Files Added
 
 | File | Purpose |
 |------|---------|
-<<<<<<< HEAD
-| `.gitignore` | Prevents secrets (rclone tokens) and build artifacts from being committed |
-| `config/authorized_keys` | SSH public keys read by `postinstall.sh` (replaces hardcoded key) |ls
-
-=======
 | `.gitignore` | Prevents secrets (rclone tokens, SSH keys) and build artifacts from being committed |
->>>>>>> bba577c (Initial commit)
-| `~/.config/mylinux/compose.env` | Global Docker Compose defaults (`TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`) — created by `wr-compose config` |
+| `~/.config/linux_post_install/compose.env` | Global Docker Compose defaults (`TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`) — created by `wr-compose config` |
 
 ---
 
@@ -118,14 +108,11 @@ If the file contains secrets (tokens, keys):
 - Add it to `.gitignore`
 - Document in README how to create it manually
 
-<<<<<<< HEAD
 ### 4. Add SSH keys (if needed)
 
 Place public keys in `config/authorized_keys` (one per line).
 `postinstall.sh` reads from this file automatically.
 
-=======
->>>>>>> bba577c (Initial commit)
 ### 5. Update README.md
 
 Add a section under **Tools Reference** following the existing format.
@@ -319,17 +306,17 @@ fi
 
 ## Working with Docker Compose
 
-The installer clones [ScaleTail](https://github.com/tailscale-dev/ScaleTail) templates to `/usr/local/share/mylinux/scale-tail/` — a library of 119+ self-hosted services with a **Tailscale sidecar** pattern. Each service runs with `network_mode: service:tailscale`, gets a `tail-xxxxx.ts.net` URL, and optional automatic HTTPS via Tailscale Serve or Funnel.
+The installer clones [ScaleTail](https://github.com/tailscale-dev/ScaleTail) templates to `/usr/local/share/linux_post_install/scale-tail/` — a library of 119+ self-hosted services with a **Tailscale sidecar** pattern. Each service runs with `network_mode: service:tailscale`, gets a `tail-xxxxx.ts.net` URL, and optional automatic HTTPS via Tailscale Serve or Funnel.
 
 ### Architecture (after install)
 
 ```
-/usr/local/share/mylinux/scale-tail/   # ScaleTail templates (git repo)
+/usr/local/share/linux_post_install/scale-tail/   # ScaleTail templates (git repo)
 └── services/<name>/
     ├── compose.yaml     # Service definition (Tailscale + app containers)
     └── .env             # Template variables (SERVICE, IMAGE_URL, TS_AUTHKEY, TZ, ...)
 
-~/.config/mylinux/compose.env          # Global defaults — set via wr-compose config
+~/.config/linux_post_install/compose.env          # Global defaults — set via wr-compose config
 
 <SERVICES_BASE>/<name>/                # Active deployments (default: /srv/<name>)
     ├── compose.yaml     # Copied from template (refreshed on wr-compose update)
@@ -345,11 +332,11 @@ The installer clones [ScaleTail](https://github.com/tailscale-dev/ScaleTail) tem
 | `wr-compose up <service>` | Deploys service to `$SERVICES_BASE/<service>/` (default: `/srv`), creates `config/` + `data/` dirs, generates `.env` from global config (prompts for `TS_AUTHKEY` if empty), runs `docker compose up -d` |
 | `wr-compose down <service>` | Runs `docker compose down` in the service directory |
 | `wr-compose update` | `git pull` in ScaleTail templates dir, then re-copies `compose.yaml` into all deployed directories — `.env` files are left untouched |
-| `wr-compose config set K=V` | Persists a value in `~/.config/mylinux/compose.env` (e.g. `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`) |
+| `wr-compose config set K=V` | Persists a value in `~/.config/linux_post_install/compose.env` (e.g. `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`) |
 
 ### Portable `.env` design
 
-- **Global**: `~/.config/mylinux/compose.env` — one place for `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`.
+- **Global**: `~/.config/linux_post_install/compose.env` — one place for `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE`.
 - **Per-service**: `<SERVICES_BASE>/<service>/.env` — generated from the ScaleTail template on first deploy, with empty values filled from the global config.
 - **On update**: `wr-compose update` refreshes only `compose.yaml` from the templates; `.env` files are preserved.
 - **Services path**: set `SERVICES_BASE` to any directory (e.g. `/srv`) via `wr-compose config set SERVICES_BASE=/srv`. Defaults to `/srv`.

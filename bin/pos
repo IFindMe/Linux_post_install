@@ -101,7 +101,7 @@ args=("$@")
 n=${#args[@]}
 
 # ── Logging setup ──────────────────────────────────────────────
-LOG_DIR="$HOME/.local/share/mylinux/logs"
+LOG_DIR="$HOME/.local/share/linux_post_install/logs"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 CMD_SAFE=$(echo "${args[*]}" | tr ' /' '__')
 LOG_FILE="$LOG_DIR/$(date +%Y%m%d_%H%M%S)_pos_${CMD_SAFE}.log"

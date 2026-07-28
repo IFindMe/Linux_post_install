@@ -49,7 +49,7 @@ _pos() {
     }
 
     _pos_complete_compose_services() {
-        local scale_dir="/usr/local/share/mylinux/scale-tail/services"
+        local scale_dir="/usr/local/share/linux_post_install/scale-tail/services"
         if [ -d "$scale_dir" ]; then
             local svcs=()
             for d in "$scale_dir"/*/; do
@@ -69,7 +69,7 @@ _pos() {
 
     _pos_complete_docker_vbox_names() {
         local names
-        names=$(docker ps -a --filter label=mylinux.vbox=true --format '{{.Names}}' 2>/dev/null)
+        names=$(docker ps -a --filter label=linux_post_install.vbox=true --format '{{.Names}}' 2>/dev/null)
         COMPREPLY=($(compgen -W "$names" -- "$cur"))
     }
 
