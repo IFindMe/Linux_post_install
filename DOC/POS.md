@@ -40,7 +40,7 @@ Every non-interactive `pos` invocation logs to `~/.local/share/linux_post_instal
 
 - Per-command files: `YYYYMMDD_HHMMSS_pos_<args>.log` (full stdout + stderr).
 - `pos.log`: one line per invocation — command, log file, exit code.
-- **Interactive** commands (`pos system firewall`, `pos media mp4`) only log the invocation, not their output.
+- **Interactive** commands (`pos system firewall`, `pos media mp4`, `pos system backup`) only log the invocation, not their output.
 
 ---
 
@@ -136,6 +136,8 @@ Global config keys:
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
 | `sudo pos system firewall` | `bin/pos-system-firewall` | Interactive UFW ("UFW POWER") menu: add/delete rules, status, enable/disable/reset, default policies | Must run as root. Every command is previewed and confirmed before execution; supports `--dry-run`; keeps a history of executed commands |
+| `pos system backup <folder-path>` | `bin/pos-system-backup` | Create a gpg-encrypted (AES-256) `tar.gz` snapshot of a folder and verify it | Prompts twice for a password (never stored). Uses `sudo tar`; needs `gnupg` (in `preinstall.sh` PACKAGES). Artifact `<name>_<date>.tar.gz.gpg` in the current directory, `chmod 600` |
+| `pos system backup --service` | `bin/pos-system-backup` | Lists folders under `/srv` and `~/srv`, lets you pick one, then runs the same backup | Roots via `BACKUP_SERVICE_ROOTS` (space-separated, default `/srv $HOME/srv`) |
 
 ### ssh
 

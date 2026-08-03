@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos system backup <folder-path>
+       pos system backup --service
+
+Create a gpg-encrypted (AES-256) tar.gz snapshot of a folder and verify it.
+The archive password is prompted twice and never stored.
+
+Modes:
+  <folder-path>   Back up that folder directly.
+  --service       List folders under /srv and ~/srv, pick one, back it up.
+
+The final artifact <name>_<date>.tar.gz.gpg is written to the current directory.
+
+Environment:
+  BACKUP_SERVICE_ROOTS   Space-separated roots for --service
+                         (default: /srv \$HOME/srv)
+EOF
+    exit 0
+}
+
+command -v tar &>/dev/null || err "tar not found"
+command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
+
+SERVICE=0
+case "${1:-}" in
+    -h|--help) usage ;;
+    --service) SERVICE=1 ;;
+    "")        err "Missing folder path (or use --service)" ;;
+    *)         FOLDER="$1" ;;
+esac
+
+if [ "$SERVICE" -eq 1 ]; then
+    if [ -n "${BACKUP_SERVICE_ROOTS:-}" ]; then
+        read -r -a roots <<< "$BACKUP_SERVICE_ROOTS"
+    else
+        roots=(/srv "$HOME/srv")
+    fi
+
+    idx=0
+    for root in "${roots[@]}"; do
+        [ -d "$root" ] || { warn "Root not found: $root"; continue; }
+
+        dirs=()
+        while IFS= read -r d; do
+            dirs+=("$d")
+        done < <(find "$root" -maxdepth 1 -mindepth 1 -type d | sort)
+
+        [ ${#dirs[@]} -gt 0 ] || { warn "No folders in $root"; continue; }
+
+        echo
+        echo "${root}:"
+        for d in "${dirs[@]}"; do
+            idx=$((idx + 1))
+            names[$idx]="$d"
+            printf "%2d) %s\n" "$idx" "$d"
+        done
+    done
+
+    [ "$idx" -gt 0 ] || err "No folders found under: ${roots[*]}"
+
+    read -rp "Select folder number: " choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > idx )); then
+        err "Invalid selection: $choice"
+    fi
+    FOLDER="${names[$choice]}"
+fi
+
+[ -d "$FOLDER" ] || err "Folder not found: $FOLDER"
+
+NAME="$(basename "$FOLDER")"
+DATE="$(date +%Y-%m-%d_%H-%M-%S)"
+ARCHIVE="${NAME}_${DATE}.tar.gz"
+
+echo
+log "Creating backup..."
+echo "Source : $FOLDER"
+echo "Output : $ARCHIVE"
+
+sudo tar -czvf "$ARCHIVE" -C "$(dirname "$FOLDER")" "$NAME"
+
+log "Verifying archive..."
+tar -tzf "$ARCHIVE" > /dev/null
+log "Archive verified"
+
+while true; do
+    read -s -rp "Enter backup password: " PASS
+    echo
+    read -s -rp "Confirm backup password: " CONFIRM
+    echo
+    if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
+        break
+    fi
+    warn "Passwords are empty or do not match — try again"
+done
+unset CONFIRM
+
+log "Encrypting backup..."
+gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
+
+rm -f "$ARCHIVE"
+ARCHIVE="${ARCHIVE}.gpg"
+chmod 600 "$ARCHIVE"
+
+log "Verifying encrypted backup..."
+gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+
+unset PASS
+echo
+log "Backup completed: $ARCHIVE"

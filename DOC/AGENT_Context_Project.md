@@ -43,6 +43,7 @@ Linux_post_install/
 │   ├── pos-media-mp3       # Audio downloader (yt-dlp → MP3)
 │   ├── pos-media-mp4       # Video downloader (yt-dlp → MP4, interactive format select)
 │   ├── pos-system-firewall # Interactive UFW manager (menu-driven, 284 lines)
+│   ├── pos-system-backup   # Encrypted folder snapshots (tar + gpg AES-256, --service) (115 lines)
 │   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
 │   ├── pos-vbox            # Disposable Docker-based "VMs"
 │   ├── pos-network-hotspot # Wi-Fi hotspot (create_ap + wihotspot-gui)
@@ -198,6 +199,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 |
 | media | mp4 | `pos-media-mp4` | Download video with format select |
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
+| system | backup | `pos-system-backup` | Encrypted folder snapshots (`tar` + gpg AES-256; `--service` picks from `/srv` and `~/srv`) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load SSH keys into agent |
 | vbox | create | `pos-vbox create` | Create disposable VM (asks "Enter now?") |
 | vbox | enter | `pos-vbox enter` | Start and exec into container |
@@ -445,6 +447,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 146 | CLI dispatcher with smart arg matching + logging |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
+| `bin/pos-system-backup` | 115 | Encrypted folder snapshots: path mode + `--service` (`/srv`, `~/srv` picker), tar + gpg AES-256 |
 | `bin/pos-docker-ps` | 127 | Enhanced container overview |
 | `bin/pos-docker-health` | 109 | Quick health dashboard |
 | `bin/pos-vbox` | 156 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
