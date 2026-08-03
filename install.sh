@@ -34,6 +34,11 @@ Options:
                     (1=preinstall, 2=scripts, 3=postinstall, 4=scalepoint)
   --no-color        Disable colored output
   -h, --help        Show this help message
+
+Uninstall optional apps later with:
+  ./apps/install.sh --uninstall            # interactive uninstall selection
+  ./apps/install.sh --uninstall --all      # uninstall everything
+  ./apps/install.sh --uninstall <app>...   # uninstall specific apps
 EOF
     exit 0
 }

@@ -11,4 +11,14 @@ install_zerotier() {
     log "Join a network: sudo zerotier-cli join <network-id>"
 }
 
-install_zerotier
+uninstall_zerotier() {
+    command -v zerotier-one &>/dev/null || { log "zerotier not installed"; return 0; }
+    spawn "Removing zerotier" sudo apt purge -y zerotier-one
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+    spawn "Removing zerotier apt repo" sudo rm -f /etc/apt/sources.list.d/zerotier.list
+}
+
+case "${1:-}" in
+    uninstall) uninstall_zerotier ;;
+    *) install_zerotier ;;
+esac

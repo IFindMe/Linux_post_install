@@ -173,7 +173,14 @@ These still work and forward to `pos`: `wr-ip`, `wr-checkport`, `wr-scan-ping`, 
 
 ## Optional Apps
 
-Install with `./apps/install.sh` (interactive), `./apps/install.sh --all`, or by name:
+Install with `./apps/install.sh` (interactive), `./apps/install.sh --all`, or by name.
+Uninstall the same way with `--uninstall`:
+
+```bash
+./apps/install.sh --uninstall                  # interactive uninstall selection
+./apps/install.sh --uninstall --all            # uninstall everything
+./apps/install.sh --uninstall brave vscode     # uninstall specific apps
+```
 
 | Category | Apps |
 |----------|------|

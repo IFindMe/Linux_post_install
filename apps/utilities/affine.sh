@@ -32,4 +32,12 @@ EOF
     "
 }
 
-install_affine
+uninstall_affine() {
+    command -v affine &>/dev/null || { log "affine not installed"; return 0; }
+    spawn "Removing AFFiNE" sudo rm -rf /opt/affine /usr/local/bin/affine /usr/share/applications/affine.desktop
+}
+
+case "${1:-}" in
+    uninstall) uninstall_affine ;;
+    *) install_affine ;;
+esac

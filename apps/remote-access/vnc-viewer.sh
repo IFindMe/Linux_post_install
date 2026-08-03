@@ -7,4 +7,13 @@ install_vnc_viewer() {
     spawn "Installing tigervnc-viewer" sudo apt install -y tigervnc-viewer
 }
 
-install_vnc_viewer
+uninstall_vnc_viewer() {
+    command -v vncviewer &>/dev/null || { log "tigervnc-viewer not installed"; return 0; }
+    spawn "Removing tigervnc-viewer" sudo apt purge -y tigervnc-viewer
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+}
+
+case "${1:-}" in
+    uninstall) uninstall_vnc_viewer ;;
+    *) install_vnc_viewer ;;
+esac

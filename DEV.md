@@ -153,7 +153,16 @@ install_myapp() {
     spawn "Installing myapp" sudo apt install -y myapp
 }
 
-install_myapp
+uninstall_myapp() {
+    command -v myapp &>/dev/null || { log "myapp not installed"; return 0; }
+    spawn "Removing myapp" sudo apt purge -y myapp
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+}
+
+case "${1:-}" in
+    uninstall) uninstall_myapp ;;
+    *) install_myapp ;;
+esac
 ```
 
 Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no registration needed.
@@ -162,11 +171,14 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 
 ### 2. Conventions
 
-- Idempotent: check `command -v` before installing
-- APT packages → `sudo apt install -y` inside `spawn`
+- Idempotent: check `command -v` (or `flatpak list` / file existence) before installing **and** uninstalling
+- Every app **must** provide an `uninstall_<name>()` function and dispatch on `uninstall` via the `case` above — `apps/install.sh --uninstall` depends on it
+- APT packages → `sudo apt install -y` inside `spawn`, remove with `sudo apt purge -y` + `sudo apt autoremove -y`
+- Repo-based apps (apt repo added at install) → also remove the `.list` file and keyring in uninstall
 - Official scripts → `curl ... | sh` inside `spawn`
-- Flatpak → `flatpak install -y flathub <app-id>` inside `spawn`
+- Flatpak → `flatpak install -y flathub <app-id>` inside `spawn`, remove with `flatpak uninstall -y <app-id>`
 - `.deb` files → download to temp, `sudo apt install -y ./file.deb` inside `spawn`
+- File/AppImage installs → remove the installed files, symlinks, and desktop entries in uninstall
 - `usermod` for groups → print re-login reminder
 
 ---

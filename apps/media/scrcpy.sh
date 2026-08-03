@@ -50,4 +50,13 @@ EOF
     log "scrcpy $version installed (adb included in the bundle)"
 }
 
-install_scrcpy
+uninstall_scrcpy() {
+    command -v scrcpy &>/dev/null || { log "scrcpy not installed"; return 0; }
+    spawn "Removing scrcpy files" sudo rm -rf /usr/local/lib/scrcpy-* /usr/local/bin/scrcpy /usr/share/applications/scrcpy.desktop
+    log "scrcpy removed (bundled adb was removed with it)"
+}
+
+case "${1:-}" in
+    uninstall) uninstall_scrcpy ;;
+    *) install_scrcpy ;;
+esac

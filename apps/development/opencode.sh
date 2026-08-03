@@ -13,4 +13,13 @@ install_opencode() {
     log "Add to PATH: export PATH=\"\$HOME/.opencode/bin:\$PATH\""
 }
 
-install_opencode
+uninstall_opencode() {
+    [ -d "$HOME/.opencode" ] || { log "opencode not installed"; return 0; }
+    spawn "Removing opencode" rm -rf "$HOME/.opencode"
+    warn "Config/data remains in ~/.config/opencode — remove manually if desired"
+}
+
+case "${1:-}" in
+    uninstall) uninstall_opencode ;;
+    *) install_opencode ;;
+esac

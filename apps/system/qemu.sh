@@ -15,4 +15,16 @@ install_qemu() {
     warn "Log out and back in for libvirt/kvm groups to take effect"
 }
 
-install_qemu
+uninstall_qemu() {
+    command -v qemu-system-x86_64 &>/dev/null || { log "qemu not installed"; return 0; }
+    spawn "Removing qemu and libvirt" sudo apt purge -y \
+        qemu-system qemu-utils qemu-kvm \
+        libvirt-daemon-system libvirt-clients \
+        bridge-utils virt-manager
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+}
+
+case "${1:-}" in
+    uninstall) uninstall_qemu ;;
+    *) install_qemu ;;
+esac

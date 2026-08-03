@@ -15,4 +15,14 @@ install_brave() {
     spawn "Installing brave-browser" sudo apt install -y brave-browser
 }
 
-install_brave
+uninstall_brave() {
+    command -v brave-browser &>/dev/null || { log "brave not installed"; return 0; }
+    spawn "Removing brave-browser" sudo apt purge -y brave-browser
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+    spawn "Removing brave apt repo" sudo rm -f /etc/apt/sources.list.d/brave-browser-release.list /usr/share/keyrings/brave-browser-archive-keyring.gpg
+}
+
+case "${1:-}" in
+    uninstall) uninstall_brave ;;
+    *) install_brave ;;
+esac

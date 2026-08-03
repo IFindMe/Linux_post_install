@@ -15,4 +15,14 @@ install_vscode() {
     spawn "Installing code" sudo apt install -y code
 }
 
-install_vscode
+uninstall_vscode() {
+    command -v code &>/dev/null || { log "vscode not installed"; return 0; }
+    spawn "Removing code" sudo apt purge -y code
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+    spawn "Removing vscode apt repo" sudo rm -f /etc/apt/sources.list.d/vscode.list /usr/share/keyrings/packages.microsoft.gpg
+}
+
+case "${1:-}" in
+    uninstall) uninstall_vscode ;;
+    *) install_vscode ;;
+esac

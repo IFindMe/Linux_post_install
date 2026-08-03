@@ -16,4 +16,15 @@ install_localsend() {
     spawn "Installing localsend" sudo flatpak install -y flathub org.localsend.localsend_app
 }
 
-install_localsend
+uninstall_localsend() {
+    if ! flatpak list 2>/dev/null | grep -q org.localsend.localsend_app; then
+        log "localsend not installed"
+        return 0
+    fi
+    spawn "Removing localsend" sudo flatpak uninstall -y org.localsend.localsend_app
+}
+
+case "${1:-}" in
+    uninstall) uninstall_localsend ;;
+    *) install_localsend ;;
+esac

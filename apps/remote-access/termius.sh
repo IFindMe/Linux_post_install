@@ -17,4 +17,13 @@ install_termius() {
     log "Termius installed — launch with 'termius'"
 }
 
-install_termius
+uninstall_termius() {
+    command -v termius &>/dev/null || { log "termius not installed"; return 0; }
+    spawn "Removing termius" sudo apt purge -y termius
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+}
+
+case "${1:-}" in
+    uninstall) uninstall_termius ;;
+    *) install_termius ;;
+esac

@@ -7,4 +7,13 @@ install_vlc() {
     spawn "Installing vlc" sudo apt install -y vlc
 }
 
-install_vlc
+uninstall_vlc() {
+    command -v vlc &>/dev/null || { log "vlc not installed"; return 0; }
+    spawn "Removing vlc" sudo apt purge -y vlc
+    spawn "Cleaning up dependencies" sudo apt autoremove -y
+}
+
+case "${1:-}" in
+    uninstall) uninstall_vlc ;;
+    *) install_vlc ;;
+esac

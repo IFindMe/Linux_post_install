@@ -78,6 +78,9 @@ Linux_post_install/
 ├── completions/
 │   └── pos.bash            # Bash tab-completion for the pos CLI
 │
+├── config/
+│   └── authorized_keys     # SSH public keys (gitignored)
+│
 ├── compose/
 │   └── scale-tail/         # Git submodule → ScaleTail templates (119+ services)
 │
@@ -266,8 +269,10 @@ ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar patter
 
 - `apps/install.sh` auto-discovers all `apps/<category>/*.sh` files (excluding itself)
 - Three modes: interactive (default), `--all`, or specific app names as arguments
+- `--uninstall` switches to uninstall mode (same selection, invokes app scripts with `uninstall` argument)
 - Interactive TUI groups apps by category with section headers
 - Each app script is standalone, idempotent, sources `lib/common.sh`
+- Every app script defines `install_<name>()` **and** `uninstall_<name>()`, dispatched via `case "${1:-}" in uninstall) ...`
 
 ### Installation Methods
 
@@ -391,18 +396,18 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | ~120 | Main orchestrator — 4 phases with CLI flags |
-| `preinstall.sh` | ~52 | System packages + yt-dlp + fail2ban |
-| `postinstall.sh` | ~65 | fail2ban config, PATH, bash completion, systemd |
+| `install.sh` | 149 | Main orchestrator — 4 phases with CLI flags |
+| `preinstall.sh` | 52 | System packages + yt-dlp + fail2ban |
+| `postinstall.sh` | 90 | fail2ban config, PATH, bash completion, systemd |
 | `lib/common.sh` | 121 | Shared library |
-| `bin/pos` | ~130 | CLI dispatcher with smart arg matching + logging |
-| `bin/pos-docker-compose` | 317 | Largest script — full compose management |
+| `bin/pos` | 145 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-docker-ps` | 127 | Enhanced container overview |
-| `bin/pos-docker-health` | ~90 | Quick health dashboard |
-| `bin/pos-vbox` | ~160 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
+| `bin/pos-docker-health` | 109 | Quick health dashboard |
+| `bin/pos-vbox` | 156 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
 | `completions/pos.bash` | 118 | Dynamic bash completion |
-| `apps/install.sh` | 99 | App picker/orchestrator |
+| `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
 ---
 
