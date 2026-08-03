@@ -37,7 +37,7 @@ USAGE
   pos <category> <command> [args]
 
 CATEGORIES
-  network    ip | checkport | scan
+  network    ip | checkport | scan | hotspot
   docker     ps | compose
   media      mp3 | mp4
   system     firewall
@@ -48,6 +48,7 @@ EXAMPLES
   pos network ip                          Show interfaces, routes, public IP
   pos network checkport 10.0.0.1:80       Check if a TCP port is open
   pos network scan 192.168.1.0/24         Fast parallel ping sweep
+  pos network hotspot                     Launch wihotspot-gui
 
   pos docker ps                           List containers (health, IPs, ports)
   pos docker compose ls                   List available ScaleTail services

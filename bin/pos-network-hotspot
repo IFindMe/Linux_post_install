@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LOGFILE=/var/log/linux_post_install_hotspot.log
+
+usage() {
+    cat <<EOF
+Usage: pos network hotspot [command] [args]
+
+Manage Wi-Fi hotspots with create_ap (CLI) or wihotspot-gui (GUI).
+These tools are precompiled and shipped in x64_bin/ (or arm64_bin/),
+installed to /usr/local/bin/ by install.sh.
+
+Commands:
+  (no args)                 Launch the wihotspot-gui
+  start [--foreground] <wifi-iface> [<internet-iface>] <ssid> [<passphrase>]
+                            Create an access point; asks whether to run in the
+                            background. Use --foreground to skip the prompt
+                            and block until Ctrl+C.
+  stop [<id>]               Stop the running access point. <id> is an interface
+                            name or PID; if omitted it is detected automatically.
+  status                    List running access points
+
+Examples:
+  pos network hotspot
+  pos network hotspot start wlan0 eth0 MyNet mypass
+  pos network hotspot start --foreground wlan0 eth0 MyNet mypass
+  pos network hotspot stop
+  pos network hotspot status
+
+Background logs: $LOGFILE
+EOF
+    exit 0
+}
+
+cmd="${1:-}"
+
+case "$cmd" in
+    -h|--help) usage ;;
+    "")        exec wihotspot-gui ;;
+    start)
+        shift
+        fg=0
+        bg=0
+        if [ "${1:-}" = "--foreground" ]; then
+            fg=1
+            shift
+        fi
+        [ $# -ge 2 ] || usage
+        if [ $fg -eq 0 ]; then
+            read -rp "Run in background? [y/N]: " bg
+            case "$bg" in
+                [yY]*) bg=1 ;;
+                *)     bg=0 ;;
+            esac
+        fi
+        if [ $bg -eq 1 ]; then
+            sudo create_ap --daemon --logfile "$LOGFILE" "$@"
+            echo "[+] Hotspot started in background"
+            echo "    Log   : $LOGFILE"
+            echo "    Status: pos network hotspot status"
+            echo "    Stop  : pos network hotspot stop"
+        else
+            exec sudo create_ap "$@"
+        fi
+        ;;
+    stop)
+        shift
+        id="${1:-}"
+        if [ -z "$id" ]; then
+            ids=$(sudo create_ap --list-running | awk 'NF { print $2 }')
+            if [ -z "$ids" ]; then
+                echo "No hotspot running."
+                exit 0
+            fi
+            for id in $ids; do
+                sudo create_ap --stop "$id"
+            done
+        else
+            sudo create_ap --stop "$id"
+        fi
+        ;;
+    status)
+        exec sudo create_ap --list-running
+        ;;
+    *)
+        echo "ERROR: Unknown hotspot command '$cmd'"
+        echo "Run 'pos network hotspot --help' for usage."
+        exit 1
+        ;;
+esac

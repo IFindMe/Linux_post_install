@@ -12,6 +12,7 @@ Everything that runs during the bootstrap install: `install.sh`, `preinstall.sh`
 - [lib/common.sh — shared library](#libcommonsh--shared-library)
 - [lib/flags.sh — feature flags](#libflagssh--feature-flags)
 - [features/autostart.sh — boot-time feature](#featuresautostartsh--boot-time-feature)
+- [x64_bin/ — precompiled binaries](#x64_bin--precompiled-binaries)
 
 ---
 
@@ -35,10 +36,12 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` → `/usr/local/bin/` (644). With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
+
+**Precompiled arch binaries (Phase 2):** `install.sh` picks the source folder from the machine architecture — `x86_64` → `x64_bin/`, `aarch64`/`arm64` → `arm64_bin/` (added later) — and copies every file in it to `/usr/local/bin/` (755). These are manually-compiled tools not available as internet builds (currently `create_ap`, `wihotspot`, `wihotspot-gui`). Dropping an `arm64_bin/` folder later needs no code change.
 
 **Feature block (Phase 2, only with `--feature`):** for every file in `features/` it copies it to `/usr/local/bin/<name>`. If the destination already exists it asks **"Overwrite existing …? [y/N]"** (default keeps your file), then always sets the feature flag via `flag_set` (name derived as `<filename without .sh>`).
 
@@ -82,12 +85,14 @@ PACKAGES=(
     unzip zip rsync htop btop telnet
     net-tools iputils-ping traceroute tcpdump nmap
     openssh-client openssh-server ufw fail2ban
+    hostapd dnsmasq iptables iw
     ca-certificates gnupg lsb-release
     python3 python3-pip rclone
+    libqrencode4 libgtk-3-0
 )
 ```
 
-Add or remove package names here. `nmap` and `fail2ban` are used later by `pos network scan` and `postinstall.sh`.
+Add or remove package names here. `nmap` and `fail2ban` are used later by `pos network scan` and `postinstall.sh`; `hostapd`, `dnsmasq`, `iptables`, `iw` and the GTK/Qr libs support the precompiled hotspot tools (see [x64_bin/ — precompiled binaries](#x64_bin--precompiled-binaries)).
 
 ---
 
@@ -186,3 +191,23 @@ Appends timestamped lines to `~/.autostart.log`:
 
 - Log file: `$HOME/.autostart.log` (edit the `LOG` variable at the top).
 - The script is the one you're *most* likely to customize — this is exactly why it lives in `features/` instead of `bin/`: a plain reinstall never overwrites your edits.
+
+---
+
+## x64_bin/ — precompiled binaries
+
+**Folder:** `x64_bin/` (future: `arm64_bin/`)
+**Purpose:** manually-compiled tools that are **not available as prebuilt binaries on the internet**. `install.sh` copies them verbatim into `/usr/local/bin/` on the matching architecture (see [install.sh — the orchestrator](#installsh--the-orchestrator)).
+
+### Contents
+
+| File | Type | Purpose | Runtime deps |
+|------|------|---------|--------------|
+| `create_ap` | bash script | Create a Wi-Fi access point from the CLI (NAT/Internet sharing) | `hostapd`, `dnsmasq`, `iptables`, `iw` (in `preinstall.sh`) |
+| `wihotspot` | POSIX wrapper | Launches `wihotspot-gui` (path points at `/usr/local/bin/`) | — |
+| `wihotspot-gui` | ELF x86-64 | GTK3 GUI for the hotspot (QR code via libqrencode) | `libgtk-3-0`, `libqrencode4` |
+
+### Configuration
+
+- Managed through the `pos network hotspot` command (see [POS.md → network](POS.md#network)): `hotspot` launches the GUI; `start`/`stop`/`status` wrap `create_ap`.
+- Add a future `arm64_bin/` folder with the same filenames and it is installed automatically on `aarch64` machines — no `install.sh` change needed.

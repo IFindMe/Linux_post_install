@@ -114,6 +114,23 @@ if should_run 2 scripts; then
     run sudo install -m 644 lib/common.sh /usr/local/bin/common.sh
     run sudo install -m 644 lib/flags.sh /usr/local/bin/flags.sh
 
+    # ── Precompiled architecture binaries ─────────────────────
+    # Manually-compiled binaries (not available on the internet),
+    # copied straight into /usr/local/bin for the matching arch.
+    # Drop an arm64_bin/ folder later — it is picked up automatically.
+    case "$(uname -m)" in
+        x86_64)          prebuilt_dir="x64_bin" ;;
+        aarch64|arm64)   prebuilt_dir="arm64_bin" ;;
+        *)               prebuilt_dir="" ;;
+    esac
+    if [ -n "$prebuilt_dir" ] && [ -d "$prebuilt_dir" ]; then
+        for f in "$prebuilt_dir"/*; do
+            [ -f "$f" ] || continue
+            run sudo install -m 755 "$f" /usr/local/bin/
+        done
+        ok "$prebuilt_dir binaries -> /usr/local/bin"
+    fi
+
     # ── Optional features ──────────────────────────────────────
     if [ "$RUN_FEATURES" -eq 1 ]; then
         for f in features/*; do

@@ -45,6 +45,7 @@ Linux_post_install/
 │   ├── pos-system-firewall # Interactive UFW manager (menu-driven, 284 lines)
 │   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
 │   ├── pos-vbox            # Disposable Docker-based "VMs"
+│   ├── pos-network-hotspot # Wi-Fi hotspot (create_ap + wihotspot-gui)
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
 │   ├── flag-set            # Set a feature flag (optionally with a value)
 │   ├── flag-clear          # Unset a feature flag
@@ -54,6 +55,12 @@ Linux_post_install/
 │
 ├── features/               # User-customizable scripts (installed via --feature)
 │   └── autostart.sh        # Boot-time script (via systemd, flag-gated)
+│
+├── x64_bin/                # Precompiled binaries, copied to /usr/local/bin on x86_64
+│   ├── create_ap           # Wi-Fi AP CLI (bash script)
+│   ├── wihotspot           # Wrapper → wihotspot-gui
+│   └── wihotspot-gui       # GTK3 hotspot GUI (x86-64 ELF)
+│                           # future: arm64_bin/ picked up automatically on aarch64
 │
 ├── apps/                   # Optional desktop app installers (by category)
 │   ├── install.sh          # Interactive picker / orchestrator
@@ -123,6 +130,7 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--step
 ├─ Phase 2: install.sh           (requires root)
 │   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
 │   └─ Copies lib/common.sh + lib/flags.sh → /usr/local/bin/ (chmod 644)
+│   └─ Copies x64_bin/* → /usr/local/bin/ on x86_64 (arm64_bin/ on aarch64)
 │   └─ [if --feature] Copies features/* → /usr/local/bin/ (asks before overwriting),
 │                      then sets the matching feature flag
 │
@@ -425,8 +433,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 175 | Main orchestrator — 4 phases with CLI flags, `--feature` block |
-| `preinstall.sh` | 52 | System packages + yt-dlp + fail2ban |
+| `install.sh` | 192 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
+| `preinstall.sh` | 54 | System packages + hotspot deps + yt-dlp + fail2ban |
 | `postinstall.sh` | 97 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 121 | Shared library |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
@@ -434,12 +442,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `bin/pos` | 145 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos` | 146 | CLI dispatcher with smart arg matching + logging |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-docker-ps` | 127 | Enhanced container overview |
 | `bin/pos-docker-health` | 109 | Quick health dashboard |
 | `bin/pos-vbox` | 156 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
+| `bin/pos-network-hotspot` | 91 | Wi-Fi hotspot: `create_ap` (start with background prompt/`--foreground`, stop, status) + `wihotspot-gui` |
 | `completions/pos.bash` | 118 | Dynamic bash completion |
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -453,6 +462,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Add a new app installer | Create `apps/<name>.sh` (auto-discovered) |
 | Add a feature | Create `features/<name>.sh` (installed on demand via `./install.sh --feature`) |
 | Add a systemd service | Create `systemd/<name>.service` (auto-installed by postinstall; gate on a flag if it backs a feature) |
+| Add a precompiled binary | Drop it in `x64_bin/` (or `arm64_bin/` later) — auto-copied by Phase 2 |
 | Inspect/set feature flags | `flag-reader`, `flag-set`, `flag-clear` (or source `lib/flags.sh`) |
 | Modify package list | Edit `PACKAGES` array in `preinstall.sh` |
 | Change PATH or bash config | Edit `postinstall.sh` |

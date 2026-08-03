@@ -53,6 +53,7 @@ Every non-interactive `pos` invocation logs to `~/.local/share/linux_post_instal
 | `pos network ip` | `bin/pos-network-ip` | Show interfaces, default route, public IP | None. Public IP via `https://ifconfig.me` (5s timeout) |
 | `pos network checkport <ip:port>` | `bin/pos-network-checkport` | Check if a TCP port is open | None. Uses `/dev/tcp` with a 2s timeout; exit 0/1 via OPEN/CLOSED |
 | `pos network scan <cidr> [--full] [--retries N]` | `bin/pos-network-scan` | Two-phase nmap scan | See below |
+| `pos network hotspot [cmd]` | `bin/pos-network-hotspot` | Wi-Fi hotspot via `create_ap` (CLI) or `wihotspot-gui` (GUI) | Uses the precompiled binaries from `x64_bin/`; see below |
 
 **`pos network scan` in detail:**
 
@@ -61,6 +62,18 @@ Every non-interactive `pos` invocation logs to `~/.local/share/linux_post_instal
 - Accepts a bare IP (treated as `/32`) or a CIDR.
 - Auto-raises to `sudo nmap` when possible (root, passwordless sudo, or an interactive terminal with `--full`).
 - `--retries N` tunes discovery retries (default 1).
+
+**`pos network hotspot` in detail:**
+
+Backed by the precompiled binaries shipped in `x64_bin/` (see [SCRIPTS.md → x64_bin/](SCRIPTS.md#x64_bin--precompiled-binaries)). Needs root for the CLI commands (uses `sudo`):
+
+| Command | Behavior |
+|---------|----------|
+| `pos network hotspot` | Launches the `wihotspot-gui` (GTK3 GUI) |
+| `pos network hotspot start <wifi-iface> [<internet-iface>] <ssid> [<passphrase>]` | Asks whether to run in the background; `y` starts `create_ap --daemon` (logs to `/var/log/linux_post_install_hotspot.log`), `n` runs in the foreground (blocks until Ctrl+C) |
+| `pos network hotspot start --foreground <wifi-iface> [<internet-iface>] <ssid> [<passphrase>]` | Skips the prompt, runs in the foreground |
+| `pos network hotspot stop [<id>]` | Stops the running access point via `create_ap --stop`; `<id>` is an interface name or PID, auto-detected if omitted |
+| `pos network hotspot status` | Runs `create_ap --list-running` |
 
 ### docker
 

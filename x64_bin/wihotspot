@@ -1,4 +1,4 @@
 #!/bin/sh
 
 # Start wihotspot-gui
-/usr/bin/wihotspot-gui
+/usr/local/bin/wihotspot-gui
