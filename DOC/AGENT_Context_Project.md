@@ -94,8 +94,18 @@ Linux_post_install/
 │   ├── autostart.service   # Runs autostart.sh on boot
 │   └── ssh-agent.service   # System-wide SSH agent socket
 │
-├── README.md               # User-facing documentation
-├── DEV.md                  # Developer guide
+├── README.md               # User-facing intro + quick start (links into DOC/)
+│
+├── DOC/                    # All documentation
+│   ├── README.md           # Docs index
+│   ├── SCRIPTS.md          # Installer scripts, libs, features — reference
+│   ├── POS.md              # pos CLI reference
+│   ├── APPS.md             # Optional apps reference
+│   ├── SYSTEMD.md          # Systemd units + completion
+│   ├── DEV.md              # Developer guide
+│   ├── AGENT_Context_Project.md  # This file — AI agent context
+│   └── algorithm.md        # Algorithm diagrams
+│
 ├── .gitignore              # Excludes secrets, Python artifacts, OS files
 └── .gitmodules             # Submodule: compose/scale-tail → ScaleTail
 ```
@@ -298,7 +308,7 @@ ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar patter
 
 ### Adding a New App
 
-1. Create `apps/<name>.sh` following the template in DEV.md
+1. Create `apps/<name>.sh` following the template in DOC/DEV.md
 2. It auto-appears in the interactive picker — no registration needed
 
 ---
@@ -374,7 +384,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 
 ### Adding a New App
 
-1. Create `apps/<category>/<name>.sh` following the template in DEV.md
+1. Create `apps/<category>/<name>.sh` following the template in DOC/DEV.md
 2. It auto-appears in the interactive picker — no registration needed
 
 ### Adding a New Tool
@@ -382,7 +392,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 1. Create `bin/pos-<category>-<command>` following conventions
 2. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed)
 3. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets)
-4. Update `README.md`
+4. Update `DOC/POS.md` (and root `README.md` only if the category list changes)
 5. Test: `bash -n bin/your-tool && shellcheck bin/your-tool`
 
 ### Testing
@@ -453,5 +463,5 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
 | Modify install phases/flags | Edit arg parsing in `install.sh` |
-| Update documentation | Edit `README.md` and/or `DEV.md` |
+| Update documentation | Edit the relevant doc under `DOC/` (index: `DOC/README.md`) |
 | Add a secret config file | Add to `config/`, update `.gitignore`, add copy logic in `postinstall.sh` |

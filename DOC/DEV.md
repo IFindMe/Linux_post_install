@@ -119,15 +119,15 @@ PACKAGES=(
 
 ### 3. Add config files (if needed)
 
-Place defaults in `config/` and add copy logic to `postinstall.sh`. If they contain secrets, add to `.gitignore` and document in README.
+Place defaults in `config/` and add copy logic to `postinstall.sh`. If they contain secrets, add to `.gitignore` and document in `DOC/`.
 
 ### 4. Add SSH keys (if needed)
 
 Place public keys in `config/authorized_keys` (one per line). `postinstall.sh` reads this file automatically.
 
-### 5. Update README
+### 5. Update the docs
 
-Add a section under the relevant category in README.md.
+Add a section for the new command in `DOC/POS.md`.
 
 ### 6. Test
 
@@ -188,7 +188,7 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 1. Find the script in `bin/`
 2. Understand its contract (args, output, exit codes)
 3. Make the change — keep it idempotent
-4. Update README if behaviour changed
+4. Update `DOC/POS.md` (or the relevant doc) if behaviour changed
 5. Run `shellcheck` on the modified file
 
 ---
