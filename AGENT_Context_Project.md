@@ -29,7 +29,8 @@ Linux_post_install/
 ├── postinstall.sh          # Phase 3: PATH, bash completion, systemd services
 │
 ├── lib/
-│   └── common.sh           # Shared library (colors, logging, spinner, timer, run)
+│   ├── common.sh           # Shared library (colors, logging, spinner, timer, run)
+│   └── flags.sh            # Feature flag store (flag_set/clear/is_set/value/list/status)
 │
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
@@ -44,10 +45,15 @@ Linux_post_install/
 │   ├── pos-system-firewall # Interactive UFW manager (menu-driven, 284 lines)
 │   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
 │   ├── pos-vbox            # Disposable Docker-based "VMs"
-│   ├── autostart.sh        # Boot-time script (via systemd)
+│   ├── flag-reader         # Inspect feature flags (list/status/--raw)
+│   ├── flag-set            # Set a feature flag (optionally with a value)
+│   ├── flag-clear          # Unset a feature flag
 │   ├── wr-*                # Legacy wrappers → pos (backward compat)
 │   ├── mp3, mp4, vbox      # Legacy convenience wrappers → pos
 │   └── ssh-load-all        # Legacy wrapper → pos ssh load-keys
+│
+├── features/               # User-customizable scripts (installed via --feature)
+│   └── autostart.sh        # Boot-time script (via systemd, flag-gated)
 │
 ├── apps/                   # Optional desktop app installers (by category)
 │   ├── install.sh          # Interactive picker / orchestrator
@@ -99,20 +105,23 @@ Linux_post_install/
 ## 3. Installation Flow
 
 ```
-User runs: ./install.sh [--apps|--full|--dry-run|--skip <phase>|--steps <spec>]
+User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--steps <spec>]
 │
 ├─ Phase 1: preinstall.sh        (requires root)
 │   └─ apt update + installs 25+ packages + yt-dlp + fail2ban
 │
 ├─ Phase 2: install.sh           (requires root)
 │   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
-│   └─ Copies lib/common.sh → /usr/local/bin/common.sh (chmod 644)
+│   └─ Copies lib/common.sh + lib/flags.sh → /usr/local/bin/ (chmod 644)
+│   └─ [if --feature] Copies features/* → /usr/local/bin/ (asks before overwriting),
+│                      then sets the matching feature flag
 │
 ├─ Phase 3: postinstall.sh       (runs as user)
 │   └─ Configures fail2ban (SSH jail: 5 retries, 1h ban)
 │   └─ PATH export in ~/.bashrc
 │   └─ Bash completion for pos CLI
 │   └─ Copies systemd/*.service → /etc/systemd/system/, enables them
+│      (autostart.service only when the `autostart` flag is set)
 │
 ├─ Phase 4: ScaleTail clone
 │   └─ Shallow-clones ScaleTail templates to /usr/local/share/linux_post_install/scale-tail
@@ -129,6 +138,7 @@ User runs: ./install.sh [--apps|--full|--dry-run|--skip <phase>|--steps <spec>]
 |------|---------|
 | `--apps` | Run interactive app picker after core install |
 | `--full` | Core install + all apps (non-interactive) |
+| `--feature` | Install `features/` scripts to `/usr/local/bin/` (asks before overwriting), set their flags |
 | `--dry-run` | Preview without executing |
 | `--skip <phase>` | Skip a phase (repeatable): `preinstall`, `scripts`, `postinstall`, `scalepoint`, `apps` |
 | `--steps <spec>` | Run only specific phases. Format: `1,3,4` or `1-3` |
@@ -316,6 +326,15 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 - `~/.config/linux_post_install/compose.env` — Docker Compose global defaults
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
+### Feature Flags
+
+System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
+- One file per flag; **presence = set**, **file content = optional value** (dir 755, files 644).
+- Library: `lib/flags.sh` (installed as `/usr/local/bin/flags.sh`) — `flag_set <name> [value]`, `flag_clear <name>`, `flag_is_set <name>`, `flag_value <name>`, `flag_list`, `flag_status <name>`.
+- CLI: `flag-reader` (list / status / `--raw`), `flag-set`, `flag-clear`.
+- Set by `./install.sh --feature`; read by `postinstall.sh` to gate systemd enablement (e.g. `autostart.service` requires the `autostart` flag).
+- Writes use `run` + `sudo`, so they respect `--dry-run`. `FLAGS_DIR` is env-overridable for tests.
+
 ---
 
 ## 10. Coding Conventions
@@ -396,10 +415,15 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 149 | Main orchestrator — 4 phases with CLI flags |
+| `install.sh` | 175 | Main orchestrator — 4 phases with CLI flags, `--feature` block |
 | `preinstall.sh` | 52 | System packages + yt-dlp + fail2ban |
-| `postinstall.sh` | 90 | fail2ban config, PATH, bash completion, systemd |
+| `postinstall.sh` | 97 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 121 | Shared library |
+| `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
+| `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
+| `bin/flag-set` | 21 | Set a flag (optionally with a value) |
+| `bin/flag-clear` | 21 | Unset a flag |
+| `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 | `bin/pos` | 145 | CLI dispatcher with smart arg matching + logging |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
@@ -417,7 +441,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 |------|---------------|
 | Add a new CLI tool | Create `bin/pos-<cat>-<cmd>`, add deps in `preinstall.sh` |
 | Add a new app installer | Create `apps/<name>.sh` (auto-discovered) |
-| Add a systemd service | Create `systemd/<name>.service` (auto-installed by postinstall) |
+| Add a feature | Create `features/<name>.sh` (installed on demand via `./install.sh --feature`) |
+| Add a systemd service | Create `systemd/<name>.service` (auto-installed by postinstall; gate on a flag if it backs a feature) |
+| Inspect/set feature flags | `flag-reader`, `flag-set`, `flag-clear` (or source `lib/flags.sh`) |
 | Modify package list | Edit `PACKAGES` array in `preinstall.sh` |
 | Change PATH or bash config | Edit `postinstall.sh` |
 | Modify fail2ban config | Edit jail.local section in `postinstall.sh` |

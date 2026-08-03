@@ -27,6 +27,7 @@ cd Linux_post_install
 ./install.sh              # core: packages + CLI + services + ScaleTail
 ./install.sh --apps       # core + interactive app picker
 ./install.sh --full        # core + all apps (non-interactive)
+./install.sh --feature    # core + install features/ scripts (prompts on overwrite)
 ```
 
 **Flags:**
@@ -35,6 +36,7 @@ cd Linux_post_install
 |------|-------------|
 | `--apps` | Run interactive app picker after core install |
 | `--full` | Core install + all apps (no prompts) |
+| `--feature` | Install `features/` scripts to `/usr/local/bin/` (asks before overwriting), sets their feature flags |
 | `--dry-run` | Preview without executing anything |
 | `--skip <phase>` | Skip a phase (repeatable): `preinstall`, `scripts`, `postinstall`, `scalepoint` |
 | `--steps <spec>` | Run specific phases only, e.g. `--steps 1,3` or `--steps 1-3` |
@@ -51,6 +53,33 @@ cd Linux_post_install
 | 3 | `postinstall.sh` | Configures fail2ban, SSH agent, PATH, bash completion, systemd services |
 | 4 | ScaleTail clone | Downloads 119+ Docker Compose templates with Tailscale sidecar |
 | 5 (opt) | `apps/install.sh` | Installs desktop apps you select |
+| opt | `./install.sh --feature` | Installs `features/` scripts (never overwrites without asking) |
+
+---
+
+## Features & Flags
+
+`features/` holds scripts you're likely to customize (like `autostart.sh`), kept out of `bin/` so a plain re-install never resets them.
+
+```bash
+./install.sh --feature       # install features/ — asks before overwriting
+```
+
+- Each feature is copied to `/usr/local/bin/`; if the file already exists you're asked **"Overwrite? [y/N]"** — your existing config is kept by default.
+- A successful install sets a **feature flag** at `/usr/local/share/linux_post_install/flags/` (presence = set, file content = optional value).
+- Flags drive systemd: e.g. `autostart.service` is enabled only when the `autostart` flag is green.
+
+Inspect and manage flags:
+
+```bash
+flag-reader                 # list all flags + status
+flag-reader autostart       # check one flag (exit 0 if set)
+flag-reader --raw autostart # print the raw value only (script-friendly)
+flag-set autostart prod     # set a flag, optionally with a value
+flag-clear autostart        # unset a flag
+```
+
+Any project script can `source lib/flags.sh` (or the installed `/usr/local/bin/flags.sh`) and use `flag_set`, `flag_is_set`, `flag_value`, `flag_clear`.
 
 ---
 

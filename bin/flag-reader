@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/flags.sh" 2>/dev/null || source "$(dirname "$0")/flags.sh"
+
+usage() {
+    cat <<EOF
+Usage: flag-reader [OPTIONS] [name ...]
+
+Show feature flag state. Flags live in $FLAGS_DIR
+
+  flag-reader              list all flags with status
+  flag-reader <name>...    status per flag (exit 0 if all are set)
+  flag-reader --raw <name> print the raw stored value only (script-friendly)
+EOF
+    exit 0
+}
+
+RAW=0
+NAMES=()
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+        --raw) RAW=1 ;;
+        -*) echo "ERROR: unknown option: $arg" >&2; exit 1 ;;
+        *) NAMES+=("$arg") ;;
+    esac
+done
+
+if [ "$RAW" -eq 1 ]; then
+    [ "${#NAMES[@]}" -eq 1 ] || { echo "ERROR: --raw requires exactly one name" >&2; exit 1; }
+    flag_value "${NAMES[0]}"
+    exit 0
+fi
+
+if [ "${#NAMES[@]}" -eq 0 ]; then
+    if [ -d "$FLAGS_DIR" ] && [ -n "$(ls -A "$FLAGS_DIR" 2>/dev/null)" ]; then
+        for f in "$FLAGS_DIR"/*; do
+            [ -f "$f" ] || continue
+            flag_status "$(basename "$f")"
+        done
+    else
+        warn "no flags set"
+    fi
+    exit 0
+fi
+
+rc=0
+for name in "${NAMES[@]}"; do
+    if flag_is_set "$name"; then
+        ok "$(flag_status "$name")"
+    else
+        warn "$(flag_status "$name")"
+        rc=1
+    fi
+done
+exit "$rc"

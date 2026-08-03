@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
+source "$(dirname "$0")/lib/flags.sh"
 
 log "Running post-install..."
 
@@ -79,6 +80,12 @@ if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
 
     for svc in systemd/*.service; do
         svc_name=$(basename "$svc")
+        # autostart.service runs features/autostart.sh — enable only when
+        # the autostart feature flag is green (set by ./install.sh --feature)
+        if [ "$svc_name" = "autostart.service" ] && ! flag_is_set autostart; then
+            warn "autostart feature not installed — skipping autostart.service (run ./install.sh --feature)"
+            continue
+        fi
         run sudo systemctl enable --now "$svc_name" 2>/dev/null || \
             run sudo systemctl enable "$svc_name"
     done

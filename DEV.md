@@ -238,7 +238,46 @@ run sudo apt install -y git
 - CLI tools: `bin/pos-<category>-<command>`
 - Legacy wrappers: `bin/wr-*`
 - App installers: `apps/<category>/<name>.sh`
+- Features: `features/<name>.sh`
 - Lowercase with hyphens
+
+---
+
+## Features & Flags
+
+`features/` holds scripts the user is likely to customize (e.g. `autostart.sh`). Unlike `bin/` (synced on every install), features are installed on demand and **never overwritten without asking**.
+
+### Adding a Feature
+
+1. Create `features/<name>.sh` following the CLI tool template (shebang, `set -euo pipefail`, `--help`).
+2. Nothing else is registered — `./install.sh --feature` auto-discovers it, copies it to `/usr/local/bin/`, asks before overwriting an existing file, and sets its flag.
+3. If the feature backs a systemd service, gate the service on the flag in `postinstall.sh` (see below).
+
+### Flag System
+
+System-wide flag store at `/usr/local/share/linux_post_install/flags/` (presence = set, content = optional value). Sourced via `lib/flags.sh` (or the installed `/usr/local/bin/flags.sh`):
+
+```bash
+source "$(dirname "$0")/lib/flags.sh" 2>/dev/null || source "$(dirname "$0")/flags.sh"
+
+flag_set autostart        # green flag
+flag_set app "2.1"        # green flag with a value
+flag_is_set autostart     # test (0/1) — the primitive consumers use
+flag_value app            # → "2.1"
+flag_list                 # names of all set flags
+flag_clear autostart
+```
+
+Writes use `run` + `sudo`, so they respect `--dry-run`. CLI equivalents: `flag-reader`, `flag-set`, `flag-clear`.
+
+**Example — service gated on a flag** (in `postinstall.sh`'s systemd loop):
+
+```bash
+if [ "$svc_name" = "myapp.service" ] && ! flag_is_set myapp; then
+    warn "myapp feature not installed — skipping myapp.service"
+    continue
+fi
+```
 
 ---
 

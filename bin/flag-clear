@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/flags.sh" 2>/dev/null || source "$(dirname "$0")/flags.sh"
+
+usage() {
+    cat <<EOF
+Usage: flag-clear <name>
+
+Unset a feature flag (remove it from $FLAGS_DIR).
+Requires sudo.
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+flag_clear "$1"
+ok "flag cleared: $1"

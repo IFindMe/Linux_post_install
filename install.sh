@@ -12,9 +12,11 @@ if [ "$NO_COLOR" -eq 1 ]; then
 fi
 
 source "$(dirname "$0")/lib/common.sh"
+source "$(dirname "$0")/lib/flags.sh"
 
 DRY_RUN=0
 RUN_APPS=0
+RUN_FEATURES=0
 SKIP_PHASES=""
 STEPS_SPEC=""
 
@@ -27,6 +29,7 @@ Bootstrap a fresh Debian/Ubuntu install.
 Options:
   --apps            Run interactive app picker after core install
   --full            Core install + all optional apps (non-interactive)
+  --feature         Install features/ scripts (prompts before overwriting)
   --dry-run         Show what would be done without executing
   --skip <phase>    Skip a phase (repeatable):
                       preinstall, scripts, postinstall, scalepoint, apps
@@ -47,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --apps) RUN_APPS=1; shift ;;
         --full) RUN_APPS=2; shift ;;
+        --feature) RUN_FEATURES=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --skip)
             [ -z "${2:-}" ] && err "Missing value for --skip"
@@ -108,7 +112,29 @@ if should_run 2 scripts; then
         count=$((count + 1))
     done
     run sudo install -m 644 lib/common.sh /usr/local/bin/common.sh
-    ok "$count scripts + lib -> /usr/local/bin"
+    run sudo install -m 644 lib/flags.sh /usr/local/bin/flags.sh
+
+    # ── Optional features ──────────────────────────────────────
+    if [ "$RUN_FEATURES" -eq 1 ]; then
+        for f in features/*; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            flag_name="${name%.sh}"
+            dest="/usr/local/bin/$name"
+            if [ -e "$dest" ]; then
+                if confirm "Overwrite existing $dest?" n; then
+                    run sudo install -m 755 "$f" "$dest"
+                else
+                    log "Keeping existing $dest"
+                fi
+            else
+                run sudo install -m 755 "$f" "$dest"
+            fi
+            flag_set "$flag_name"
+        done
+        ok "features installed"
+    fi
+    ok "$count scripts + libs -> /usr/local/bin"
 fi
 
 # ── Phase 3: postinstall ───────────────────────────────────────
