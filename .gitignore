@@ -19,3 +19,5 @@ Thumbs.db
 # Docker Compose — user's active stacks and secrets
 compose/custom/
 compose/config.env
+
+session
