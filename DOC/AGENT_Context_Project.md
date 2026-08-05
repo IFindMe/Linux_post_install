@@ -259,7 +259,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`pos`, `pos-communication-telegram`, `pos-media-mp3`, `pos-media-mp4`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
+`pos`, `pos-communication-telegram`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -476,8 +476,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 157 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
-| `bin/pos-media-mp3` | 31 | Download audio as MP3 (yt-dlp) |
-| `bin/pos-media-mp4` | 34 | Download video as MP4 (interactive format select) |
+| `bin/pos-media-mp3` | 35 | Download audio as MP3 (yt-dlp) |
+| `bin/pos-media-mp4` | 38 | Download video as MP4 (interactive format select) |
 | `bin/pos-network-checkport` | 45 | Check TCP port connectivity |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |

@@ -2,6 +2,8 @@
 set -euo pipefail
 # POS: media mp4 — Download video as MP4 (interactive format select)
 
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
 usage() {
     cat <<EOF
 Usage: pos media mp4 <url>
@@ -17,6 +19,8 @@ EOF
 case "${1:-}" in
     -h|--help|"") usage ;;
 esac
+
+command -v yt-dlp &>/dev/null || err "yt-dlp not found — install it with: sudo apt install yt-dlp"
 
 url="$1"
 
