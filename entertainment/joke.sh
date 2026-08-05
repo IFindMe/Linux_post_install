@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Entertainment plugin: random dad joke via icanhazdadjoke.com (no API key).
+# POS_PLUGIN: joke
 # Contract: stdout is the message sent by 'pos entertainment send joke'.
 
 err() { echo "ERROR: $*" >&2; exit 1; }

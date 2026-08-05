@@ -4,7 +4,7 @@ Everything in this folder is reference material for the `Linux_post_install` pro
 
 | Document | What it covers |
 |----------|----------------|
-| [SCRIPTS.md](SCRIPTS.md) | Core installer scripts: `install.sh`, `preinstall.sh`, `postinstall.sh`, `lib/common.sh`, `lib/flags.sh`, `features/autostart.sh` — purpose, how each works, configuration |
+| [SCRIPTS.md](SCRIPTS.md) | Core installer scripts: `install.sh`, `preinstall.sh`, `postinstall.sh`, `lib/common.sh`, `lib/flags.sh`, `lib/entertainment-lib.sh`, `features/autostart.sh` — purpose, how each works, configuration |
 | [POS.md](POS.md) | The `pos` CLI: dispatcher, every `pos-*` command, Docker Compose / ScaleTail config, legacy wrappers, flag CLIs |
 | [APPS.md](APPS.md) | Optional apps: `apps/install.sh` picker, installer conventions, full app catalog |
 | [SYSTEMD.md](SYSTEMD.md) | Systemd units (`autostart.service`, `ssh-agent.service`), feature-flag gating, bash completion |

@@ -17,7 +17,7 @@ else
 fi
 
 # ── entertainment config ───────────────────────────────────────
-# Default location for the weather plugin — copied only if the user
+# Generic template for the weather plugin — copied only if the user
 # has not already created their own entertainment.env (no clobber).
 ENT_DIR="$HOME/.config/linux_post_install"
 if [ -f config/entertainment.env ]; then
@@ -27,7 +27,8 @@ if [ -f config/entertainment.env ]; then
     else
         cp config/entertainment.env "$ENT_DIR/entertainment.env"
         chmod 600 "$ENT_DIR/entertainment.env"
-        log "Installed entertainment.env (default weather location)"
+        log "Installed entertainment.env — set your location:"
+        cat "$ENT_DIR/entertainment.env"
     fi
 else
     warn "config/entertainment.env not found, skipping"

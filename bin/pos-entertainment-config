@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: entertainment config — Show or edit the entertainment config (ENABLED auto-trigger list, weather location)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos entertainment config [set KEY=VALUE ...]
+
+Show the entertainment config file, or set one or more keys.
+After 'set', auto-trigger timers are re-synced from ENABLED.
+
+Config file: $CONFIG_FILE
+
+Keys:
+  ENABLED        Auto-trigger list: comma-separated 'plugin, interval' pairs,
+                 e.g. ENABLED="weather, 5m gold, 1h"
+  WEATHER_LAT    Weather plugin latitude  (required for weather)
+  WEATHER_LON    Weather plugin longitude (required for weather)
+  WEATHER_CITY   Optional city label
+
+Intervals: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=...
+
+Examples:
+  pos entertainment config
+  pos entertainment config set ENABLED="weather, 5m gold, 1h"
+  pos entertainment config set WEATHER_LAT=36.51 WEATHER_LON=40.75
+  pos entertainment config set ENABLED=""
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+    set)
+        shift
+        [ $# -ge 1 ] || usage
+        for pair in "$@"; do
+            key="${pair%%=*}"
+            val="${pair#*=}"
+            case "$key" in
+                ENABLED|WEATHER_LAT|WEATHER_LON|WEATHER_CITY) ;;
+                *) err "Unknown key '$key' (allowed: ENABLED, WEATHER_LAT, WEATHER_LON, WEATHER_CITY)" ;;
+            esac
+            [ -z "$val" ] && [ "$key" != "ENABLED" ] && err "No value given (expected $key=...)"
+            write_config_key "$key" "$val"
+            ok "$key saved to $CONFIG_FILE"
+        done
+        sync_timers
+        ;;
+    *)
+        echo "Config: $CONFIG_FILE"
+        if [ -f "$CONFIG_FILE" ]; then
+            cat "$CONFIG_FILE"
+        else
+            echo "(not created yet — run 'pos entertainment enable <plugin> [interval]' or 'pos entertainment config set ...')"
+        fi
+        echo
+        echo "ENABLED: $(config_value ENABLED)"
+        echo "Intervals: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=..."
+        ;;
+esac

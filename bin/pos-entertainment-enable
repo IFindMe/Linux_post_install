@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: entertainment enable — Enable an auto-trigger for a plugin (systemd user timer)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos entertainment enable <plugin> [interval]
+
+Enable an auto-trigger: writes '<plugin>, <interval>' into the ENABLED list in
+$CONFIG_FILE
+and creates/enables a systemd user timer that runs 'pos entertainment send <plugin>'
+on the schedule. Re-running without an interval keeps the plugin's current one.
+
+Available plugins:
+$(list_plugins "$(plugin_dir)" | sed 's/^/  /')
+
+Intervals: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=...
+Default: $DEFAULT_INTERVAL
+
+Stop it with: pos entertainment disable <plugin>
+
+Examples:
+  pos entertainment enable weather 5m
+  pos entertainment enable gold hourly
+  pos entertainment enable joke
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+[ $# -ge 1 ] || usage
+plugin="$1"
+interval="${2:-}"
+
+resolve_plugin "$(plugin_dir)" "$plugin" >/dev/null
+if [ -n "$interval" ]; then
+    interval_to_oncalendar "$interval" >/dev/null || \
+        err "Invalid interval '$interval' (allowed: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=...)"
+fi
+
+enabled_upsert "$plugin" "$interval"
+sync_timers
+ok "'$plugin' enabled${interval:+ (every $interval)} — schedule synced"

@@ -20,7 +20,7 @@ How this repo works, how to add features, and what to keep in mind when editing.
 | Phase | Script | Responsibility |
 |-------|--------|----------------|
 | Pre | `preinstall.sh` | System packages, apt repos, global binaries (yt-dlp) |
-| Install | `install.sh` | Copies `bin/*` → `/usr/local/bin/` (chmod 755), `lib/common.sh` → `/usr/local/bin/common.sh` |
+| Install | `install.sh` | Copies `bin/*` → `/usr/local/bin/` (chmod 755), `lib/common.sh` + `lib/flags.sh` + `lib/entertainment-lib.sh` → `/usr/local/bin/` (chmod 644) |
 | Post | `postinstall.sh` | User config (SSH keys, PATH, bash completion), systemd services |
 
 Each phase is independent and runs only if the corresponding script exists.
@@ -31,9 +31,9 @@ Each phase is independent and runs only if the corresponding script exists.
 |-----------|---------|-------------|
 | `bin/` | Daily-use CLI tools and wrappers | `/usr/local/bin/` |
 | `apps/<category>/` | Optional desktop app installers | run on demand |
-| `lib/` | Shared library (`common.sh`) | sourced at build time |
+| `lib/` | Shared libraries: `common.sh` (helpers), `flags.sh` (feature flags), `entertainment-lib.sh` (entertainment scheduling) | sourced at build time |
 | `config/` | Gitignored user config files | `~/.config/<app>/` (via postinstall) |
-| `entertainment/` | Public-API plugins for the entertainment module | `/usr/local/share/linux_post_install/entertainment` (via install.sh Phase 2) |
+| `entertainment/` | Public-API plugins for the entertainment module | `/usr/local/bin` (via install.sh Phase 2) |
 | `compose/` | ScaleTail templates (git submodule) | `/usr/local/share/linux_post_install/scale-tail` |
 | `systemd/` | Systemd unit files | `/etc/systemd/system/` (via postinstall) |
 
@@ -179,15 +179,16 @@ make check                    # full self-consistency gate (syntax, exec bits, d
 
 ## Adding an Entertainment Plugin
 
-The `entertainment` module routes public-API data to Telegram via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`).
+The `entertainment` module routes public-API data to Telegram via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`). Auto-triggering is config-driven: `ENABLED` in `entertainment.env` holds `plugin, interval` pairs; the tools `pos entertainment config|enable|disable|status` (`bin/pos-entertainment-*`) reconcile the schedule. All shared logic (ENABLED parsing, interval→schedule mapping, scheduler sync) lives in `lib/entertainment-lib.sh` — sourced by the `pos-entertainment-*` tools (never by plugins). The scheduler is auto-detected: systemd user timers when a user systemd manager exists, otherwise a managed user crontab block.
 
 ### 1. Create the plugin
 
-Drop an executable script in `entertainment/<name>.sh`:
+Drop an executable script in `entertainment/<name>.sh` with a `# POS_PLUGIN: <name>` marker on line 3 (this is what makes it a plugin — the installed runner lists plugins by this marker, not by `.sh` files, since `/usr/local/bin` is shared with other tooling):
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
+# POS_PLUGIN: myplugin
 err() { echo "ERROR: $*" >&2; exit 1; }
 
 command -v curl &>/dev/null || err "curl not found"

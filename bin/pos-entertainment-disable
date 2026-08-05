@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: entertainment disable — Disable a plugin's auto-trigger (remove it from ENABLED)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos entertainment disable <plugin>
+
+Remove a plugin from the ENABLED list in
+$CONFIG_FILE
+and disable/remove its systemd user timer.
+
+Examples:
+  pos entertainment disable weather
+  pos entertainment disable gold
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+[ $# -eq 1 ] || usage
+plugin="$1"
+
+enabled_remove "$plugin"
+sync_timers
+ok "'$plugin' disabled — schedule synced"

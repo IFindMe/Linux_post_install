@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: entertainment status — Show enabled plugins and their timer state
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos entertainment status
+
+Show the enabled plugins (from ENABLED in $CONFIG_FILE)
+and each one's systemd user timer state + next fire time.
+
+Enable plugins with: pos entertainment enable <plugin> [interval]
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+raw="$(config_value ENABLED)"
+echo "Config: $CONFIG_FILE"
+
+if [ -z "$raw" ]; then
+    echo "No plugins enabled."
+    echo "Enable one with: pos entertainment enable <plugin> [interval]"
+    exit 0
+fi
+
+parse_enabled "$raw"
+echo "Enabled plugins:"
+for entry in "${ENABLED_ENTRIES[@]}"; do
+    plugin="${entry%%,*}"; interval="${entry##*,}"
+    [ "$interval" = "$plugin" ] && interval="$DEFAULT_INTERVAL"
+    printf '  %-12s %s\n' "$plugin" "$(interval_label "$interval")"
+done
+
+echo
+echo "Scheduler: $(if systemctl --user show-environment >/dev/null 2>&1; then echo 'systemd user timers'; elif command -v crontab >/dev/null 2>&1; then echo 'cron (user crontab)'; else echo 'none available'; fi)"
+if systemctl --user show-environment >/dev/null 2>&1; then
+    echo "Timers (systemd --user):"
+    systemctl --user list-timers --no-pager 'pos-entertainment-*.timer' 2>/dev/null || \
+        echo "  (no timers)"
+elif command -v crontab >/dev/null 2>&1; then
+    echo "Cron jobs (user crontab):"
+    block="$(cron_block)"
+    if [ -n "$block" ]; then
+        printf '%s\n' "$block" | sed 's/^/  /'
+    else
+        echo "  (none)"
+    fi
+fi

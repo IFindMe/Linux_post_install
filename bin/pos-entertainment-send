@@ -4,38 +4,7 @@ set -euo pipefail
 # POS_FLAGS: --print --markdown
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
-
-# ── Plugin directory lookup ─────────────────────────────────────
-plugin_dir() {
-    if [ -n "${ENTERTAINMENT_DIR:-}" ]; then
-        echo "$ENTERTAINMENT_DIR"
-    elif [ -d "$(dirname "$0")/../entertainment" ]; then
-        echo "$(cd "$(dirname "$0")/../entertainment" && pwd)"
-    elif [ -d "/usr/local/share/linux_post_install/entertainment" ]; then
-        echo "/usr/local/share/linux_post_install/entertainment"
-    else
-        err "entertainment plugin dir not found (set ENTERTAINMENT_DIR)"
-    fi
-}
-
-list_plugins() {
-    local dir="$1" f
-    for f in "$dir"/*; do
-        [ -f "$f" ] && [ -x "$f" ] && echo "$(basename "$f")"
-    done
-}
-
-resolve_plugin() {
-    local dir="$1" name="$2" f
-    [ -n "$name" ] || err "No plugin given"
-    for f in "$dir/$name" "$dir/$name.sh"; do
-        if [ -f "$f" ] && [ -x "$f" ]; then
-            echo "$f"
-            return 0
-        fi
-    done
-    err "Plugin '$name' not found in $dir — try one of: $(list_plugins "$dir" | tr '\n' ' ')"
-}
+source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
 
 usage() {
     local dir plugins

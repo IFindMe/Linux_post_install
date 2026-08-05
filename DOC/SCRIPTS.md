@@ -36,7 +36,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/entertainment-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -169,6 +169,15 @@ flag_clear autostart
 |---------|----------|
 | `FLAGS_DIR` (env) | Default `/usr/local/share/linux_post_install/flags` (dir 755, files 644). Overridable via environment for testing |
 | CLI wrappers | `flag-reader`, `flag-set`, `flag-clear` (see [POS.md](POS.md)) |
+
+---
+
+## lib/entertainment-lib.sh — entertainment module
+
+**File:** `lib/entertainment-lib.sh` (installed to `/usr/local/bin/entertainment-lib.sh`)
+**Purpose:** shared logic for the `pos entertainment` tools — config (`entertainment.env`), `ENABLED` auto-trigger list parsing (`plugin, interval` pairs), plugin lookup by `# POS_PLUGIN:` marker, interval→schedule mapping, and scheduler reconciliation (systemd **user** timers when a user manager is reachable, otherwise a managed user **crontab** block).
+
+Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib/common.sh`). **Plugins must not source it** — their stdout is the sent message.
 
 ---
 

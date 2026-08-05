@@ -215,8 +215,13 @@ The bot token is a secret — it is stored only in `~/.config/linux_post_install
 | `pos entertainment send <plugin> [--print] [--markdown] [args…]` | Run the plugin, send its output to Telegram (silent) |
 | `pos entertainment send <plugin> --print` | Print the output locally; do not send |
 | `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram`) |
+| `pos entertainment config` | Show the config file (`~/.config/linux_post_install/entertainment.env`) |
+| `pos entertainment config set KEY=VALUE…` | Set keys (e.g. `ENABLED`, `WEATHER_LAT`) and re-sync timers |
+| `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + create/enable its systemd **user** timer |
+| `pos entertainment disable <plugin>` | Remove plugin from `ENABLED` + disable/remove its timer |
+| `pos entertainment status` | Enabled plugins + timer state + next fire time |
 
-**Plugin lookup order:** `$ENTERTAINMENT_DIR` → repo `entertainment/` → `/usr/local/share/linux_post_install/entertainment/` (installed by `install.sh` Phase 2). A plugin name matches the file name with or without the `.sh` suffix.
+**Plugin lookup order:** `$ENTERTAINMENT_DIR` → repo `entertainment/` → `/usr/local/bin/` (installed by `install.sh` Phase 2, beside the runner). A plugin name matches the file name with or without the `.sh` suffix.
 
 Plugins:
 
@@ -224,12 +229,32 @@ Plugins:
 |--------|-----------|--------|
 | `weather` | Open-Meteo (no API key) | `~/.config/linux_post_install/entertainment.env`: `WEATHER_LAT`, `WEATHER_LON` (required), `WEATHER_CITY` (optional label) |
 | `joke` | icanhazdadjoke.com (no API key) | None |
+| `gold` | goldprice.dev (no API key, anonymous free tier) | None |
 
-**Config auto-install:** `postinstall.sh` copies the repo's `config/entertainment.env` (default: Al-Hasakah, Syria) to `~/.config/linux_post_install/entertainment.env` on install — but only if you haven't already created your own (no clobber). Override the default by creating/editing that file.
+**Config auto-install:** `postinstall.sh` copies the repo's `config/entertainment.env` (a commented template showing each key's syntax) to `~/.config/linux_post_install/entertainment.env` on install — but only if you haven't already created your own (no clobber), and prints the template so you can fill in your location. Fill in `WEATHER_LAT`/`WEATHER_LON` (and optionally `WEATHER_CITY`) to enable the weather plugin.
 
-**Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`). It must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). If it needs coordinates/tokens, read them from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence). No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `command -v … || exit 1`.
+**Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`) with a `# POS_PLUGIN: <name>` marker on line 3 — the runner lists and validates plugins by this marker, so non-plugin `.sh` files in the shared `/usr/local/bin` are ignored. The plugin must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). If it needs coordinates/tokens, read them from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence). No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `command -v … || exit 1`.
 
-**Automation:** the runner is headless/timer-friendly — no TTY prompts, exit 0 on success / 1 on failure. A systemd timer (e.g. hourly) can call `pos entertainment send weather` directly. Note the config files live under the user's `$HOME`, so the timer must run as that user (a systemd **user** unit, or a system unit with `Environment=HOME=/home/<user>`).
+**Automation (auto-trigger):** enable plugins on a schedule via the `ENABLED` key in the config — a comma-separated list of `plugin, interval` pairs:
+
+```
+ENABLED="weather, 5m gold, 1h joke, daily"
+```
+
+`pos entertainment enable <plugin> [interval]` appends/updates one entry and re-syncs; `pos entertainment disable <plugin>` removes it; `pos entertainment config set ENABLED="…"` replaces the whole list. The scheduler backend is auto-detected on each sync:
+
+- **systemd** (when a user systemd manager is reachable): one **user timer** per enabled plugin (`~/.config/systemd/user/pos-entertainment-<plugin>.{service,timer}`), running `pos entertainment send <plugin>` as your user on that schedule (`OnCalendar` + `Persistent=true`). `pos entertainment enable` also tries `sudo loginctl enable-linger $USER` once so timers fire without login.
+- **cron** (fallback when no systemd user manager, e.g. this dev box): a managed block in your user crontab (`# POS-ENTERTAINMENT-BEGIN`…`END`), one line per plugin. Cron runs as your user and fires without login.
+
+Either way the job runs as you, so it reads your `$HOME` configs (weather location, Telegram token) natively — no `Environment=HOME=` hacks.
+
+Intervals: `5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly`, or a raw `OnCalendar=…` spec (systemd mode only; cron mode uses the named intervals). Default when omitted: `daily`.
+
+`pos entertainment status` shows the enabled plugins, the detected scheduler, and each plugin's interval + next/next-ish fire time (`systemctl --user list-timers` or the crontab block).
+
+Notes:
+- The runner is headless/timer-friendly — no TTY prompts, exit 0 on success / 1 on failure.
+- Scheduling is per-user for the user who runs `enable`; if you manage a different machine's user (e.g. via `runuser`/`sudo -u`), run the `enable`/`disable` commands as that user.
 
 ### flags
 

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Entertainment plugin: current weather via Open-Meteo (no API key).
+# POS_PLUGIN: weather
 # Contract: stdout is the message sent by 'pos entertainment send weather'.
 
 err() { echo "ERROR: $*" >&2; exit 1; }

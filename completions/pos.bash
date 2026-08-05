@@ -86,6 +86,19 @@ _pos() {
         COMPREPLY=($(compgen -W "${_pos_flags[$tool]:-} --help" -- "$cur"))
     }
 
+    _pos_entertainment_plugins() {
+        local d f name out=()
+        for d in /usr/local/bin "$pos_dir/../entertainment"; do
+            [ -d "$d" ] || continue
+            for f in "$d"/*.sh; do
+                [ -f "$f" ] || continue
+                name="$(grep -m1 '^# POS_PLUGIN:' "$f" 2>/dev/null | sed 's/^# POS_PLUGIN:[[:space:]]*//;s/[[:space:]]*$//')"
+                [ -n "$name" ] && out+=("$name")
+            done
+        done
+        COMPREPLY=($(compgen -W "${out[*]}" -- "$cur"))
+    }
+
     # ── Dispatch ───────────────────────────────────────────────
     case "${#words[@]}" in
         2)
@@ -117,6 +130,12 @@ _pos() {
                     ;;
                 entertainment-send)
                     _pos_complete_flags entertainment-send
+                    ;;
+                entertainment-enable|entertainment-disable)
+                    _pos_entertainment_plugins
+                    ;;
+                entertainment-config)
+                    COMPREPLY=($(compgen -W "set --help" -- "$cur"))
                     ;;
                 network-hotspot)
                     _pos_complete_flags network-hotspot
