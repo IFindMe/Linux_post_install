@@ -42,6 +42,8 @@ CATEGORIES
   media      mp3 | mp4
   system     firewall | backup
   ssh        load-keys
+  communication
+             telegram
   vbox       create | enter | stop | start | rm | ls
 
 EXAMPLES
@@ -62,6 +64,9 @@ EXAMPLES
   pos system backup --service             Pick a folder from /srv or ~/srv
 
   pos ssh load-keys                       Load all SSH keys into agent
+
+  pos communication telegram --send "Backup done"
+                                          Send a Telegram message
 
   pos vbox create lab1                    Create disposable Docker VM
   pos vbox create lab1 --dir .            Create VM using current directory

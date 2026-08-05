@@ -45,6 +45,7 @@ Linux_post_install/
 │   ├── pos-system-firewall # Interactive UFW manager (menu-driven, 284 lines)
 │   ├── pos-system-backup   # Encrypted folder snapshots (tar + gpg AES-256, --service) (115 lines)
 │   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
+│   ├── pos-communication-telegram  # Send Telegram messages via Bot API
 │   ├── pos-vbox            # Disposable Docker-based "VMs"
 │   ├── pos-network-hotspot # Wi-Fi hotspot (create_ap + wihotspot-gui)
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
@@ -201,6 +202,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | backup | `pos-system-backup` | Encrypted folder snapshots (`tar` + gpg AES-256; `--service` picks from `/srv` and `~/srv`) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load SSH keys into agent |
+| communication | telegram | `pos-communication-telegram` | Send Telegram messages via Bot API (`--send`, `test`, `config set`); config in `~/.config/linux_post_install/telegram.env` |
 | vbox | create | `pos-vbox create` | Create disposable VM (asks "Enter now?") |
 | vbox | enter | `pos-vbox enter` | Start and exec into container |
 | vbox | ls | `pos-vbox ls` | List vbox-managed containers only (label-filtered) |
@@ -246,7 +248,7 @@ Sourced by most scripts. Provides:
 source "$(dirname "$0")/../lib/common.sh"
 ```
 
-**Scripts that do NOT source common.sh** (self-contained): `bin/pos`, `pos-network-ip`, `pos-network-checkport`, `pos-network-scan`, `pos-media-mp3`, `pos-media-mp4`, `pos-ssh-load-keys`, `pos-system-firewall`.
+**Scripts that do NOT source common.sh** (self-contained): `bin/pos`, `pos-network-ip`, `pos-network-checkport`, `pos-network-scan`, `pos-media-mp3`, `pos-media-mp4`, `pos-ssh-load-keys`, `pos-system-firewall`, `pos-communication-telegram`.
 
 ---
 
@@ -444,7 +446,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `bin/pos` | 146 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos` | 153 | CLI dispatcher with smart arg matching + logging |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-system-backup` | 115 | Encrypted folder snapshots: path mode + `--service` (`/srv`, `~/srv` picker), tar + gpg AES-256 |
@@ -452,6 +454,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-health` | 109 | Quick health dashboard |
 | `bin/pos-vbox` | 156 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
 | `bin/pos-network-hotspot` | 91 | Wi-Fi hotspot: `create_ap` (start with background prompt/`--foreground`, stop, status) + `wihotspot-gui` |
+| `bin/pos-communication-telegram` | 138 | Telegram sender via Bot API: `--send`, `test`, `config set`; token masked; config `~/.config/linux_post_install/telegram.env` |
 | `completions/pos.bash` | 118 | Dynamic bash completion |
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

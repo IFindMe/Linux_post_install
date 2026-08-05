@@ -11,7 +11,7 @@ It is a **personal toolkit** — a bootstrap script, a unified `pos` CLI for eve
 **What you get:**
 
 - 25+ system packages installed automatically
-- The `pos` CLI: network, Docker, media, system, SSH, and vbox tools
+- The `pos` CLI: network, Docker, media, system, SSH, communication (Telegram), and vbox tools
 - Wi-Fi hotspot tools (`create_ap`, `wihotspot-gui`) via `pos network hotspot`
 - 15 optional desktop apps (VS Code, Brave, OBS, Tailscale, …) — pick what you want
 - 119+ self-hosted services with Tailscale access (Jellyfin, Home Assistant, …)

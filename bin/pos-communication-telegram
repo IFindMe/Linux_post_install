@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_FILE="$CONFIG_DIR/telegram.env"
+API="https://api.telegram.org"
+
+usage() {
+    cat <<EOF
+Usage: pos communication telegram [command] [args]
+
+Send Telegram messages via the Bot API.
+
+Commands:
+  --send "text"             Send a text message to the configured chat
+  --send "text" --token <t> --chat-id <id>   Override token/chat for one send
+  test                      Send a test message using the current config
+  config                    Show current config (token masked)
+  config set KEY=VALUE      Set TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID
+
+Config file: $CONFIG_FILE
+Keys: TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID
+
+Precedence: CLI flags > environment > config file.
+
+Examples:
+  pos communication telegram config set TELEGRAM_BOT_TOKEN=123456:ABC-DEF
+  pos communication telegram config set TELEGRAM_CHAT_ID=987654321
+  pos communication telegram --send "Backup finished"
+  pos communication telegram test
+EOF
+    exit 0
+}
+
+err() { echo "ERROR: $*" >&2; exit 1; }
+
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+mask_token() {
+    local t="$1"
+    [ -z "$t" ] && { echo "(not set)"; return; }
+    if [ "${#t}" -le 12 ]; then
+        echo "${t:0:4}... (${#t} chars)"
+    else
+        echo "${t:0:6}...${t: -4} (${#t} chars)"
+    fi
+}
+
+cmd_send() {
+    local text="$1"
+    [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
+    [ -z "${TELEGRAM_CHAT_ID:-}" ] && err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
+    curl -fsS -m 20 -X POST "$API/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+        --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+        --data-urlencode "text=${text}" >/dev/null
+    echo "[+] Message sent to chat ${TELEGRAM_CHAT_ID}"
+}
+
+cmd_config() {
+    load_config
+    echo "Config: $CONFIG_FILE"
+    echo "  TELEGRAM_BOT_TOKEN = $(mask_token "${TELEGRAM_BOT_TOKEN:-}")"
+    echo "  TELEGRAM_CHAT_ID   = ${TELEGRAM_CHAT_ID:-}"
+}
+
+cmd_config_set() {
+    local kv="$1"
+    local key="${kv%%=*}"
+    local val="${kv#*=}"
+    case "$key" in
+        TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID) ;;
+        *) err "Unknown key '$key' (allowed: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)" ;;
+    esac
+    [ -z "$val" ] && err "No value given (expected $key=...)"
+
+    mkdir -p "$CONFIG_DIR"
+    if [ -f "$CONFIG_FILE" ]; then
+        if grep -q "^${key}=" "$CONFIG_FILE"; then
+            sed -i "s|^${key}=.*|${key}=${val}|" "$CONFIG_FILE"
+        else
+            echo "${key}=${val}" >>"$CONFIG_FILE"
+        fi
+    else
+        echo "${key}=${val}" >"$CONFIG_FILE"
+    fi
+    chmod 600 "$CONFIG_FILE"
+    echo "[+] $key saved to $CONFIG_FILE"
+}
+
+cmd="${1:-}"
+
+case "$cmd" in
+    -h|--help) usage ;;
+    --send)
+        shift
+        [ $# -ge 1 ] || usage
+        text="$1"
+        shift
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --token)   TELEGRAM_BOT_TOKEN="$2"; shift 2 ;;
+                --chat-id) TELEGRAM_CHAT_ID="$2"; shift 2 ;;
+                *) err "Unknown option '$1'" ;;
+            esac
+        done
+        load_config
+        cmd_send "$text"
+        ;;
+    test)
+        load_config
+        cmd_send "Test message from pos $(date '+%Y-%m-%d %H:%M:%S')"
+        ;;
+    config)
+        shift
+        case "${1:-}" in
+            set) shift; [ $# -eq 1 ] || usage; cmd_config_set "$1" ;;
+            *) cmd_config ;;
+        esac
+        ;;
+    *)
+        echo "ERROR: Unknown telegram command '$cmd'"
+        echo "Run 'pos communication telegram --help' for usage."
+        exit 1
+        ;;
+esac

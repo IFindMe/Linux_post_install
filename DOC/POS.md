@@ -10,6 +10,7 @@
   - [media](#media)
   - [system](#system)
   - [ssh](#ssh)
+  - [communication](#communication)
   - [vbox](#vbox)
   - [flags](#flags)
 - [Legacy wrappers](#legacy-wrappers)
@@ -144,6 +145,25 @@ Global config keys:
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
 | `pos ssh load-keys` | `bin/pos-ssh-load-keys` | Load all `~/.ssh/id_*` private keys into the ssh-agent | Uses `SSH_AUTH_SOCK` (default `/run/ssh-agent/socket`, provided by `ssh-agent.service`); skips `.pub`, `known_hosts`, `authorized_keys`, `config`; validates keys before adding |
+
+### communication
+
+| Command | File | Purpose | Configuration |
+|---------|------|---------|---------------|
+| `pos communication telegram --send "text"` | `bin/pos-communication-telegram` | Send a text message to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
+
+`pos communication telegram` in detail:
+
+| Command | Behavior |
+|---------|----------|
+| `pos communication telegram --send "text"` | POSTs `sendMessage` to the Bot API (20s timeout); prints `[+] Message sent to chat <id>` or fails with a nonzero exit |
+| `pos communication telegram --send "text" --token <t> --chat-id <id>` | One-shot override of token/chat ID |
+| `pos communication telegram test` | Sends a canned test message using the current config |
+| `pos communication telegram config` | Shows current config (bot token masked) |
+| `pos communication telegram config set TELEGRAM_BOT_TOKEN=...` | Saves a bot token (600 perms) |
+| `pos communication telegram config set TELEGRAM_CHAT_ID=...` | Saves the target chat ID |
+
+The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Requires network access to `api.telegram.org`.
 
 ### vbox
 
