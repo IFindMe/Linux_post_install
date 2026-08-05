@@ -46,7 +46,7 @@ Linux_post_install/
 │   ├── pos-system-backup   # Encrypted folder snapshots (tar + gpg AES-256, --service) (115 lines)
 │   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
 │   ├── pos-communication-telegram  # Send Telegram messages via Bot API
-│   ├── pos-vbox            # Disposable Docker-based "VMs"
+│   ├── pos-docker-vbox     # Disposable Docker-based "VMs" (pos docker vbox)
 │   ├── pos-network-hotspot # Wi-Fi hotspot (create_ap + wihotspot-gui)
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
 │   ├── flag-set            # Set a feature flag (optionally with a value)
@@ -208,18 +208,15 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | backup | `pos-system-backup` | Encrypted folder snapshots (`tar` + gpg AES-256; `--service` picks from `/srv` and `~/srv`) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load SSH keys into agent |
 | communication | telegram | `pos-communication-telegram` | Send Telegram messages via Bot API (`--send`, `test`, `config set`); config in `~/.config/linux_post_install/telegram.env` |
-| vbox | create | `pos-vbox create` | Create disposable VM (asks "Enter now?") |
-| vbox | enter | `pos-vbox enter` | Start and exec into container |
-| vbox | ls | `pos-vbox ls` | List vbox-managed containers only (label-filtered) |
-| vbox | start/stop/rm | `pos-vbox start/stop/rm` | Lifecycle management |
+| docker | vbox | `pos-docker-vbox` | Disposable Docker "VMs" (`create/enter/start/stop/rm/ls`; label-filtered, auto-enter prompt) |
 
 ### Legacy Wrappers
 
 These forward to `pos` transparently: `wr-ip`, `wr-checkport`, `wr-scan-ping`, `wr-docker`, `wr-compose`, `wr-ufw`, `mp3`, `mp4`, `vbox`, `ssh-load-all`.
 
-### pos vbox Details
+### pos docker vbox Details
 
-`pos-vbox` manages disposable Docker containers as lightweight VMs:
+`pos-docker-vbox` manages disposable Docker containers as lightweight VMs:
 
 - **Container labeling:** All created containers get `linux_post_install.vbox=true` label
 - **`ls` filtering:** `docker ps --filter label=linux_post_install.vbox=true` — only shows vbox-managed containers
@@ -461,16 +458,16 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `bin/pos` | 154 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos` | 153 | CLI dispatcher with smart arg matching + logging |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-system-backup` | 115 | Encrypted folder snapshots: path mode + `--service` (`/srv`, `~/srv` picker), tar + gpg AES-256 |
 | `bin/pos-docker-ps` | 127 | Enhanced container overview |
 | `bin/pos-docker-health` | 109 | Quick health dashboard |
-| `bin/pos-vbox` | 156 | Docker-based disposable VMs (label-filtered, auto-enter prompt) |
+| `bin/pos-docker-vbox` | 156 | Docker-based disposable VMs (`pos docker vbox`; label-filtered, auto-enter prompt) |
 | `bin/pos-network-hotspot` | 91 | Wi-Fi hotspot: `create_ap` (start with background prompt/`--foreground`, stop, status) + `wihotspot-gui` |
 | `bin/pos-communication-telegram` | 138 | Telegram sender via Bot API: `--send`, `test`, `config set`; token masked; config `~/.config/linux_post_install/telegram.env` |
-| `completions/pos.bash` | 118 | Dynamic bash completion |
+| `completions/pos.bash` | 122 | Dynamic bash completion |
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
 ---
@@ -491,6 +488,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Add bash completion | Edit `completions/pos.bash` |
 | Modify Docker Compose logic | Edit `bin/pos-docker-compose` |
 | Modify Docker health check | Edit `bin/pos-docker-health` |
+| Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
 | Modify install phases/flags | Edit arg parsing in `install.sh` |

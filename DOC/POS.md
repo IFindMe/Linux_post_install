@@ -11,7 +11,6 @@
   - [system](#system)
   - [ssh](#ssh)
   - [communication](#communication)
-  - [vbox](#vbox)
   - [flags](#flags)
 - [Legacy wrappers](#legacy-wrappers)
 
@@ -125,6 +124,20 @@ Global config keys:
 | `DNS_SERVER` | no | `9.9.9.9` | DNS server |
 | `SERVICES_BASE` | no | `/srv` | Deployment root |
 
+#### Docker vbox
+
+**File:** `bin/pos-docker-vbox`
+**Purpose:** manage disposable Docker containers as lightweight "VMs". Each container gets a bind-mounted host directory so files persist after the container is removed. Containers carry the label `linux_post_install.vbox=true`.
+
+| Command | Behavior |
+|---------|----------|
+| `pos docker vbox create <name> [image] [--dir <path>]` | Creates a container from `ubuntu:22.04` (or the given image), bind-mounting `~/<name>` (or `--dir`, or `.` for cwd) as the working directory; prompts to enter immediately |
+| `pos docker vbox enter <name>` | Shell into the container (auto-starts it if stopped); detects the working dir from the container mounts |
+| `pos docker vbox start/stop/rm <name>` | Start, stop, or force-remove the container |
+| `pos docker vbox ls` | List vbox containers only (label filter) |
+
+The standalone `vbox` command still works and forwards to `pos docker vbox` (see [Legacy wrappers](#legacy-wrappers)).
+
 ### media
 
 | Command | File | Purpose | Configuration |
@@ -165,18 +178,6 @@ Global config keys:
 
 The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Requires network access to `api.telegram.org`.
 
-### vbox
-
-**File:** `bin/pos-vbox`
-**Purpose:** manage disposable Docker containers as lightweight "VMs". Each container gets a bind-mounted host directory so files persist after the container is removed. Containers carry the label `linux_post_install.vbox=true`.
-
-| Command | Behavior |
-|---------|----------|
-| `pos vbox create <name> [image] [--dir <path>]` | Creates a container from `ubuntu:22.04` (or the given image), bind-mounting `~/<name>` (or `--dir`, or `.` for cwd) as the working directory; prompts to enter immediately |
-| `pos vbox enter <name>` | Shell into the container (auto-starts it if stopped); detects the working dir from the container mounts |
-| `pos vbox start/stop/rm <name>` | Start, stop, or force-remove the container |
-| `pos vbox ls` | List vbox containers only (label filter) |
-
 ### flags
 
 Feature-flag management CLIs (see [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libflagssh--feature-flags)):
@@ -205,5 +206,5 @@ Thin 2-line scripts that `exec pos … "$@"`. All of them still work:
 | `wr-ufw` | `pos system firewall` |
 | `mp3` | `pos media mp3` |
 | `mp4` | `pos media mp4` |
-| `vbox` | `pos vbox` |
+| `vbox` | `pos docker vbox` |
 | `ssh-load-all` | `pos ssh load-keys` |

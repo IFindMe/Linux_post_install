@@ -325,7 +325,7 @@ pos docker compose up jellyfin
 
 ---
 
-## 6. `pos-vbox` Lifecycle
+## 6. `pos docker vbox` Lifecycle
 
 ```
 create lab1

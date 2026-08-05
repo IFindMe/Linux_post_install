@@ -63,7 +63,7 @@ _pos() {
         COMPREPLY=($(compgen -W "ls installed up down restart logs update config" -- "$cur"))
     }
 
-    _pos_complete_vbox_cmds() {
+    _pos_complete_docker_vbox_cmds() {
         COMPREPLY=($(compgen -W "create enter stop start rm ls" -- "$cur"))
     }
 
@@ -93,8 +93,8 @@ _pos() {
                             ;;
                     esac
                     ;;
-                vbox-*)
-                    _pos_complete_vbox_cmds
+                docker-vbox)
+                    _pos_complete_docker_vbox_cmds
                     ;;
             esac
             ;;
@@ -107,8 +107,12 @@ _pos() {
                             ;;
                     esac
                     ;;
-                vbox-create|vbox-enter|vbox-stop|vbox-start|vbox-rm)
-                    _pos_complete_docker_vbox_names
+                docker-vbox)
+                    case "${words[3]}" in
+                        create|enter|stop|start|rm)
+                            _pos_complete_docker_vbox_names
+                            ;;
+                    esac
                     ;;
             esac
             ;;

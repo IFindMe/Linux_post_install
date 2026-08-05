@@ -5,12 +5,12 @@ source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")
 usage() {
     cat <<EOF
 Usage:
-  pos vbox create <name> [image] [--dir <path>]
-  pos vbox enter  <name>
-  pos vbox stop   <name>
-  pos vbox start  <name>
-  pos vbox rm     <name>
-  pos vbox ls
+  pos docker vbox create <name> [image] [--dir <path>]
+  pos docker vbox enter  <name>
+  pos docker vbox stop   <name>
+  pos docker vbox start  <name>
+  pos docker vbox rm     <name>
+  pos docker vbox ls
 
 Manage disposable Docker containers as lightweight VMs.
 
@@ -22,15 +22,15 @@ Options:
                  Use "." for current directory
 
 Examples:
-  pos vbox create lab1
-  pos vbox create lab1 --dir .
-  pos vbox create lab1 --dir /mnt/data/lab1
-  pos vbox create kali kalilinux/kali-rolling
-  pos vbox enter lab1
-  pos vbox stop lab1
-  pos vbox start lab1
-  pos vbox rm lab1
-  pos vbox ls
+  pos docker vbox create lab1
+  pos docker vbox create lab1 --dir .
+  pos docker vbox create lab1 --dir /mnt/data/lab1
+  pos docker vbox create kali kalilinux/kali-rolling
+  pos docker vbox enter lab1
+  pos docker vbox stop lab1
+  pos docker vbox start lab1
+  pos docker vbox rm lab1
+  pos docker vbox ls
 EOF
     exit 0
 }

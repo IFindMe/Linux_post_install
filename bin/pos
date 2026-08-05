@@ -38,13 +38,12 @@ USAGE
 
 CATEGORIES
   network    ip | checkport | scan | hotspot
-  docker     ps | compose
+  docker     ps | compose | vbox
   media      mp3 | mp4
   system     firewall | backup
   ssh        load-keys
   communication
              telegram
-  vbox       create | enter | stop | start | rm | ls
 
 EXAMPLES
   pos network ip                          Show interfaces, routes, public IP
@@ -68,10 +67,10 @@ EXAMPLES
   pos communication telegram --send "Backup done"
                                           Send a Telegram message
 
-  pos vbox create lab1                    Create disposable Docker VM
-  pos vbox create lab1 --dir .            Create VM using current directory
-  pos vbox enter lab1                     Shell into a Docker VM
-  pos vbox ls                             List Docker VMs
+  pos docker vbox create lab1              Create disposable Docker VM
+  pos docker vbox create lab1 --dir .      Create VM using current directory
+  pos docker vbox enter lab1               Shell into a Docker VM
+  pos docker vbox ls                       List Docker VMs
 
 HELP
   pos help <command>    Show help for a command
