@@ -195,6 +195,7 @@ Subcommands that need input prompt interactively when args are omitted.
 |---------|----------|
 | `pos communication telegram --send "text"` | POSTs `sendMessage` to the Bot API (20s timeout); prints `[+] Message sent to chat <id>` or fails with a nonzero exit |
 | `pos communication telegram --send "text" --token <t> --chat-id <id>` | One-shot override of token/chat ID |
+| `pos communication telegram --send "text" --parse-mode <mode>` | Send with Telegram formatting; `<mode>` is `plain` (default), `markdown`, or `html` (passed as `parse_mode` to the API). Markdown/HTML use raw Telegram syntax — unescaped characters may be rejected by the API (400) |
 | `pos communication telegram test` | Sends a canned test message using the current config |
 | `pos communication telegram config` | Shows current config (bot token masked) |
 | `pos communication telegram config set TELEGRAM_BOT_TOKEN=...` | Saves a bot token (600 perms) |

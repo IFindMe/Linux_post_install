@@ -16,6 +16,7 @@ Send Telegram messages via the Bot API.
 Commands:
   --send "text"             Send a text message to the configured chat
   --send "text" --token <t> --chat-id <id>   Override token/chat for one send
+  --send "text" --parse-mode <mode>   Format mode: plain (default), markdown, html
   test                      Send a test message using the current config
   config                    Show current config (token masked)
   config set KEY=VALUE      Set TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID
@@ -29,6 +30,7 @@ Examples:
   pos communication telegram config set TELEGRAM_BOT_TOKEN=123456:ABC-DEF
   pos communication telegram config set TELEGRAM_CHAT_ID=987654321
   pos communication telegram --send "Backup finished"
+  pos communication telegram --send "*Backup finished*" --parse-mode markdown
   pos communication telegram test
 EOF
     exit 0
@@ -62,12 +64,12 @@ mask_token() {
 }
 
 cmd_send() {
-    local text="$1"
+    local text="$1" parse_mode="${2:-}"
     [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
     [ -z "${TELEGRAM_CHAT_ID:-}" ] && err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
-    curl -fsS -m 20 -X POST "$API/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-        --data-urlencode "text=${text}" >/dev/null
+    local args=(--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${text}")
+    [ -n "$parse_mode" ] && args+=(--data-urlencode "parse_mode=${parse_mode}")
+    curl -fsS -m 20 -X POST "$API/bot${TELEGRAM_BOT_TOKEN}/sendMessage" "${args[@]}" >/dev/null
     echo "[+] Message sent to chat ${TELEGRAM_CHAT_ID}"
 }
 
@@ -111,15 +113,23 @@ case "$cmd" in
         [ $# -ge 1 ] || usage
         text="$1"
         shift
+        parse_mode=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 --token)   TELEGRAM_BOT_TOKEN="$2"; shift 2 ;;
                 --chat-id) TELEGRAM_CHAT_ID="$2"; shift 2 ;;
+                --parse-mode)
+                    case "$2" in
+                        plain|markdown|html) ;;
+                        *) err "Unknown parse mode '$2' (allowed: plain, markdown, html)" ;;
+                    esac
+                    parse_mode="$2"; shift 2 ;;
                 *) err "Unknown option '$1'" ;;
             esac
         done
+        [ "$parse_mode" = "plain" ] && parse_mode=""
         load_config
-        cmd_send "$text"
+        cmd_send "$text" "$parse_mode"
         ;;
     test)
         load_config
