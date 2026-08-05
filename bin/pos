@@ -25,6 +25,25 @@ _pos_commands() {
     echo "${cmds[*]}"
 }
 
+# ── Category list (sorted, filename-derived) ─────────────────────
+_pos_category_list() {
+    local -A cats=()
+    local cmd cat f
+    for f in "$self"/pos-*; do
+        [ -x "$f" ] || continue
+        cmd="${f##*/pos-}"
+        cat="${cmd%%-*}"
+        [ "$cat" = "$cmd" ] && continue
+        cats["$cat"]+="${cmd#*-} "
+    done
+    local c line subs joined
+    for c in $(printf '%s\n' "${!cats[@]}" | sort); do
+        subs=(${cats[$c]})
+        joined="$(IFS='|'; echo "${subs[*]}")"
+        printf "  %-14s%s\n" "$c" "$joined"
+    done
+}
+
 # ── Category helpers ────────────────────────────────────────────
 _pos_category_exists() {
     local cat="${1:-}" f
@@ -57,7 +76,9 @@ _pos_category_help() {
 
 # ── Help text ──────────────────────────────────────────────────
 usage() {
-    cat <<'EOF'
+    local cats
+    cats="$(_pos_category_list)"
+    cat <<EOF
 pos — Personal OS Toolkit
 
   A unified CLI for network, docker, media, system,
@@ -67,15 +88,7 @@ USAGE
   pos <category> <command> [args]
 
 CATEGORIES
-  network    ip | checkport | scan | hotspot
-  docker     ps | compose | health | vbox
-  media      mp3 | mp4
-  system     firewall | backup
-  ssh        load-keys
-  usb        server
-  communication
-             telegram
-
+$cats
 EXAMPLES
   pos network ip                          Show interfaces, routes, public IP
   pos network checkport 10.0.0.1:80       Check if a TCP port is open

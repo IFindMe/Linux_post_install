@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: media mp4 — Download video as MP4 (interactive format select)
 
 usage() {
     cat <<EOF

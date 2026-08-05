@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: network hotspot — Wi-Fi hotspot via create_ap + wihotspot-gui
+# POS_FLAGS: --foreground
 
 LOGFILE=/var/log/linux_post_install_hotspot.log
 

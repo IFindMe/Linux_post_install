@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: ssh load-keys — Load all SSH keys into the agent
 
 usage() {
     cat <<EOF

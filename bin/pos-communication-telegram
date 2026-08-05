@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: communication telegram — Send Telegram messages via Bot API (--send, test, config set)
+# POS_FLAGS: --send
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"

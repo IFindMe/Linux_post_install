@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: docker compose — Docker Compose service manager (ls/up/down/restart/logs/update/config)
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
 SCALE_DIR="/usr/local/share/linux_post_install/scale-tail/services"

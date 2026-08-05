@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Bash completion for pos — dynamically discovers pos-* subcommands
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
+# GEN:START posflags
+declare -A _pos_flags
+_pos_flags[communication-telegram]="--send"
+_pos_flags[network-hotspot]="--foreground"
+_pos_flags[system-backup]="--service"
+_pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
+# GEN:END posflags
 
 _pos() {
     local cur prev words cword
@@ -73,8 +80,9 @@ _pos() {
         COMPREPLY=($(compgen -W "$names" -- "$cur"))
     }
 
-    _pos_complete_usb_server_flags() {
-        COMPREPLY=($(compgen -W "--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version --help" -- "$cur"))
+    _pos_complete_flags() {
+        local tool="$1"
+        COMPREPLY=($(compgen -W "${_pos_flags[$tool]:-} --help" -- "$cur"))
     }
 
     # ── Dispatch ───────────────────────────────────────────────
@@ -101,7 +109,16 @@ _pos() {
                     _pos_complete_docker_vbox_cmds
                     ;;
                 usb-server)
-                    _pos_complete_usb_server_flags
+                    _pos_complete_flags usb-server
+                    ;;
+                communication-telegram)
+                    _pos_complete_flags communication-telegram
+                    ;;
+                network-hotspot)
+                    _pos_complete_flags network-hotspot
+                    ;;
+                system-backup)
+                    _pos_complete_flags system-backup
                     ;;
             esac
             ;;

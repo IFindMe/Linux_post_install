@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: media mp3 — Download audio as MP3 (yt-dlp)
 
 usage() {
     cat <<EOF

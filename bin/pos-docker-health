@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: docker health — One-glance container health dashboard (exits 1 if unhealthy)
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
 usage() {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: network checkport — Check TCP port connectivity
 
 usage() {
     cat <<EOF

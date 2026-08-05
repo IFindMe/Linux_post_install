@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# POS: network scan — Parallel ping sweep of CIDR
 
 usage() {
     cat <<EOF
