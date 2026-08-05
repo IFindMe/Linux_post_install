@@ -50,7 +50,7 @@ Every non-interactive `pos` invocation logs to `~/.local/share/linux_post_instal
 
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
-| `pos network ip` | `bin/pos-network-ip` | Show interfaces, default route, public IP | None. Public IP via `https://ifconfig.me` (5s timeout) |
+| `pos network ip` | `bin/pos-network-ip` | Show interfaces, default route, public IP + location | None. Public IP via `https://ifconfig.me`; location via `ip-api.com` (5s timeouts) |
 | `pos network checkport <ip:port>` | `bin/pos-network-checkport` | Check if a TCP port is open | None. Uses `/dev/tcp` with a 2s timeout; exit 0/1 via OPEN/CLOSED |
 | `pos network scan <cidr> [--full] [--retries N]` | `bin/pos-network-scan` | Two-phase nmap scan | See below |
 | `pos network hotspot [cmd]` | `bin/pos-network-hotspot` | Wi-Fi hotspot via `create_ap` (CLI) or `wihotspot-gui` (GUI) | Uses the precompiled binaries from `x64_bin/`; see below |

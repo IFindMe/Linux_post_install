@@ -34,7 +34,7 @@ Linux_post_install/
 │
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
-│   ├── pos-network-ip      # Show interfaces, routes, public IP
+│   ├── pos-network-ip      # Show interfaces, routes, public IP + location
 │   ├── pos-network-checkport  # TCP port checker
 │   ├── pos-network-scan    # Parallel ping sweep of CIDR subnet
 │   ├── pos-docker-ps       # Enhanced docker ps (health, IPs, ports, uptime)
@@ -196,7 +196,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
-| network | ip | `pos-network-ip` | Show interfaces, routes, public IP |
+| network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |
 | network | checkport | `pos-network-checkport` | Check TCP port connectivity |
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
 | docker | ps | `pos-docker-ps` | Enhanced container overview |

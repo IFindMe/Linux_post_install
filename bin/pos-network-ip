@@ -42,5 +42,27 @@ SEP
 echo "Public IP"
 SEP
 
-curl -4 -s --max-time 5 https://ifconfig.me 2>/dev/null || echo "Unavailable"
+PUBLIC_IP=$(curl -4 -s --max-time 5 https://ifconfig.me 2>/dev/null) || true
+
+if [ -n "${PUBLIC_IP:-}" ]; then
+    echo "$PUBLIC_IP"
+    GEO=$(curl -4 -s --max-time 5 "http://ip-api.com/json/${PUBLIC_IP}?fields=status,country,regionName,city,isp" 2>/dev/null) || true
+    if [ -n "${GEO:-}" ]; then
+        location=$(echo "$GEO" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if d.get('status') == 'success':
+    print(f\"{d['city']}, {d['regionName']}, {d['country']} ({d['isp']})\")
+" 2>/dev/null) || true
+        if [ -n "${location:-}" ]; then
+            printf "%-20s %s\n" "Location" "$location"
+        else
+            echo "Location: Unavailable"
+        fi
+    else
+        echo "Location: Unavailable"
+    fi
+else
+    echo "Unavailable"
+fi
 echo
