@@ -49,7 +49,7 @@ pos docker compose up jellyfin
 
 All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 
-`pos help <full command>` shows a tool's help, e.g. `pos help communication telegram` (all words joined with dashes → `pos-communication-telegram --help`).
+`pos help <full command>` shows a tool's help, e.g. `pos help communication telegram` (all words joined with dashes → `pos-communication-telegram --help`). `pos <category>` or `pos <category> --help` shows a category's subcommands (derived from the `pos-<category>-*` filenames in `bin/` — no script execution, so it works even for root-only/interactive tools like `system-firewall`).
 
 **When adding a command, `bin/pos` itself has two things to keep in sync:**
 
@@ -159,6 +159,7 @@ bash -n bin/your-tool
 shellcheck bin/your-tool
 ./bin/your-tool --help
 bin/pos help <full command>   # confirm dispatch works
+bin/pos <category> --help     # confirm category listing includes the new tool (first tool in a new category)
 ```
 
 ---

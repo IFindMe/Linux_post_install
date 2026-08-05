@@ -458,7 +458,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `bin/pos` | 153 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos` | 191 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-system-backup` | 115 | Encrypted folder snapshots: path mode + `--service` (`/srv`, `~/srv` picker), tar + gpg AES-256 |

@@ -30,7 +30,7 @@ tries pos-docker-compose-up            (not found)
 tries pos-docker-compose               (found) → runs with args "up jellyfin"
 ```
 
-`pos help <full command>` runs that tool's `--help` (e.g. `pos help communication telegram`, `pos help docker compose` — the words are joined with dashes). Running `pos` with no args prints the built-in usage text (which doubles as the category cheat-sheet).
+`pos help <full command>` runs that tool's `--help` (e.g. `pos help communication telegram`, `pos help docker compose` — the words are joined with dashes). `pos <category>` and `pos <category> --help` list that category's subcommands (derived from `bin/pos-<category>-*` filenames, no script execution). Running `pos` with no args prints the built-in usage text (which doubles as the category cheat-sheet).
 
 ---
 

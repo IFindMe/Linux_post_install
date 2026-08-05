@@ -45,7 +45,7 @@ _pos() {
 
     _pos_complete_subcats() {
         local cat="${words[1]}"
-        COMPREPLY=($(compgen -W "${cat_cmds[$cat]:-}" -- "$cur"))
+        COMPREPLY=($(compgen -W "${cat_cmds[$cat]:-} --help" -- "$cur"))
     }
 
     _pos_complete_compose_services() {

@@ -25,6 +25,36 @@ _pos_commands() {
     echo "${cmds[*]}"
 }
 
+# ── Category helpers ────────────────────────────────────────────
+_pos_category_exists() {
+    local cat="${1:-}" f
+    [ -n "$cat" ] || return 1
+    for f in "$self"/pos-"$cat"-*; do
+        [ -x "$f" ] && return 0
+    done
+    return 1
+}
+
+_pos_category_help() {
+    local cat="$1" sub subs=()
+    local f
+    for f in "$self"/pos-"$cat"-*; do
+        [ -x "$f" ] || continue
+        subs+=("${f##*/pos-$cat-}")
+    done
+
+    echo "pos $cat — $cat tools"
+    echo
+    echo "USAGE"
+    echo "  pos $cat <command> [args]"
+    echo
+    echo "COMMANDS"
+    printf "  %s\n" "${subs[@]}"
+    echo
+    echo "Run 'pos $cat <command> --help' for details on a command."
+    exit 0
+}
+
 # ── Help text ──────────────────────────────────────────────────
 usage() {
     cat <<'EOF'
@@ -73,8 +103,9 @@ EXAMPLES
   pos docker vbox ls                       List Docker VMs
 
 HELP
-  pos help <command>    Show help for a command
-  pos --help            Show this help
+  pos <category> --help    Show a category's commands
+  pos help <command>       Show help for a command
+  pos --help               Show this help
 
 LEGACY WRAPPERS
   wr-ip, wr-checkport, wr-scan-ping, wr-docker,
@@ -107,6 +138,13 @@ fi
 # ── Dispatch ───────────────────────────────────────────────────
 args=("$@")
 n=${#args[@]}
+
+# ── Category help: pos <category> [--help] ─────────────────────
+if _pos_category_exists "${args[0]:-}"; then
+    if [ "$n" -eq 1 ] || { [ "$n" -eq 2 ] && { [ "${args[1]}" = "-h" ] || [ "${args[1]}" = "--help" ]; }; }; then
+        _pos_category_help "${args[0]}"
+    fi
+fi
 
 # ── Logging setup ──────────────────────────────────────────────
 LOG_DIR="$HOME/.local/share/linux_post_install/logs"
