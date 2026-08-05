@@ -119,6 +119,7 @@ esac
 ### 2. Make it discoverable
 
 - The dispatcher auto-discovers executable `bin/pos-*` files — no registration needed. The file **must be executable** (`chmod +x`, committed as mode `100755`); the dispatcher and `install.sh` skip non-executables.
+- `pos <category> --help` (and bare `pos <category>`) is derived from the `pos-<category>-*` filenames too — a new tool appears in its category's help automatically, with no registration (see [The `pos` CLI](#the-pos-cli)).
 - Add the command to the `usage()` CATEGORIES/EXAMPLES blocks in `bin/pos` (see [The `pos` CLI](#the-pos-cli)).
 - If the command **reads stdin** (prompts/selection), add it to `INTERACTIVE_CMDS` in `bin/pos` — see [The `pos` CLI](#the-pos-cli).
 - If it takes flag-style args (e.g. `--send "text"`), consider extending `completions/pos.bash`; category/subcommand names are auto-discovered from the filename.

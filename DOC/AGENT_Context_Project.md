@@ -412,12 +412,12 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 
 ### Adding a New Tool
 
-1. Create `bin/pos-<category>-<command>` from `templates/pos-tool.sh` — must be executable (`100755`)
+1. Create `bin/pos-<category>-<command>` from `templates/pos-tool.sh` — must be executable (`100755`); it auto-appears in `pos <category> --help` (filename-derived, no registration)
 2. Register in `bin/pos` `usage()` CATEGORIES/EXAMPLES; add to `INTERACTIVE_CMDS` in `bin/pos` if it reads stdin
 3. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed)
 4. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
 5. Update docs: `DOC/POS.md` (section table + detail), `DOC/AGENT_Context_Project.md` (bin tree, dispatch table, self-contained list, file line-count table), root `README.md` only if the category list changes
-6. Test: `bash -n bin/your-tool && shellcheck bin/your-tool && bin/pos help <full command>`
+6. Test: `bash -n bin/your-tool && shellcheck bin/your-tool && bin/pos help <full command> && bin/pos <category> --help`
 
 ### Testing
 
