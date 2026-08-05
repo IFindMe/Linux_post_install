@@ -54,7 +54,7 @@ All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 **When adding a command, `bin/pos` itself has two things to keep in sync:**
 
 - **The usage text** (`usage()` function) — the CATEGORIES and EXAMPLES blocks are the built-in cheat-sheet (`pos --help`). Add the new command there or it stays invisible.
-- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `media-mp4`, `system-backup`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`.
+- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `media-mp4`, `system-backup`, `usb-server`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`. Trade-off: it's all-or-nothing **per script** — adding a flag-style tool with *any* prompting subcommand (e.g. `usb-server --share`) means *every* subcommand of that script skips output logging (e.g. `usb server --ls` loses the `tee` log too).
 
 ### Shared Library (`lib/common.sh`)
 
@@ -134,6 +134,8 @@ PACKAGES=(
     your-package
 )
 ```
+
+**Not in apt?** If the dependency ships as a manual installer (no package — e.g. `usbsrv`, the USB Redirector server), do **not** put it in `PACKAGES` (that would break `preinstall.sh`). Instead, add a `command -v <binary> || err "… install from <URL>"` guard in the tool itself and note the manual install in `usage()`/`DOC/POS.md`.
 
 ### 4. Config files (if needed)
 

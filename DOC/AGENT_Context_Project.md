@@ -39,12 +39,13 @@ Linux_post_install/
 │   ├── pos-network-scan    # Parallel ping sweep of CIDR subnet
 │   ├── pos-docker-ps       # Enhanced docker ps (health, IPs, ports, uptime)
 │   ├── pos-docker-health   # Quick one-glance health dashboard
-│   ├── pos-docker-compose  # Docker Compose service manager (largest script, 317 lines)
+│   ├── pos-docker-compose  # Docker Compose service manager (largest script, 363 lines)
 │   ├── pos-media-mp3       # Audio downloader (yt-dlp → MP3)
 │   ├── pos-media-mp4       # Video downloader (yt-dlp → MP4, interactive format select)
 │   ├── pos-system-firewall # Interactive UFW manager (menu-driven, 284 lines)
 │   ├── pos-system-backup   # Encrypted folder snapshots (tar + gpg AES-256, --service) (115 lines)
 │   ├── pos-ssh-load-keys   # Load SSH keys into ssh-agent
+│   ├── pos-usb-server      # USB Redirector server control (usbsrv)
 │   ├── pos-communication-telegram  # Send Telegram messages via Bot API
 │   ├── pos-docker-vbox     # Disposable Docker-based "VMs" (pos docker vbox)
 │   ├── pos-network-hotspot # Wi-Fi hotspot (create_ap + wihotspot-gui)
@@ -207,6 +208,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | backup | `pos-system-backup` | Encrypted folder snapshots (`tar` + gpg AES-256; `--service` picks from `/srv` and `~/srv`) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load SSH keys into agent |
+| usb | server | `pos-usb-server` | USB Redirector server control: `--ls`, `--share`, `--unshare`, `--auto-share`, `--callback`, `--disconnect`, `--nickname`, `--timeout`, `--port`, `--info`, `--version` (flag-style, prompts when args omitted) |
 | communication | telegram | `pos-communication-telegram` | Send Telegram messages via Bot API (`--send`, `test`, `config set`); config in `~/.config/linux_post_install/telegram.env` |
 | docker | vbox | `pos-docker-vbox` | Disposable Docker "VMs" (`create/enter/start/stop/rm/ls`; label-filtered, auto-enter prompt) |
 
@@ -250,7 +252,7 @@ Sourced by most scripts. Provides:
 source "$(dirname "$0")/../lib/common.sh"
 ```
 
-**Scripts that do NOT source common.sh** (self-contained): `bin/pos`, `pos-network-ip`, `pos-network-checkport`, `pos-network-scan`, `pos-media-mp3`, `pos-media-mp4`, `pos-ssh-load-keys`, `pos-system-firewall`, `pos-communication-telegram`.
+**Scripts that do NOT source common.sh** (self-contained): `bin/pos`, `pos-network-ip`, `pos-network-checkport`, `pos-network-scan`, `pos-network-hotspot`, `pos-media-mp3`, `pos-media-mp4`, `pos-ssh-load-keys`, `pos-system-firewall`, `pos-communication-telegram`.
 
 ---
 
@@ -458,7 +460,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `bin/pos` | 191 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 195 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-system-backup` | 115 | Encrypted folder snapshots: path mode + `--service` (`/srv`, `~/srv` picker), tar + gpg AES-256 |
@@ -467,7 +469,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-vbox` | 156 | Docker-based disposable VMs (`pos docker vbox`; label-filtered, auto-enter prompt) |
 | `bin/pos-network-hotspot` | 91 | Wi-Fi hotspot: `create_ap` (start with background prompt/`--foreground`, stop, status) + `wihotspot-gui` |
 | `bin/pos-communication-telegram` | 138 | Telegram sender via Bot API: `--send`, `test`, `config set`; token masked; config `~/.config/linux_post_install/telegram.env` |
-| `completions/pos.bash` | 122 | Dynamic bash completion |
+| `bin/pos-usb-server` | 216 | USB Redirector server control (`usbsrv`): `--ls`, `--share` (interactive picker), `--unshare`, `--auto-share`, `--callback`, `--close-callback`, `--auto-connect`, `--disconnect`, `--nickname`, `--timeout`, `--port`, `--info`, `--version` |
+| `completions/pos.bash` | 129 | Dynamic bash completion |
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
 ---
@@ -476,7 +479,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | Task | Where to Edit |
 |------|---------------|
-| Add a new CLI tool | Create `bin/pos-<cat>-<cmd>`, add deps in `preinstall.sh` |
+| Add a new CLI tool | Create `bin/pos-<cat>-<cmd>`, add apt deps in `preinstall.sh` (non-apt/manual installers: add a `command -v` guard in the tool instead) |
 | Add a new app installer | Create `apps/<name>.sh` (auto-discovered) |
 | Add a feature | Create `features/<name>.sh` (installed on demand via `./install.sh --feature`) |
 | Add a systemd service | Create `systemd/<name>.service` (auto-installed by postinstall; gate on a flag if it backs a feature) |
@@ -489,6 +492,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify Docker Compose logic | Edit `bin/pos-docker-compose` |
 | Modify Docker health check | Edit `bin/pos-docker-health` |
 | Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
+| Modify USB forwarding logic | Edit `bin/pos-usb-server` |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
 | Modify install phases/flags | Edit arg parsing in `install.sh` |

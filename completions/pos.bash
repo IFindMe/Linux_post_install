@@ -73,6 +73,10 @@ _pos() {
         COMPREPLY=($(compgen -W "$names" -- "$cur"))
     }
 
+    _pos_complete_usb_server_flags() {
+        COMPREPLY=($(compgen -W "--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version --help" -- "$cur"))
+    }
+
     # ── Dispatch ───────────────────────────────────────────────
     case "${#words[@]}" in
         2)
@@ -95,6 +99,9 @@ _pos() {
                     ;;
                 docker-vbox)
                     _pos_complete_docker_vbox_cmds
+                    ;;
+                usb-server)
+                    _pos_complete_usb_server_flags
                     ;;
             esac
             ;;

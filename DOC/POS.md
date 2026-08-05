@@ -10,6 +10,7 @@
   - [media](#media)
   - [system](#system)
   - [ssh](#ssh)
+  - [usb](#usb)
   - [communication](#communication)
   - [flags](#flags)
 - [Legacy wrappers](#legacy-wrappers)
@@ -158,6 +159,29 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
 | `pos ssh load-keys` | `bin/pos-ssh-load-keys` | Load all `~/.ssh/id_*` private keys into the ssh-agent | Uses `SSH_AUTH_SOCK` (default `/run/ssh-agent/socket`, provided by `ssh-agent.service`); skips `.pub`, `known_hosts`, `authorized_keys`, `config`; validates keys before adding |
+
+### usb
+
+**File:** `bin/pos-usb-server`
+**Purpose:** control the USB Redirector server (`usbsrv`) — share local USB devices over the network and manage connected clients. Requires `usbsrv` (manual install from incentivespro.com — not in `PACKAGES`).
+
+| Command | Behavior |
+|---------|----------|
+| `pos usb server --ls` | List host USB devices and connected clients |
+| `pos usb server --ls-shared` | List shared or in-use devices only |
+| `pos usb server --share [dev-id] [client-id]` | Share a device and connect it to a client; interactive picker when IDs are omitted (`-share` + `-connect-to CLIENT-DEV`) |
+| `pos usb server --unshare [dev-id]` | Stop sharing a device |
+| `pos usb server --auto-share on\|off` | Toggle automatic sharing of new devices |
+| `pos usb server --callback [addr:port]` | Create a callback connection to a client |
+| `pos usb server --close-callback [target\|all]` | Close a client callback |
+| `pos usb server --auto-connect on\|off [client]` | Toggle remote auto-connect for a client |
+| `pos usb server --disconnect [dev-id\|all]` | Disconnect a device from its clients |
+| `pos usb server --nickname [dev-id] [nick]` | Set a device nickname (empty nick removes it) |
+| `pos usb server --timeout [dev-id] [sec]` | Set device inactivity timeout (0 disables) |
+| `pos usb server --port [num]` | Set the TCP port (restart server to apply) |
+| `pos usb server --info` / `--version` | Show server info / version |
+
+Subcommands that need input prompt interactively when args are omitted.
 
 ### communication
 

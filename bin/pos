@@ -68,10 +68,11 @@ USAGE
 
 CATEGORIES
   network    ip | checkport | scan | hotspot
-  docker     ps | compose | vbox
+  docker     ps | compose | health | vbox
   media      mp3 | mp4
   system     firewall | backup
   ssh        load-keys
+  usb        server
   communication
              telegram
 
@@ -84,6 +85,7 @@ EXAMPLES
   pos docker ps                           List containers (health, IPs, ports)
   pos docker compose ls                   List available ScaleTail services
   pos docker compose up jellyfin          Deploy a service with Tailscale
+  pos docker health                       One-glance health dashboard
 
   pos media mp3 <url>                     Download audio as MP3
   pos media mp4 <url>                     Download video as MP4
@@ -93,6 +95,8 @@ EXAMPLES
   pos system backup --service             Pick a folder from /srv or ~/srv
 
   pos ssh load-keys                       Load all SSH keys into agent
+
+  pos usb server --ls                     List USB devices + connected clients
 
   pos communication telegram --send "Backup done"
                                           Send a Telegram message
@@ -155,7 +159,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

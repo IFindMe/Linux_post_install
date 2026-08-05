@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos usb server [flag] [args]
+
+Control the USB Redirector server (usbsrv) — share local USB devices
+over the network and manage connected clients.
+
+Flags:
+  --ls                          List host USB devices and connected clients
+  --ls-shared                   List shared or in-use devices only
+  --share [dev-id] [client-id]  Share a device and connect it to a client
+                                (interactive picker when IDs are omitted)
+  --unshare [dev-id]            Stop sharing a device
+  --auto-share on|off           Toggle automatic sharing of new devices
+  --callback [addr:port]        Create a callback connection to a client
+  --close-callback [target|all] Close a client callback
+  --auto-connect on|off [client]  Toggle remote auto-connect for a client
+  --disconnect [dev-id|all]     Disconnect a device from its clients
+  --nickname [dev-id] [nick]    Set a device nickname (empty nick removes it)
+  --timeout [dev-id] [sec]      Set device inactivity timeout (0 disables)
+  --port [num]                  Set the TCP port (restart server to apply)
+  --info                        Show server info
+  --version                     Show server version
+  -h, --help                    Show this help
+
+Examples:
+  pos usb server --ls
+  pos usb server --share
+  pos usb server --share 0-1 3
+  pos usb server --auto-share on
+  pos usb server --port 32032
+EOF
+    exit 0
+}
+
+cmd_ls() {
+    echo "==== HOST USB DEVICES ===="
+    usbsrv -list-devices
+    echo
+    echo "==== CONNECTED CLIENTS ===="
+    usbsrv -list-clients
+}
+
+cmd_ls_shared() {
+    echo "==== SHARED OR IN USE DEVICES ===="
+    usbsrv -list-devices | awk '
+      BEGIN {RS=""; FS="\n"}
+      {
+        for(i=1; i<=NF; i++) {
+          if ($i ~ /Status:.*(shared|in use)/) {
+            print $0 "\n"
+            break
+          }
+        }
+      }
+    ' || true
+}
+
+cmd_share() {
+    local dev="${1:-}" client="${2:-}"
+    if [ -z "$dev" ]; then
+        echo "==== HOST USB DEVICES ===="
+        usbsrv -list-devices
+        echo
+        echo "==== CONNECTED CLIENTS ===="
+        usbsrv -list-clients
+        echo
+        read -rp "Enter device ID to share: " dev
+        read -rp "Enter client ID to connect to: " client
+    fi
+    [ -n "$dev" ] || err "no device ID given"
+    [ -n "$client" ] || err "no client ID given"
+    log "Sharing device ID $dev..."
+    usbsrv -share "$dev"
+    log "Connecting device $dev to client $client..."
+    usbsrv -connect-to "${client}-${dev}"
+}
+
+cmd_unshare() {
+    local dev="${1:-}"
+    if [ -z "$dev" ]; then
+        cmd_ls_shared
+        read -rp "Enter device ID to unshare: " dev
+    fi
+    [ -n "$dev" ] || err "no device ID given"
+    log "Unsharing device ID $dev..."
+    usbsrv -unshare "$dev"
+}
+
+cmd_auto_share() {
+    local mode="${1:-}"
+    if [ -z "$mode" ]; then
+        read -rp "Turn auto-share on or off? (on/off): " mode
+    fi
+    case "$mode" in
+        on|off) ;;
+        *) err "Invalid option '$mode' — must be 'on' or 'off'" ;;
+    esac
+    usbsrv -auto-share "$mode"
+    log "Auto-share set to $mode"
+}
+
+cmd_callback() {
+    local addr="${1:-}"
+    if [ -z "$addr" ]; then
+        read -rp "Enter client address:port for callback (e.g. 192.168.1.100:32032): " addr
+    fi
+    [ -n "$addr" ] || err "no address given"
+    usbsrv -create-callback "$addr"
+}
+
+cmd_close_callback() {
+    local target="${1:-}"
+    if [ -z "$target" ]; then
+        usbsrv -list-clients
+        read -rp "Enter client or clientid or 'all' to close callback: " target
+    fi
+    [ -n "$target" ] || err "no target given"
+    usbsrv -close-callback "$target"
+}
+
+cmd_auto_connect() {
+    local mode="${1:-}" client="${2:-}"
+    if [ -z "$mode" ]; then
+        read -rp "Enable or disable remote auto-connect? (on/off): " mode
+    fi
+    case "$mode" in
+        on|off) ;;
+        *) err "Invalid option '$mode' — must be 'on' or 'off'" ;;
+    esac
+    if [ -z "$client" ]; then
+        usbsrv -list-clients
+        read -rp "Enter client or clientid: " client
+    fi
+    [ -n "$client" ] || err "no client given"
+    usbsrv -remote-auto-connect "$mode" "$client"
+}
+
+cmd_disconnect() {
+    local dev="${1:-}"
+    if [ -z "$dev" ]; then
+        cmd_ls_shared
+        read -rp "Enter device ID or 'all' to disconnect from clients: " dev
+    fi
+    [ -n "$dev" ] || err "no device ID given"
+    usbsrv -disconnect-from "$dev"
+}
+
+cmd_nickname() {
+    local dev="${1:-}" nick="${2:-}"
+    if [ -z "$dev" ]; then
+        usbsrv -list-devices
+        read -rp "Enter device ID to set nickname (empty to remove): " dev
+        read -rp "Enter nickname (or leave empty to remove): " nick
+    fi
+    [ -n "$dev" ] || err "no device ID given"
+    usbsrv -set-nickname "$nick" "$dev"
+}
+
+cmd_timeout() {
+    local dev="${1:-}" sec="${2:-}"
+    if [ -z "$dev" ]; then
+        usbsrv -list-devices
+        read -rp "Enter device ID to set timeout for: " dev
+        read -rp "Enter timeout in seconds (0 to disable): " sec
+    fi
+    [ -n "$dev" ] || err "no device ID given"
+    [[ "$sec" =~ ^[0-9]+$ ]] || err "Invalid timeout '$sec' — must be a number"
+    usbsrv -set-timeout "$sec" "$dev"
+}
+
+cmd_port() {
+    local port="${1:-}"
+    if [ -z "$port" ]; then
+        read -rp "Enter new TCP port: " port
+    fi
+    [[ "$port" =~ ^[0-9]+$ ]] || err "Invalid port number '$port'"
+    usbsrv -set-tcp-port "$port"
+    warn "Restart your server for port changes to take effect."
+}
+
+cmd="${1:-}"
+
+case "$cmd" in
+    -h|--help|"") usage ;;
+esac
+
+case "$cmd" in
+    --ls|--ls-shared|--share|--unshare|--auto-share|--callback|--close-callback|--auto-connect|--disconnect|--nickname|--timeout|--port|--info|--version) ;;
+    *) err "Unknown flag '$cmd'" ;;
+esac
+
+command -v usbsrv &>/dev/null \
+    || err "usbsrv not found — install the USB Redirector server (https://www.incentivespro.com/usb-server.html)"
+
+case "$cmd" in
+    --ls)           cmd_ls ;;
+    --ls-shared)    cmd_ls_shared ;;
+    --share)        shift; cmd_share "$@" ;;
+    --unshare)      shift; cmd_unshare "$@" ;;
+    --auto-share)   shift; cmd_auto_share "$@" ;;
+    --callback)     shift; cmd_callback "$@" ;;
+    --close-callback) shift; cmd_close_callback "$@" ;;
+    --auto-connect) shift; cmd_auto_connect "$@" ;;
+    --disconnect)   shift; cmd_disconnect "$@" ;;
+    --nickname)     shift; cmd_nickname "$@" ;;
+    --timeout)      shift; cmd_timeout "$@" ;;
+    --port)         shift; cmd_port "$@" ;;
+    --info)         usbsrv -info ;;
+    --version)      usbsrv -version ;;
+    *)              err "Unknown flag '$cmd'"; usage ;;
+esac
