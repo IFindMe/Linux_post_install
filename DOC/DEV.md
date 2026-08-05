@@ -49,6 +49,13 @@ pos docker compose up jellyfin
 
 All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 
+`pos help <full command>` shows a tool's help, e.g. `pos help communication telegram` (all words joined with dashes → `pos-communication-telegram --help`).
+
+**When adding a command, `bin/pos` itself has two things to keep in sync:**
+
+- **The usage text** (`usage()` function) — the CATEGORIES and EXAMPLES blocks are the built-in cheat-sheet (`pos --help`). Add the new command there or it stays invisible.
+- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `media-mp4`, `system-backup`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`.
+
 ### Shared Library (`lib/common.sh`)
 
 Sourced by most scripts. Key functions:
@@ -69,6 +76,8 @@ Sourced by most scripts. Key functions:
 ---
 
 ## Adding a New CLI Tool
+
+Start from the template: `cp templates/pos-tool.sh bin/pos-<category>-<command> && chmod +x bin/pos-<category>-<command>`.
 
 ### 1. Create the script
 
@@ -105,8 +114,16 @@ esac
   warn() { echo "[!] $*"; }
   err()  { echo "ERROR: $*" >&2; exit 1; }
   ```
+  If you skip `common.sh`, add the tool to the "Scripts that do NOT source common.sh" list in `DOC/AGENT_Context_Project.md`.
 
-### 2. Add system dependencies
+### 2. Make it discoverable
+
+- The dispatcher auto-discovers executable `bin/pos-*` files — no registration needed. The file **must be executable** (`chmod +x`, committed as mode `100755`); the dispatcher and `install.sh` skip non-executables.
+- Add the command to the `usage()` CATEGORIES/EXAMPLES blocks in `bin/pos` (see [The `pos` CLI](#the-pos-cli)).
+- If the command **reads stdin** (prompts/selection), add it to `INTERACTIVE_CMDS` in `bin/pos` — see [The `pos` CLI](#the-pos-cli).
+- If it takes flag-style args (e.g. `--send "text"`), consider extending `completions/pos.bash`; category/subcommand names are auto-discovered from the filename.
+
+### 3. Add system dependencies
 
 Add package names to the `PACKAGES` array in `preinstall.sh`:
 
@@ -117,29 +134,38 @@ PACKAGES=(
 )
 ```
 
-### 3. Add config files (if needed)
+### 4. Config files (if needed)
 
-Place defaults in `config/` and add copy logic to `postinstall.sh`. If they contain secrets, add to `.gitignore` and document in `DOC/`.
+Two kinds of config, don't mix them up:
 
-### 4. Add SSH keys (if needed)
+- **Machine defaults shipped by the installer:** place the file in `config/` and add copy logic to `postinstall.sh`. If it contains secrets, add to `.gitignore` and document in `DOC/`.
+- **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`) and `pos-communication-telegram` (`telegram.env`, token masked in `config` output). Never store tokens in the repo.
+
+### 5. Add SSH keys (if needed)
 
 Place public keys in `config/authorized_keys` (one per line). `postinstall.sh` reads this file automatically.
 
-### 5. Update the docs
+### 6. Update the docs
 
-Add a section for the new command in `DOC/POS.md`.
+- `DOC/POS.md`: add the command to the section table + a detail block (commands, behavior, configuration).
+- `DOC/AGENT_Context_Project.md`: update the bin tree, the dispatch table, the "scripts that do NOT source common.sh" list (if applicable), and the file line-count table.
+- Root `README.md`: only if the `pos` category list in the help text changes.
 
-### 6. Test
+### 7. Test
 
 ```bash
+chmod +x bin/your-tool
 bash -n bin/your-tool
 shellcheck bin/your-tool
 ./bin/your-tool --help
+bin/pos help <full command>   # confirm dispatch works
 ```
 
 ---
 
 ## Adding an Optional App
+
+Start from the template: `cp templates/app.sh apps/<category>/<name>.sh`.
 
 ### 1. Create the installer
 
@@ -168,6 +194,8 @@ esac
 Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no registration needed.
 
 **Categories:** `browsers`, `development`, `media`, `networking`, `remote-access`, `system`, `utilities`
+
+**Docs:** add a row to the catalog table in `DOC/APPS.md` (name, category, purpose, install method).
 
 ### 2. Conventions
 
@@ -228,8 +256,9 @@ run sudo apt install -y git
 
 ### Security
 
-- Never hardcode secrets — put them in `config/` (gitignored)
+- Never hardcode secrets — put them in `config/` (gitignored) or, for runtime tool config, `~/.config/linux_post_install/<tool>.env`
 - `chmod 600` for sensitive files
+- Mask secrets in `config` output (see `pos-communication-telegram`'s `mask_token`)
 - Validate input before shell commands
 - Use `sudo` only where needed
 
@@ -248,6 +277,8 @@ run sudo apt install -y git
 `features/` holds scripts the user is likely to customize (e.g. `autostart.sh`). Unlike `bin/` (synced on every install), features are installed on demand and **never overwritten without asking**.
 
 ### Adding a Feature
+
+Start from the template: `cp templates/feature.sh features/<name>.sh`.
 
 1. Create `features/<name>.sh` following the CLI tool template (shebang, `set -euo pipefail`, `--help`).
 2. Nothing else is registered — `./install.sh --feature` auto-discovers it, copies it to `/usr/local/bin/`, asks before overwriting an existing file, and sets its flag.

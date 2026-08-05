@@ -58,6 +58,11 @@ Linux_post_install/
 ├── features/               # User-customizable scripts (installed via --feature)
 │   └── autostart.sh        # Boot-time script (via systemd, flag-gated)
 │
+├── templates/              # Dev-only scaffolds — NOT installed by install.sh
+│   ├── pos-tool.sh         # New `pos` CLI tool (→ bin/pos-<cat>-<cmd>)
+│   ├── app.sh              # New optional app installer (→ apps/<cat>/<name>.sh)
+│   └── feature.sh          # New feature script (→ features/<name>.sh)
+│
 ├── x64_bin/                # Precompiled binaries, copied to /usr/local/bin on x86_64
 │   ├── create_ap           # Wi-Fi AP CLI (bash script)
 │   ├── wihotspot           # Wrapper → wihotspot-gui
@@ -394,18 +399,28 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 
 ## 11. Development Workflow
 
+### Adding a New Feature
+
+1. Create `features/<name>.sh` from `templates/feature.sh` (installed on demand via `./install.sh --feature`; never overwritten without asking)
+2. `install.sh` auto-discovers it and sets its flag — no registration needed
+3. If a systemd service depends on it, gate the service on `flag_is_set <name>` in `postinstall.sh`
+4. Update `DOC/AGENT_Context_Project.md` file table if line counts change
+
 ### Adding a New App
 
-1. Create `apps/<category>/<name>.sh` following the template in DOC/DEV.md
+1. Create `apps/<category>/<name>.sh` from `templates/app.sh` (per DOC/DEV.md)
 2. It auto-appears in the interactive picker — no registration needed
+3. Update `DOC/APPS.md` catalog table (name, category, purpose, install method)
+4. Test: `bash -n apps/<cat>/<name>.sh && shellcheck apps/<cat>/<name>.sh`
 
 ### Adding a New Tool
 
-1. Create `bin/pos-<category>-<command>` following conventions
-2. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed)
-3. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets)
-4. Update `DOC/POS.md` (and root `README.md` only if the category list changes)
-5. Test: `bash -n bin/your-tool && shellcheck bin/your-tool`
+1. Create `bin/pos-<category>-<command>` from `templates/pos-tool.sh` — must be executable (`100755`)
+2. Register in `bin/pos` `usage()` CATEGORIES/EXAMPLES; add to `INTERACTIVE_CMDS` in `bin/pos` if it reads stdin
+3. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed)
+4. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
+5. Update docs: `DOC/POS.md` (section table + detail), `DOC/AGENT_Context_Project.md` (bin tree, dispatch table, self-contained list, file line-count table), root `README.md` only if the category list changes
+6. Test: `bash -n bin/your-tool && shellcheck bin/your-tool && bin/pos help <full command>`
 
 ### Testing
 
@@ -446,7 +461,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `bin/pos` | 153 | CLI dispatcher with smart arg matching + logging |
+| `bin/pos` | 154 | CLI dispatcher with smart arg matching + logging |
 | `bin/pos-docker-compose` | 363 | Largest script — full compose management |
 | `bin/pos-system-firewall` | 284 | Interactive UFW manager |
 | `bin/pos-system-backup` | 115 | Encrypted folder snapshots: path mode + `--service` (`/srv`, `~/srv` picker), tar + gpg AES-256 |

@@ -94,12 +94,13 @@ esac
 if [ "${1:-}" = "help" ]; then
     shift
     [ $# -eq 0 ] && usage
-    cmd="pos-${1// /-}"
+    cmd="pos-$*"
+    cmd="${cmd// /-}"
     if command -v "$cmd" &>/dev/null; then
         exec "$cmd" --help
     fi
     [ -x "$self/$cmd" ] && exec "$self/$cmd" --help
-    echo "pos: unknown command '$1'" >&2
+    echo "pos: unknown command '$*'" >&2
     echo "Run 'pos --help' to see available commands." >&2
     exit 1
 fi
