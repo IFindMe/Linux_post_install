@@ -225,6 +225,8 @@ Plugins:
 | `weather` | Open-Meteo (no API key) | `~/.config/linux_post_install/entertainment.env`: `WEATHER_LAT`, `WEATHER_LON` (required), `WEATHER_CITY` (optional label) |
 | `joke` | icanhazdadjoke.com (no API key) | None |
 
+**Config auto-install:** `postinstall.sh` copies the repo's `config/entertainment.env` (default: Al-Hasakah, Syria) to `~/.config/linux_post_install/entertainment.env` on install — but only if you haven't already created your own (no clobber). Override the default by creating/editing that file.
+
 **Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`). It must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). If it needs coordinates/tokens, read them from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence). No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `command -v … || exit 1`.
 
 **Automation:** the runner is headless/timer-friendly — no TTY prompts, exit 0 on success / 1 on failure. A systemd timer (e.g. hourly) can call `pos entertainment send weather` directly. Note the config files live under the user's `$HOME`, so the timer must run as that user (a systemd **user** unit, or a system unit with `Environment=HOME=/home/<user>`).

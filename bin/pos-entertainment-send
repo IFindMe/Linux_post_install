@@ -99,8 +99,10 @@ unset 'plugin_args[0]'
 dir="$(plugin_dir)"
 script="$(resolve_plugin "$dir" "$plugin")"
 
-if ! output="$("$script" "$@")"; then
-    err "Plugin '$plugin' failed (exit $?)"
+rc=0
+output="$( "$script" "$@" )" || rc=$?
+if [ "$rc" -ne 0 ]; then
+    err "Plugin '$plugin' failed (exit $rc)"
 fi
 
 [ -n "$output" ] || { warn "Plugin '$plugin' produced no output — nothing to send"; exit 0; }

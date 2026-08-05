@@ -107,7 +107,8 @@ Linux_post_install/
 │   └── pos.bash            # Bash tab-completion for the pos CLI
 │
 ├── config/
-│   └── authorized_keys     # SSH public keys (gitignored)
+│   ├── authorized_keys     # SSH public keys (gitignored)
+│   └── entertainment.env   # Default weather location (auto-installed by postinstall)
 │
 ├── compose/
 │   └── scale-tail/         # Git submodule → ScaleTail templates (119+ services)
@@ -364,6 +365,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 ### Runtime Config
 
 - `~/.config/linux_post_install/compose.env` — Docker Compose global defaults
+- `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults (e.g. weather location); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber)
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -468,7 +470,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 |------|-------|---------|
 | `install.sh` | 192 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
 | `preinstall.sh` | 54 | System packages + hotspot deps + yt-dlp + fail2ban |
-| `postinstall.sh` | 97 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
+| `postinstall.sh` | 114 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 121 | Shared library |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
@@ -482,7 +484,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 157 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
-| `bin/pos-entertainment-send` | 122 | Run a public-API plugin and send its output via Telegram (default sender) |
+| `bin/pos-entertainment-send` | 124 | Run a public-API plugin and send its output via Telegram (default sender) |
 | `bin/pos-media-mp3` | 35 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 38 | Download video as MP4 (interactive format select) |
 | `bin/pos-network-checkport` | 45 | Check TCP port connectivity |
