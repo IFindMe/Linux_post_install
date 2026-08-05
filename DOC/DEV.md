@@ -33,6 +33,7 @@ Each phase is independent and runs only if the corresponding script exists.
 | `apps/<category>/` | Optional desktop app installers | run on demand |
 | `lib/` | Shared library (`common.sh`) | sourced at build time |
 | `config/` | Gitignored user config files | `~/.config/<app>/` (via postinstall) |
+| `entertainment/` | Public-API plugins for the entertainment module | `/usr/local/share/linux_post_install/entertainment` (via install.sh Phase 2) |
 | `compose/` | ScaleTail templates (git submodule) | `/usr/local/share/linux_post_install/scale-tail` |
 | `systemd/` | Systemd unit files | `/etc/systemd/system/` (via postinstall) |
 
@@ -173,6 +174,41 @@ make check                    # full self-consistency gate (syntax, exec bits, d
 ```
 
 `make check` is the definition of done — the same check runs as a pre-commit hook once you've run `make hook`.
+
+---
+
+## Adding an Entertainment Plugin
+
+The `entertainment` module routes public-API data to Telegram via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`).
+
+### 1. Create the plugin
+
+Drop an executable script in `entertainment/<name>.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+err() { echo "ERROR: $*" >&2; exit 1; }
+
+command -v curl &>/dev/null || err "curl not found"
+
+data="$(curl -fsS --max-time 20 https://api.example.com/foo)"
+printf 'Title: %s\n' "$data"
+```
+
+**Contract:** plugins are **self-contained** — do **not** source `lib/common.sh`. Its `log`/`warn`/`ok` helpers print to **stdout**, and the runner captures stdout as the message to send (helper chatter would be sent to Telegram). All stdout is the message; errors go to stderr and exit nonzero. Plugins must be non-interactive (no prompts) — the module is designed for cron/systemd timers.
+
+### 2. Config (if needed)
+
+Read runtime values from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence) — same pattern as `telegram.env`. Example: `weather.sh` uses `WEATHER_LAT`/`WEATHER_LON`.
+
+### 3. Deps
+
+`curl` and `jq` are already in `preinstall.sh` PACKAGES. Anything else: guard with `command -v … || err "…"` and, if apt-available, add to PACKAGES.
+
+### 4. Done
+
+Plugins are not `pos-*` tools, so `make gen`/`make check` don't scan them — verify with `bash -n entertainment/<name>.sh` and a live `pos entertainment send <name> --print` run. Document the plugin in `DOC/POS.md`'s entertainment plugin table.
 
 ---
 

@@ -12,6 +12,7 @@
   - [ssh](#ssh)
   - [usb](#usb)
   - [communication](#communication)
+  - [entertainment](#entertainment)
   - [flags](#flags)
 - [Legacy wrappers](#legacy-wrappers)
 
@@ -202,6 +203,31 @@ Subcommands that need input prompt interactively when args are omitted.
 | `pos communication telegram config set TELEGRAM_CHAT_ID=...` | Saves the target chat ID |
 
 The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Requires network access to `api.telegram.org`.
+
+### entertainment
+
+**File:** `bin/pos-entertainment-send`
+**Purpose:** run a public-API plugin and send its output to Telegram by default. Plugins are standalone scripts in `entertainment/` that fetch a public API and **print the message to stdout** — that stdout is what gets sent.
+
+| Command | Behavior |
+|---------|----------|
+| `pos entertainment send` | List available plugins + usage |
+| `pos entertainment send <plugin> [--print] [--markdown] [args…]` | Run the plugin, send its output to Telegram (silent) |
+| `pos entertainment send <plugin> --print` | Print the output locally; do not send |
+| `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram`) |
+
+**Plugin lookup order:** `$ENTERTAINMENT_DIR` → repo `entertainment/` → `/usr/local/share/linux_post_install/entertainment/` (installed by `install.sh` Phase 2). A plugin name matches the file name with or without the `.sh` suffix.
+
+Plugins:
+
+| Plugin | Source API | Config |
+|--------|-----------|--------|
+| `weather` | Open-Meteo (no API key) | `~/.config/linux_post_install/entertainment.env`: `WEATHER_LAT`, `WEATHER_LON` (required), `WEATHER_CITY` (optional label) |
+| `joke` | icanhazdadjoke.com (no API key) | None |
+
+**Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`). It must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). If it needs coordinates/tokens, read them from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence). No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `command -v … || exit 1`.
+
+**Automation:** the runner is headless/timer-friendly — no TTY prompts, exit 0 on success / 1 on failure. A systemd timer (e.g. hourly) can call `pos entertainment send weather` directly. Note the config files live under the user's `$HOME`, so the timer must run as that user (a systemd **user** unit, or a system unit with `Environment=HOME=/home/<user>`).
 
 ### flags
 

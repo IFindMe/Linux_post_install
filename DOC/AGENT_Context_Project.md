@@ -40,6 +40,7 @@ Linux_post_install/
 │   ├── pos-docker-health          # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps              # Enhanced container overview (health, IPs, ports, uptime)
 │   ├── pos-docker-vbox            # Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
+│   ├── pos-entertainment-send     # Run a public-API plugin and send its output via Telegram (default sender)
 │   ├── pos-media-mp3              # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4              # Download video as MP4 (interactive format select)
 │   ├── pos-network-checkport      # Check TCP port connectivity
@@ -60,6 +61,10 @@ Linux_post_install/
 │
 ├── features/               # User-customizable scripts (installed via --feature)
 │   └── autostart.sh        # Boot-time script (via systemd, flag-gated)
+│
+├── entertainment/          # Public-API plugins for pos entertainment send (→ /usr/local/share/linux_post_install/entertainment)
+│   ├── weather.sh          # Current weather via Open-Meteo (no API key)
+│   └── joke.sh             # Random dad joke via icanhazdadjoke (no API key)
 │
 ├── templates/              # Dev-only scaffolds — NOT installed by install.sh
 │   ├── pos-tool.sh         # New `pos` CLI tool (→ bin/pos-<cat>-<cmd>)
@@ -205,6 +210,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
 | docker | vbox | `pos-docker-vbox` | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
+| entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via Telegram (default sender) |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (interactive format select) |
 | network | checkport | `pos-network-checkport` | Check TCP port connectivity |
@@ -470,12 +476,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 208 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram` | 140 | Send Telegram messages via Bot API (--send, test, config set) |
+| `bin/pos` | 211 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos-communication-telegram` | 150 | Send Telegram messages via Bot API (--send, test, config set) |
 | `bin/pos-docker-compose` | 364 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 157 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
+| `bin/pos-entertainment-send` | 122 | Run a public-API plugin and send its output via Telegram (default sender) |
 | `bin/pos-media-mp3` | 35 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 38 | Download video as MP4 (interactive format select) |
 | `bin/pos-network-checkport` | 45 | Check TCP port connectivity |
@@ -486,7 +493,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-backup` | 117 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 285 | Interactive UFW management |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 146 | Dynamic bash completion |
+| `completions/pos.bash` | 150 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: entertainment send — Run a public-API plugin and send its output via Telegram (default sender)
+# POS_FLAGS: --print --markdown
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+# ── Plugin directory lookup ─────────────────────────────────────
+plugin_dir() {
+    if [ -n "${ENTERTAINMENT_DIR:-}" ]; then
+        echo "$ENTERTAINMENT_DIR"
+    elif [ -d "$(dirname "$0")/../entertainment" ]; then
+        echo "$(cd "$(dirname "$0")/../entertainment" && pwd)"
+    elif [ -d "/usr/local/share/linux_post_install/entertainment" ]; then
+        echo "/usr/local/share/linux_post_install/entertainment"
+    else
+        err "entertainment plugin dir not found (set ENTERTAINMENT_DIR)"
+    fi
+}
+
+list_plugins() {
+    local dir="$1" f
+    for f in "$dir"/*; do
+        [ -f "$f" ] && [ -x "$f" ] && echo "$(basename "$f")"
+    done
+}
+
+resolve_plugin() {
+    local dir="$1" name="$2" f
+    [ -n "$name" ] || err "No plugin given"
+    for f in "$dir/$name" "$dir/$name.sh"; do
+        if [ -f "$f" ] && [ -x "$f" ]; then
+            echo "$f"
+            return 0
+        fi
+    done
+    err "Plugin '$name' not found in $dir — try one of: $(list_plugins "$dir" | tr '\n' ' ')"
+}
+
+usage() {
+    local dir plugins
+    dir="$(plugin_dir 2>/dev/null)" || dir=""
+    if [ -n "$dir" ]; then
+        plugins="$(list_plugins "$dir" | sed 's/^/  /')"
+    else
+        plugins="  (plugin directory not found — set ENTERTAINMENT_DIR)"
+    fi
+    cat <<EOF
+Usage: pos entertainment send <plugin> [--print] [--markdown] [plugin args...]
+
+Run an entertainment plugin, capture its output, and send it via Telegram.
+
+Plugins are scripts that fetch a public API and print the message to stdout —
+that stdout is what gets sent.
+
+Modes:
+  (default)     Send the plugin output to Telegram (silent)
+  --print       Print the output locally instead of sending
+  --markdown    Send with Markdown parse_mode (via pos communication telegram)
+
+Available plugins:
+$plugins
+
+Environment:
+  ENTERTAINMENT_DIR   Override the plugin directory
+
+Config (per plugin): ~/.config/linux_post_install/entertainment.env
+
+Examples:
+  pos entertainment send weather
+  pos entertainment send weather --print
+  pos entertainment send joke --markdown
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+# ── Parse runner flags ──────────────────────────────────────────
+PRINT=0
+MARKDOWN=0
+plugin_args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --print)    PRINT=1; shift ;;
+        --markdown) MARKDOWN=1; shift ;;
+        -h|--help)  usage ;;
+        *)          plugin_args+=("$1"); shift ;;
+    esac
+done
+
+[ ${#plugin_args[@]} -ge 1 ] || usage
+plugin="${plugin_args[0]}"
+unset 'plugin_args[0]'
+
+# ── Run the plugin ──────────────────────────────────────────────
+dir="$(plugin_dir)"
+script="$(resolve_plugin "$dir" "$plugin")"
+
+if ! output="$("$script" "$@")"; then
+    err "Plugin '$plugin' failed (exit $?)"
+fi
+
+[ -n "$output" ] || { warn "Plugin '$plugin' produced no output — nothing to send"; exit 0; }
+
+# ── Route the output ────────────────────────────────────────────
+if [ "$PRINT" -eq 1 ]; then
+    printf '%s\n' "$output"
+    exit 0
+fi
+
+telegram="$(dirname "$0")/pos-communication-telegram"
+[ -x "$telegram" ] || telegram="$(command -v pos-communication-telegram 2>/dev/null || true)"
+[ -n "$telegram" ] && [ -x "$telegram" ] || err "pos-communication-telegram not found next to this script"
+
+if [ "$MARKDOWN" -eq 1 ]; then
+    exec "$telegram" --send "$output" --parse-mode markdown
+else
+    exec "$telegram" --send "$output"
+fi

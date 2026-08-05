@@ -114,6 +114,16 @@ if should_run 2 scripts; then
     run sudo install -m 644 lib/common.sh /usr/local/bin/common.sh
     run sudo install -m 644 lib/flags.sh /usr/local/bin/flags.sh
 
+    # ── Entertainment plugins ────────────────────────────────
+    run sudo mkdir -p /usr/local/share/linux_post_install/entertainment
+    pcount=0
+    for f in entertainment/*.sh; do
+        [ -f "$f" ] || continue
+        run sudo install -m 755 "$f" /usr/local/share/linux_post_install/entertainment/
+        pcount=$((pcount + 1))
+    done
+    ok "$pcount entertainment plugins -> /usr/local/share/linux_post_install/entertainment"
+
     # ── Precompiled architecture binaries ─────────────────────
     # Manually-compiled binaries (not available on the internet),
     # copied straight into /usr/local/bin for the matching arch.

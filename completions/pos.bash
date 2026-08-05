@@ -4,6 +4,7 @@
 # GEN:START posflags
 declare -A _pos_flags
 _pos_flags[communication-telegram]="--send"
+_pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[system-backup]="--service"
 _pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
@@ -113,6 +114,9 @@ _pos() {
                     ;;
                 communication-telegram)
                     _pos_complete_flags communication-telegram
+                    ;;
+                entertainment-send)
+                    _pos_complete_flags entertainment-send
                     ;;
                 network-hotspot)
                     _pos_complete_flags network-hotspot

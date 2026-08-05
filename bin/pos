@@ -81,8 +81,8 @@ usage() {
     cat <<EOF
 pos — Personal OS Toolkit
 
-  A unified CLI for network, docker, media, system,
-  and SSH tools on Debian/Ubuntu.
+  A unified CLI for network, docker, media, system, SSH,
+  USB, communication, and entertainment tools on Debian/Ubuntu.
 
 USAGE
   pos <category> <command> [args]
@@ -113,6 +113,9 @@ EXAMPLES
 
   pos communication telegram --send "Backup done"
                                           Send a Telegram message
+
+  pos entertainment send weather          Fetch Open-Meteo weather → Telegram
+  pos entertainment send joke --print     Preview a joke locally (no send)
 
   pos docker vbox create lab1              Create disposable Docker VM
   pos docker vbox create lab1 --dir .      Create VM using current directory

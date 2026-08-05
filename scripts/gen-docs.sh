@@ -132,7 +132,7 @@ regen_block() {
 regen_block "$ctx" tree
 regen_block "$ctx" dispatch
 regen_block "$ctx" selfcontained
-regen_block "$ctx" filetable
 regen_block "$comp" posflags
+regen_block "$ctx" filetable
 
 echo "gen-docs: $mode OK"
