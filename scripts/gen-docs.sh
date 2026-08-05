@@ -90,18 +90,13 @@ gen_posflags() {
 }
 
 # ── Replace (write) or verify (check) one marker block ──────────
-markers() {
-    # bash files use '#' comment markers, markdown uses HTML comments
-    case "$1" in
-        *.bash|*.sh) echo "# GEN:START $2" "# GEN:END $2" ;;
-        *)           echo "<!-- GEN:START $2 -->" "<!-- GEN:END $2 -->" ;;
-    esac
-}
-
 regen_block() {
     local file="$1" name="$2"
     local start end newfile tmp
-    read -r start end <<<"$(markers "$file" "$name")"
+    case "$file" in
+        *.bash|*.sh) start="# GEN:START $name"; end="# GEN:END $name" ;;
+        *)           start="<!-- GEN:START $name -->"; end="<!-- GEN:END $name -->" ;;
+    esac
     newfile="$(mktemp)"
     "gen_$name" > "$newfile"
 

@@ -5,15 +5,19 @@ set -euo pipefail
 # TEMPLATE — new `pos` CLI tool
 #
 #  1. Copy:     cp templates/pos-tool.sh bin/pos-<category>-<command>
-#  2. Exec bit: chmod +x bin/pos-<category>-<command>
-#  3. Register: add the command to usage() CATEGORIES/EXAMPLES in bin/pos
-#     If it reads stdin (password/selection prompts), also add it to
+#  2. Header:   add a `# POS:` line right after the shebang/strict-mode
+#               lines (single source of truth for generated docs):
+#                 # POS: <category> <command> — one-line description
+#                 # POS_FLAGS: --flag1 --flag2   (flag-style tools only)
+#  3. Exec bit: chmod +x bin/pos-<category>-<command>
+#  4. If it reads stdin (password/selection prompts), add it to
 #     INTERACTIVE_CMDS in bin/pos or its prompt breaks under the log tee.
-#  4. Docs:     DOC/POS.md section table + detail block,
-#     DOC/AGENT_Context_Project.md (bin tree, dispatch table,
-#     self-contained list, file line-count table), root README.md only
-#     when the category list changes.
-#  5. Deps:     add packages to PACKAGES in preinstall.sh if needed.
+#  5. Docs:     DOC/POS.md section table + detail block (hand-written).
+#               The AGENT_Context tables + completion flags come from
+#               `make gen` — never hand-edit between GEN markers.
+#  6. Deps:     add apt packages to PACKAGES in preinstall.sh; non-apt
+#               installers → `command -v <bin> || err "install from <URL>"`.
+#  7. Done:     `make gen && make check`
 #
 # Invoked as:  pos <category> <command> [args]
 # ────────────────────────────────────────────────────────────────

@@ -51,9 +51,9 @@ All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 
 `pos help <full command>` shows a tool's help, e.g. `pos help communication telegram` (all words joined with dashes → `pos-communication-telegram --help`). `pos <category>` or `pos <category> --help` shows a category's subcommands (derived from the `pos-<category>-*` filenames in `bin/` — no script execution, so it works even for root-only/interactive tools like `system-firewall`).
 
-**When adding a command, `bin/pos` itself has two things to keep in sync:**
+**When adding a command, `bin/pos` itself has one thing to keep in sync:**
 
-- **The usage text** (`usage()` function) — the CATEGORIES and EXAMPLES blocks are the built-in cheat-sheet (`pos --help`). Add the new command there or it stays invisible.
+- **The usage text** (`usage()` function) — the CATEGORIES block is **auto-derived** from the `pos-*` filenames in `bin/` (no manual edit, can't drift). The EXAMPLES block is the only hand-maintained part: add a line there only if you want the tool showcased in `pos --help`.
 - **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `media-mp4`, `system-backup`, `usb-server`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`. Trade-off: it's all-or-nothing **per script** — adding a flag-style tool with *any* prompting subcommand (e.g. `usb-server --share`) means *every* subcommand of that script skips output logging (e.g. `usb server --ls` loses the `tee` log too).
 
 ### Shared Library (`lib/common.sh`)
@@ -114,15 +114,20 @@ esac
   warn() { echo "[!] $*"; }
   err()  { echo "ERROR: $*" >&2; exit 1; }
   ```
-  If you skip `common.sh`, add the tool to the "Scripts that do NOT source common.sh" list in `DOC/AGENT_Context_Project.md`.
+  If you skip `common.sh`, `make gen` adds the tool to the "Scripts that do NOT source common.sh" list in `DOC/AGENT_Context_Project.md` automatically.
 
 ### 2. Make it discoverable
 
 - The dispatcher auto-discovers executable `bin/pos-*` files — no registration needed. The file **must be executable** (`chmod +x`, committed as mode `100755`); the dispatcher and `install.sh` skip non-executables.
 - `pos <category> --help` (and bare `pos <category>`) is derived from the `pos-<category>-*` filenames too — a new tool appears in its category's help automatically, with no registration (see [The `pos` CLI](#the-pos-cli)).
-- Add the command to the `usage()` CATEGORIES/EXAMPLES blocks in `bin/pos` (see [The `pos` CLI](#the-pos-cli)).
+- **Add the `# POS:` header** (single source of truth for the docs) right after the shebang/strict-mode lines:
+  ```bash
+  # POS: <category> <command> — one-line description rendered by `make gen`
+  # POS_FLAGS: --flag1 --flag2      # ONLY for flag-style tools
+  ```
+  The description feeds the dispatch table, bin tree and file table in `DOC/AGENT_Context_Project.md`; `POS_FLAGS` feeds flag completion in `completions/pos.bash`. Both update via `make gen`.
+- Optionally add an EXAMPLES line in `bin/pos` `usage()` to showcase the tool in `pos --help`.
 - If the command **reads stdin** (prompts/selection), add it to `INTERACTIVE_CMDS` in `bin/pos` — see [The `pos` CLI](#the-pos-cli).
-- If it takes flag-style args (e.g. `--send "text"`), consider extending `completions/pos.bash`; category/subcommand names are auto-discovered from the filename.
 
 ### 3. Add system dependencies
 
@@ -150,8 +155,8 @@ Place public keys in `config/authorized_keys` (one per line). `postinstall.sh` r
 
 ### 6. Update the docs
 
-- `DOC/POS.md`: add the command to the section table + a detail block (commands, behavior, configuration).
-- `DOC/AGENT_Context_Project.md`: update the bin tree, the dispatch table, the "scripts that do NOT source common.sh" list (if applicable), and the file line-count table.
+- `DOC/POS.md`: add the command to the section table + a detail block (commands, behavior, configuration). This is the one hand-written doc.
+- `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, no-common.sh list, line-count table) and the `completions/pos.bash` flags block are produced by `make gen` — do **not** hand-edit between the `GEN:START`/`GEN:END` markers.
 - Root `README.md`: only if the `pos` category list in the help text changes.
 
 ### 7. Test
@@ -163,7 +168,11 @@ shellcheck bin/your-tool
 ./bin/your-tool --help
 bin/pos help <full command>   # confirm dispatch works
 bin/pos <category> --help     # confirm category listing includes the new tool (first tool in a new category)
+make gen                      # regenerate doc tables + completion flags
+make check                    # full self-consistency gate (syntax, exec bits, doc/code sync, smoke)
 ```
+
+`make check` is the definition of done — the same check runs as a pre-commit hook once you've run `make hook`.
 
 ---
 

@@ -35,6 +35,7 @@ Linux_post_install/
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
+│   ├── pos-communication-telegram # Send Telegram messages via Bot API (--send, test, config set)
 │   ├── pos-docker-compose         # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health          # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps              # Enhanced container overview (health, IPs, ports, uptime)
@@ -199,6 +200,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
+| communication | telegram | `pos-communication-telegram` | Send Telegram messages via Bot API (--send, test, config set) |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
@@ -257,7 +259,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`bin/pos`, `pos-network-ip`, `pos-network-checkport`, `pos-network-scan`, `pos-network-hotspot`, `pos-media-mp3`, `pos-media-mp4`, `pos-ssh-load-keys`, `pos-system-firewall`, `pos-communication-telegram`.
+`pos`, `pos-communication-telegram`, `pos-media-mp3`, `pos-media-mp4`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -421,11 +423,12 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 ### Adding a New Tool
 
 1. Create `bin/pos-<category>-<command>` from `templates/pos-tool.sh` — must be executable (`100755`); it auto-appears in `pos <category> --help` (filename-derived, no registration)
-2. Register in `bin/pos` `usage()` CATEGORIES/EXAMPLES; add to `INTERACTIVE_CMDS` in `bin/pos` if it reads stdin
-3. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed)
-4. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
-5. Update docs: `DOC/POS.md` (section table + detail), `DOC/AGENT_Context_Project.md` (bin tree, dispatch table, self-contained list, file line-count table), root `README.md` only if the category list changes
-6. Test: `bash -n bin/your-tool && shellcheck bin/your-tool && bin/pos help <full command> && bin/pos <category> --help`
+2. Add the `# POS: <cat> <cmd> — <one-line description>` header right after the shebang (plus `# POS_FLAGS: ...` for flag-style tools) — this is the single source of truth for the generated docs
+3. Add to `INTERACTIVE_CMDS` in `bin/pos` if it reads stdin
+4. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed); non-apt/manual installers → `command -v` guard in the tool instead
+5. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
+6. Update docs: `DOC/POS.md` (section table + detail — hand-written); `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, self-contained list, line-count table) and completion flags update via `make gen` — never hand-edit between `GEN:START`/`GEN:END` markers; root `README.md` only if the category list changes
+7. Test: `make gen && make check` — `make check` (bash -n + doc/code sync + smoke) is the definition of done; also `bin/pos help <full command> && bin/pos <category> --help`
 
 ### Testing
 
@@ -466,6 +469,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
+<!-- GEN:START filetable -->
+| `bin/pos` | 208 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-communication-telegram` | 140 | Send Telegram messages via Bot API (--send, test, config set) |
 | `bin/pos-docker-compose` | 364 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
@@ -482,6 +487,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 285 | Interactive UFW management |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `completions/pos.bash` | 146 | Dynamic bash completion |
+<!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
 ---
@@ -490,7 +496,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | Task | Where to Edit |
 |------|---------------|
-| Add a new CLI tool | Create `bin/pos-<cat>-<cmd>`, add apt deps in `preinstall.sh` (non-apt/manual installers: add a `command -v` guard in the tool instead) |
+| Add a new CLI tool | Create `bin/pos-<cat>-<cmd>` with a `# POS:` header, chmod +x, add deps (apt → `preinstall.sh` PACKAGES; non-apt → `command -v` guard), then `make gen && make check` |
+| Regenerate doc tables / completion flags | `make gen` (see `scripts/gen-docs.sh`; never hand-edit between `GEN:START`/`GEN:END` markers) |
+| Verify repo self-consistency | `make check` (runs `scripts/check-sync.sh`; also the pre-commit hook after `make hook`)
 | Add a new app installer | Create `apps/<name>.sh` (auto-discovered) |
 | Add a feature | Create `features/<name>.sh` (installed on demand via `./install.sh --feature`) |
 | Add a systemd service | Create `systemd/<name>.service` (auto-installed by postinstall; gate on a flag if it backs a feature) |
