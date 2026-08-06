@@ -49,6 +49,10 @@ summary (newest last).
 
 ## Done (summary, newest last)
 
+- 2026-08-06: Multi-platform alerting — `lib/notify.sh` routes via `NOTIFY_PLATFORM`
+  (`notify.env`, default telegram; sender contract for Matrix/Synapse later),
+  `system.env` shared config for health/backup, dynamic effective values in
+  `--help`, telegram `--markdown` alias.
 - 2026-08-06: Tier 1 — `pos system health` (dashboard + `--send`), `lib/notify.sh`
   (wired into backup + firewall), daily digest timer via postinstall.
 - 2026-08-06: Document Map index + Entertainment section in AGENT_Context (cf36780).

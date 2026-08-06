@@ -5,18 +5,14 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 
-SEND=0
-MARKDOWN=0
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help) usage_placeholder=1 ;;
-        --send)    SEND=1 ;;
-        --markdown) MARKDOWN=1 ;;
-        *)         err "Unknown option '$arg' (see --help)" ;;
-    esac
-done
+load_system_env
 
-if [ "${usage_placeholder:-0}" -eq 1 ]; then
+# Effective dynamic values (environment > system.env > defaults) shown in --help
+EFF_PLATFORMS="$(notify_platforms)"
+EFF_MAX_AGE="${HEALTH_BACKUP_MAX_AGE_DAYS:-2}"
+EFF_ROOTS="${BACKUP_SERVICE_ROOTS:-/srv $HOME/srv}"
+
+usage() {
     cat <<EOF
 Usage: pos system health [--send] [--markdown]
 
@@ -24,20 +20,37 @@ Host health dashboard: disk, RAM/swap, failed systemd units, backup age,
 fail2ban, docker containers. Exits 1 if any check FAILs.
 
 Flags:
-  --send       Send the summary via Telegram (uses lib/notify.sh)
+  --send       Send the summary via the configured notify platform(s)
+               (uses lib/notify.sh; see NOTIFY_PLATFORM below)
   --markdown   Same as --send, with markdown parse mode
   -h, --help   Show this help
 
-Environment:
-  HEALTH_BACKUP_MAX_AGE_DAYS   Max backup age before a WARN (default: 2)
-  BACKUP_SERVICE_ROOTS         Where to look for backups (default: /srv \$HOME/srv)
+Environment (effective values):
+  NOTIFY_PLATFORM             ${EFF_PLATFORMS}
+  HEALTH_BACKUP_MAX_AGE_DAYS  ${EFF_MAX_AGE}
+  BACKUP_SERVICE_ROOTS        ${EFF_ROOTS}
+
+Loaded from ~/.config/linux_post_install/system.env (health/backup settings)
+and ~/.config/linux_post_install/notify.env (NOTIFY_PLATFORM) unless already
+exported. Defaults apply when neither is set.
 
 Examples:
   pos system health
   pos system health --send
 EOF
     exit 0
-fi
+}
+
+SEND=0
+MARKDOWN=0
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+        --send)    SEND=1 ;;
+        --markdown) MARKDOWN=1 ;;
+        *)         err "Unknown option '$arg' (see --help)" ;;
+    esac
+done
 
 if [ "$MARKDOWN" -eq 1 ]; then
     SEND=1

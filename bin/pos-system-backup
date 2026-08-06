@@ -6,6 +6,9 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 
+load_system_env
+EFF_ROOTS="${BACKUP_SERVICE_ROOTS:-/srv $HOME/srv}"
+
 trap 'notify_send "Backup FAILED: ${FOLDER:-unknown}"' ERR
 
 usage() {
@@ -24,7 +27,8 @@ The final artifact <name>_<date>.tar.gz.gpg is written to the current directory.
 
 Environment:
   BACKUP_SERVICE_ROOTS   Space-separated roots for --service
-                         (default: /srv \$HOME/srv)
+                         (effective: ${EFF_ROOTS})
+  (loaded from ~/.config/linux_post_install/system.env unless exported)
 EOF
     exit 0
 }

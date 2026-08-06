@@ -62,17 +62,19 @@ WantedBy=multi-user.target
 
 ### pos-health.service
 
-**Purpose:** daily "health digest" — runs `pos system health --send --markdown` at 08:00 and sends the report to Telegram.
+**Purpose:** daily "health digest" — runs `pos system health --send --markdown` at 08:00 and sends the report to the configured notify platform(s).
 
 ```ini
 [Unit]
-Description=POS Health digest (daily report via Telegram)
+Description=POS Health digest (daily report via configured notify platforms)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=__POS_USER__
+EnvironmentFile=-%h/.config/linux_post_install/system.env
+EnvironmentFile=-%h/.config/linux_post_install/notify.env
 ExecStart=/usr/local/bin/pos system health --send --markdown
 
 [Timer]
@@ -82,7 +84,7 @@ Persistent=true
 
 The service is `Type=oneshot` and is driven **only** by its companion `pos-health.timer` (`WantedBy=timers.target`); the service itself is never enabled directly.
 
-**Configuration:** `postinstall.sh` substitutes `__POS_USER__` with the installing user (`${SUDO_USER:-$USER}`) so the digest uses that user's real Telegram config. The timer is enabled only when `~/.config/linux_post_install/telegram.env` already exists — otherwise postinstall warns and skips; re-run postinstall after configuring Telegram (`pos communication telegram config set TELEGRAM_*`) to install it.
+**Configuration:** `postinstall.sh` substitutes `__POS_USER__` with the installing user (`${SUDO_USER:-$USER}`) so the digest uses that user's real notify config. The `EnvironmentFile=` lines load `system.env` (health/backup settings) and `notify.env` (`NOTIFY_PLATFORM`). The timer is enabled only when a Telegram config (`~/.config/linux_post_install/telegram.env`) already exists — otherwise postinstall warns and skips; re-run postinstall after configuring a notify platform to install it.
 
 ---
 

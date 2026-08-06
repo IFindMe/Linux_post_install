@@ -527,7 +527,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 213 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram` | 270 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
+| `bin/pos-communication-telegram` | 274 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
 | `bin/pos-docker-compose` | 364 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
@@ -544,9 +544,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 121 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-backup` | 125 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
-| `bin/pos-system-health` | 230 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
+| `bin/pos-system-health` | 243 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `completions/pos.bash` | 189 | Dynamic bash completion |
 <!-- GEN:END filetable -->

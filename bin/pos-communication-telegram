@@ -34,6 +34,7 @@ Options:
   --type <type>       Force a type: message|file|link|sticker|photo|video|audio|voice|animation
   --caption <text>    Caption for file/photo/video/audio/voice/animation
   --parse-mode <mode> Format mode: plain (default), markdown, html (message/link/caption)
+  --markdown          Alias for --parse-mode markdown (uniform notify_send contract)
   --no-preview        Disable the link's web page preview (message/link only)
   --token <t>         Override token for one send
   --chat-id <id>      Override chat id for one send
@@ -143,6 +144,9 @@ cmd_send() {
             --caption)
                 [ $# -ge 2 ] || err "--caption needs a value"
                 caption="$2"; shift 2 ;;
+            --markdown)
+                # Alias for --parse-mode markdown (uniform notify_send contract)
+                parse_mode="markdown"; shift ;;
             --parse-mode)
                 [ $# -ge 2 ] || err "--parse-mode needs a value"
                 case "$2" in

@@ -117,5 +117,24 @@ confirm() {
     fi
 }
 
+# ── system.env loader ──────────────────────────────────────────
+# Shared "system" tool config (~/.config/linux_post_install/system.env).
+# Fills only variables that are not already exported — an explicitly-set
+# environment variable always wins (flags > environment > file).
+load_system_env() {
+    local f="$HOME/.config/linux_post_install/system.env" k v
+    [ -f "$f" ] || return 0
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$f" || true)
+}
+
 # ── Source guard ───────────────────────────────────────────────
 return 0 2>/dev/null || true

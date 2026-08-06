@@ -34,6 +34,21 @@ else
     warn "config/entertainment.env not found, skipping"
 fi
 
+# ── system + notify config templates ───────────────────────────
+# Copied only if the user has not already created their own (no clobber).
+mkdir -p "$ENT_DIR"
+for tpl in system.env notify.env; do
+    if [ -f "config/$tpl" ]; then
+        if [ -f "$ENT_DIR/$tpl" ]; then
+            log "$tpl already exists, keeping it"
+        else
+            cp "config/$tpl" "$ENT_DIR/$tpl"
+            chmod 600 "$ENT_DIR/$tpl"
+            log "Installed $tpl — edit $ENT_DIR/$tpl"
+        fi
+    fi
+done
+
 # ── Ensure all bin dirs are in PATH ────────────────────────────
 PATH_LINE='export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin:$PATH"'
 BASHRC="$HOME/.bashrc"

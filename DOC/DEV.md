@@ -148,7 +148,9 @@ PACKAGES=(
 Two kinds of config, don't mix them up:
 
 - **Machine defaults shipped by the installer:** place the file in `config/` and add copy logic to `postinstall.sh`. If it contains secrets, add to `.gitignore` and document in `DOC/`.
-- **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`) and `pos-communication-telegram` (`telegram.env`, token masked in `config` output). Never store tokens in the repo.
+- **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`), `pos-communication-telegram` (`telegram.env`, token masked in `config` output), and the shared ones below. Never store tokens in the repo.
+  - `system.env` — shared "system" settings loaded by `pos-system-*` tools via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS`). Env already exported wins over the file.
+  - `notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`), read by `lib/notify.sh`.
 
 ### 5. Add SSH keys (if needed)
 
@@ -277,7 +279,7 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 
 ### Alerting
 
-To notify on events (Telegram), source the shared helper instead of calling the telegram tool directly:
+To notify on events, source the shared helper instead of calling a platform tool directly:
 
 ```bash
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
@@ -285,7 +287,15 @@ notify_send "Backup completed"
 notify_send "**disk full**" --markdown
 ```
 
-`notify_send` is deliberately dependency-free (defines only itself, so it never clobbers a tool's own `log`/`warn`/`err`) and **silent-fails**: if Telegram is missing or not configured it warns and returns 0, never breaking the caller's flow or exit code. Source it opt-in in any tool that should alert; for failure alerts use `trap 'notify_send "..." ERR'`.
+`notify_send` is deliberately dependency-free (defines only itself, so it never clobbers a tool's own `log`/`warn`/`err`) and **silent-fails**: if no platform is configured it warns and returns 0, never breaking the caller's flow or exit code. Source it opt-in in any tool that should alert; for failure alerts use `trap 'notify_send "..." ERR'`.
+
+**Multi-platform routing:** `notify_send` delivers to every platform listed in `NOTIFY_PLATFORM` (env or `~/.config/linux_post_install/notify.env`, default `telegram`, comma-separated to send to all). Adding a new platform (e.g. Matrix/Synapse) means creating a `bin/pos-communication-<platform>` tool that implements the **sender contract**:
+
+```bash
+pos-communication-<platform> send <value> [--markdown]   # exit 0 on delivery
+```
+
+then listing it in `NOTIFY_PLATFORM`. `pos-communication-telegram` already follows this (`--markdown` is an alias for `--parse-mode markdown`). No changes to `lib/notify.sh` are needed for a new platform.
 
 ### Idempotency
 
