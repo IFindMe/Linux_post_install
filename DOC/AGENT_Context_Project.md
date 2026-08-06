@@ -4,6 +4,27 @@
 
 ---
 
+## Document Map
+
+> Auto-generated section index (line ranges). Run `make gen` to refresh.
+
+<!-- GEN:START docmap -->
+| ## 1. Project Overview | 28–43 |
+| ## 2. Directory Structure | 44–164 |
+| ## 3. Installation Flow | 165–216 |
+| ## 4. The `pos` CLI System | 217–273 |
+| ## 5. Shared Library — `lib/common.sh` | 274–304 |
+| ## 6. Docker Compose / ScaleTail | 305–347 |
+| ## 7. Optional Apps (`apps/`) | 348–377 |
+| ## 8. Entertainment Module | 378–391 |
+| ## 9. Systemd Services | 392–402 |
+| ## 10. Configuration Files | 403–426 |
+| ## 11. Coding Conventions | 427–459 |
+| ## 12. Development Workflow | 460–511 |
+| ## 13. Key File Quick Reference | 512–553 |
+| ## 14. Common Tasks for Agents | 554–578 |
+<!-- GEN:END docmap -->
+
 ## 1. Project Overview
 
 **Linux_post_install** is a personal bootstrap and homelab toolkit for Debian/Ubuntu. One command turns a bare install into a fully productive machine:
@@ -354,7 +375,21 @@ ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar patter
 
 ---
 
-## 8. Systemd Services
+## 8. Entertainment Module
+
+Public-API "entertainment" plugins (weather, joke, gold) that can auto-send their output to Telegram on a schedule.
+
+- **CLI:** `pos entertainment {config|enable|disable|send|status}` — see the dispatch table in §4 and POS.md [entertainment](#entertainment).
+- **Library:** `lib/entertainment-lib.sh` — config-file helpers, ENABLED-list parsing, plugin lookup, and scheduler sync (systemd user timers, crontab fallback).
+- **Plugins:** `entertainment/*.sh` — standalone scripts that fetch a public API and **print the message to stdout** (what gets sent). Each declares its name with a `# POS_PLUGIN: <name>` header; a new plugin is auto-discovered.
+- **Config:** `~/.config/linux_post_install/entertainment.env` (ENABLED auto-trigger list, weather location). Template: `config/entertainment.env`, auto-installed by postinstall.
+- **Sending:** `pos entertainment send <plugin> [--print] [--markdown]` runs the plugin and delivers via `pos communication telegram --send`.
+- **Auto-trigger:** `pos entertainment enable <plugin> <interval>` writes the plugin into ENABLED and syncs a systemd user timer (allowed intervals: `5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly`, or `OnCalendar=…`); `disable` removes it.
+- **Docs:** DEV.md "Adding an Entertainment Plugin" (§1 step list) and POS.md [entertainment](#entertainment).
+
+---
+
+## 9. Systemd Services
 
 | Service | File | Purpose |
 |---------|------|---------|
@@ -365,7 +400,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 
 ---
 
-## 9. Configuration Files
+## 10. Configuration Files
 
 ### Gitignored Secrets
 
@@ -389,7 +424,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 
 ---
 
-## 10. Coding Conventions
+## 11. Coding Conventions
 
 ### Script Standards
 
@@ -422,7 +457,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 
 ---
 
-## 11. Development Workflow
+## 12. Development Workflow
 
 ### Adding a New Feature
 
@@ -474,7 +509,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 ---
 
-## 12. Key File Quick Reference
+## 13. Key File Quick Reference
 
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -516,7 +551,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 ---
 
-## 13. Common Tasks for Agents
+## 14. Common Tasks for Agents
 
 | Task | Where to Edit |
 |------|---------------|

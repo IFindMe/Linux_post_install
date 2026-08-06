@@ -89,6 +89,28 @@ gen_posflags() {
     done
 }
 
+# Section index of AGENT_Context itself: maps each "## " heading to its
+# line range. Excludes the "Document Map" heading (this block).
+gen_docmap() {
+    local file="$ctx" lines=() sections=() line n title i last
+    mapfile -t lines < <(grep -nE '^## ' "$file")
+    for line in "${lines[@]}"; do
+        title="${line#*:}"
+        [[ "$title" == "## Document Map" ]] && continue
+        sections+=("$line")
+    done
+    for i in "${!sections[@]}"; do
+        n="${sections[$i]%%:*}"
+        title="${sections[$i]#*:}"
+        if [ "$i" -eq $((${#sections[@]} - 1)) ]; then
+            last=$(wc -l < "$file")
+        else
+            last=$(( ${sections[$((i + 1))]%%:*} - 1 ))
+        fi
+        printf '| %s | %s–%s |\n' "$title" "$n" "$last"
+    done
+}
+
 # ── Replace (write) or verify (check) one marker block ──────────
 regen_block() {
     local file="$1" name="$2"
@@ -134,5 +156,17 @@ regen_block "$ctx" dispatch
 regen_block "$ctx" selfcontained
 regen_block "$comp" posflags
 regen_block "$ctx" filetable
+
+# docmap is self-referential: its own block size shifts the section line
+# numbers below it — regenerate until stable (converges in 2-3 passes).
+regen_block "$ctx" docmap
+if [ "$mode" = "write" ]; then
+    for _ in 1 2 3 4 5; do
+        prev="$(sed -n '/<!-- GEN:START docmap -->/,/<!-- GEN:END docmap -->/p' "$ctx")"
+        regen_block "$ctx" docmap
+        after="$(sed -n '/<!-- GEN:START docmap -->/,/<!-- GEN:END docmap -->/p' "$ctx")"
+        [ "$prev" = "$after" ] && break
+    done
+fi
 
 echo "gen-docs: $mode OK"
