@@ -29,15 +29,17 @@ e.g.:
 Environment (effective values):
   NOTIFY_PLATFORM             telegram
   HEALTH_BACKUP_MAX_AGE_DAYS  2
-  BACKUP_SERVICE_ROOTS        /srv /home/you/srv
+  BACKUP_SERVICE_ROOTS        /srv $HOME/srv
 ```
+
+(`$HOME` is resolved at runtime — on this host that is `/srv /home/unknown/srv`.)
 
 ### Configuration
 
 ```bash
-# ~/.config/linux_post_install/system.env
-BACKUP_SERVICE_ROOTS=/srv /home/you/srv     # where backup-age is checked
-HEALTH_BACKUP_MAX_AGE_DAYS=3                # WARN if newest backup older
+# ~/.config/linux_post_install/system.env   (comment-only defaults — uncomment to override)
+BACKUP_SERVICE_ROOTS=/srv $HOME/srv    # roots for backup-age check + backup --service
+HEALTH_BACKUP_MAX_AGE_DAYS=3           # WARN if newest backup older (default 2)
 # ~/.config/linux_post_install/notify.env
 NOTIFY_PLATFORM=telegram
 ```
