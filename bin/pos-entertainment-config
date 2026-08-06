@@ -56,13 +56,26 @@ case "${1:-}" in
     set)
         shift
         [ $# -ge 1 ] || usage
+        # Validate every KEY=VALUE pair first — all or nothing, so a typo'd
+        # arg (e.g. 'ENABLED ="x"') can't partially write or clear a key.
+        for pair in "$@"; do
+            case "$pair" in
+                *=*)
+                    key="${pair%%=*}"
+                    val="${pair#*=}"
+                    ;;
+                *)
+                    err "Invalid entry '$pair' — expected KEY=VALUE with no spaces around '=', e.g. ENABLED=\"gold, 1h\""
+                    ;;
+            esac
+            [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || \
+                err "Invalid key '$key' in '$pair' (expected UPPER_SNAKE, e.g. WEATHER_LAT)"
+            [ -z "$val" ] && [ "$key" != "ENABLED" ] && err "No value given for '$key' (expected $key=...)"
+            key_known "$key" || warn "Key '$key' not referenced by any installed plugin — saving anyway"
+        done
         for pair in "$@"; do
             key="${pair%%=*}"
             val="${pair#*=}"
-            [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || \
-                err "Invalid key '$key' (expected UPPER_SNAKE, e.g. WEATHER_LAT)"
-            [ -z "$val" ] && [ "$key" != "ENABLED" ] && err "No value given (expected $key=...)"
-            key_known "$key" || warn "Key '$key' not referenced by any installed plugin — saving anyway"
             write_config_key "$key" "$val"
             ok "$key saved to $CONFIG_FILE"
         done
