@@ -94,7 +94,17 @@ fi
 # ── systemd services ───────────────────────────────────────────
 if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
     run sudo cp systemd/*.service /etc/systemd/system/
+    if [ -n "$(ls -A systemd/*.timer 2>/dev/null)" ]; then
+        run sudo cp systemd/*.timer /etc/systemd/system/
+    fi
     run sudo systemctl daemon-reload
+
+    # pos-health.service runs as the installing user so the digest uses that
+    # user's real Telegram config. The timer is enabled only when a telegram.env
+    # is configured — re-run postinstall after configuring Telegram to pick it up.
+    DIGEST_USER="${SUDO_USER:-$USER}"
+    DIGEST_HOME="$(getent passwd "$DIGEST_USER" 2>/dev/null | cut -d: -f6)"
+    DIGEST_HOME="${DIGEST_HOME:-$HOME}"
 
     for svc in systemd/*.service; do
         svc_name=$(basename "$svc")
@@ -102,6 +112,18 @@ if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
         # the autostart feature flag is green (set by ./install.sh --feature)
         if [ "$svc_name" = "autostart.service" ] && ! flag_is_set autostart; then
             warn "autostart feature not installed — skipping autostart.service (run ./install.sh --feature)"
+            continue
+        fi
+        if [ "$svc_name" = "pos-health.service" ]; then
+            run sudo sed -i "s|__POS_USER__|$DIGEST_USER|" "/etc/systemd/system/$svc_name"
+            run sudo systemctl daemon-reload
+            if [ -f "$DIGEST_HOME/.config/linux_post_install/telegram.env" ]; then
+                run sudo systemctl enable --now pos-health.timer 2>/dev/null || \
+                    run sudo systemctl enable pos-health.timer
+                log "Daily health digest timer enabled for $DIGEST_USER"
+            else
+                warn "Telegram not configured — skipping health digest timer (run 'pos communication telegram config set ...' then re-run postinstall)"
+            fi
             continue
         fi
         run sudo systemctl enable --now "$svc_name" 2>/dev/null || \

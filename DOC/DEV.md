@@ -275,6 +275,18 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 
 ## Best Practices
 
+### Alerting
+
+To notify on events (Telegram), source the shared helper instead of calling the telegram tool directly:
+
+```bash
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+notify_send "Backup completed"
+notify_send "**disk full**" --markdown
+```
+
+`notify_send` is deliberately dependency-free (defines only itself, so it never clobbers a tool's own `log`/`warn`/`err`) and **silent-fails**: if Telegram is missing or not configured it warns and returns 0, never breaking the caller's flow or exit code. Source it opt-in in any tool that should alert; for failure alerts use `trap 'notify_send "..." ERR'`.
+
 ### Idempotency
 
 Check before creating, use `>>` with grep guards, don't overwrite user configs.

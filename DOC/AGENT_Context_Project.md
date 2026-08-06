@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–164 |
-| ## 3. Installation Flow | 165–216 |
-| ## 4. The `pos` CLI System | 217–273 |
-| ## 5. Shared Library — `lib/common.sh` | 274–304 |
-| ## 6. Docker Compose / ScaleTail | 305–347 |
-| ## 7. Optional Apps (`apps/`) | 348–377 |
-| ## 8. Entertainment Module | 378–391 |
-| ## 9. Systemd Services | 392–402 |
-| ## 10. Configuration Files | 403–426 |
-| ## 11. Coding Conventions | 427–459 |
-| ## 12. Development Workflow | 460–511 |
-| ## 13. Key File Quick Reference | 512–553 |
-| ## 14. Common Tasks for Agents | 554–578 |
+| ## 2. Directory Structure | 44–165 |
+| ## 3. Installation Flow | 166–217 |
+| ## 4. The `pos` CLI System | 218–275 |
+| ## 5. Shared Library — `lib/common.sh` | 276–306 |
+| ## 6. Docker Compose / ScaleTail | 307–349 |
+| ## 7. Optional Apps (`apps/`) | 350–379 |
+| ## 8. Entertainment Module | 380–393 |
+| ## 9. Systemd Services | 394–404 |
+| ## 10. Configuration Files | 405–428 |
+| ## 11. Coding Conventions | 429–461 |
+| ## 12. Development Workflow | 462–513 |
+| ## 13. Key File Quick Reference | 514–556 |
+| ## 14. Common Tasks for Agents | 557–581 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -76,6 +76,7 @@ Linux_post_install/
 │   ├── pos-ssh-load-keys          # Load all SSH keys into the agent
 │   ├── pos-system-backup          # Encrypted (AES-256) folder snapshots (tar + gpg)
 │   ├── pos-system-firewall        # Interactive UFW management
+│   ├── pos-system-health          # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-usb-server             # USB Redirector server control (--ls, --share; prompts when args omitted)
 <!-- GEN:END tree -->
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
@@ -252,6 +253,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
+| system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | usb | server | `pos-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
 <!-- GEN:END dispatch -->
 
@@ -542,10 +544,11 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 117 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-firewall` | 285 | Interactive UFW management |
+| `bin/pos-system-backup` | 121 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-firewall` | 291 | Interactive UFW management |
+| `bin/pos-system-health` | 230 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 188 | Dynamic bash completion |
+| `completions/pos.bash` | 189 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

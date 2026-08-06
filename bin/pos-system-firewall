@@ -9,6 +9,8 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
 HISTORY=()
 DRY_RUN=0
 
@@ -29,6 +31,10 @@ run_cmd() {
             echo "(dry-run) skipping execution"
         else
             "${cmd[@]}"
+            # Alert on mutating commands only (status queries are read-only)
+            if [[ "${cmd[1]:-}" != "status" ]]; then
+                notify_send "Firewall: ${cmd[*]}"
+            fi
         fi
         HISTORY+=("${cmd[*]}")
     else

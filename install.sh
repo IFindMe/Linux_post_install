@@ -113,6 +113,7 @@ if should_run 2 scripts; then
     done
     run sudo install -m 644 lib/common.sh /usr/local/bin/common.sh
     run sudo install -m 644 lib/flags.sh /usr/local/bin/flags.sh
+    run sudo install -m 644 lib/notify.sh /usr/local/bin/notify.sh
     run sudo install -m 644 lib/entertainment-lib.sh /usr/local/bin/entertainment-lib.sh
 
     # ── Entertainment plugins ────────────────────────────────

@@ -15,7 +15,7 @@ It is a **personal toolkit** — a bootstrap script, a unified `pos` CLI for eve
 - Wi-Fi hotspot tools (`create_ap`, `wihotspot-gui`) via `pos network hotspot`
 - 15 optional desktop apps (VS Code, Brave, OBS, Tailscale, …) — pick what you want
 - 119+ self-hosted services with Tailscale access (Jellyfin, Home Assistant, …)
-- systemd services for SSH agent and boot-time automation
+- systemd services for SSH agent, boot-time automation, and a daily Telegram health digest (`pos system health`)
 - Everything lands in `/usr/local/bin/` — you can delete the repo after install
 
 ## Quick Start

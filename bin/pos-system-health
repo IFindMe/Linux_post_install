@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system health — Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
+# POS_FLAGS: --send --markdown
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+SEND=0
+MARKDOWN=0
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage_placeholder=1 ;;
+        --send)    SEND=1 ;;
+        --markdown) MARKDOWN=1 ;;
+        *)         err "Unknown option '$arg' (see --help)" ;;
+    esac
+done
+
+if [ "${usage_placeholder:-0}" -eq 1 ]; then
+    cat <<EOF
+Usage: pos system health [--send] [--markdown]
+
+Host health dashboard: disk, RAM/swap, failed systemd units, backup age,
+fail2ban, docker containers. Exits 1 if any check FAILs.
+
+Flags:
+  --send       Send the summary via Telegram (uses lib/notify.sh)
+  --markdown   Same as --send, with markdown parse mode
+  -h, --help   Show this help
+
+Environment:
+  HEALTH_BACKUP_MAX_AGE_DAYS   Max backup age before a WARN (default: 2)
+  BACKUP_SERVICE_ROOTS         Where to look for backups (default: /srv \$HOME/srv)
+
+Examples:
+  pos system health
+  pos system health --send
+EOF
+    exit 0
+fi
+
+if [ "$MARKDOWN" -eq 1 ]; then
+    SEND=1
+fi
+
+FAILURES=0
+WARNINGS=0
+REPORT=()
+
+report() {
+    local st="$1" label="$2" detail="$3" line
+    case "$st" in
+        ok)
+            echo " ${GREEN}${BOLD}[ OK ]${RESET}  ${label}: ${detail}"
+            printf -v line "[ OK ]  %s: %s" "$label" "$detail"
+            ;;
+        warn)
+            echo " ${YELLOW}${BOLD}[WARN]${RESET}  ${label}: ${detail}"
+            printf -v line "[WARN]  %s: %s" "$label" "$detail"
+            WARNINGS=$((WARNINGS + 1))
+            ;;
+        fail)
+            echo " ${RED}${BOLD}[FAIL]${RESET}  ${label}: ${detail}"
+            printf -v line "[FAIL]  %s: %s" "$label" "$detail"
+            FAILURES=$((FAILURES + 1))
+            ;;
+    esac
+    REPORT+=("$line")
+}
+
+host="$(hostname -s 2>/dev/null || echo "localhost")"
+ip_public="$(curl -fsS -m 5 https://api.ipify.org 2>/dev/null || echo "unreachable")"
+loadavg="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo "?")"
+uptime_s="$(uptime -p 2>/dev/null || echo "?")"
+
+section "System Health — ${host}"
+echo " ${BLUE}${BOLD}date${RESET}    $(date '+%Y-%m-%d %H:%M:%S')"
+echo " ${BLUE}${BOLD}uptime${RESET}  ${uptime_s}"
+echo " ${BLUE}${BOLD}load${RESET}    ${loadavg}"
+echo " ${BLUE}${BOLD}ip${RESET}      ${ip_public}"
+echo
+
+# ── Disk ──────────────────────────────────────────────────────
+DISK_PCT_MAX=0
+DISK_ISSUES=()
+while read -r fs use mount; do
+    pct=${use%\%}
+    if [ "$pct" -gt "$DISK_PCT_MAX" ]; then
+        DISK_PCT_MAX="$pct"
+    fi
+    if [ "$pct" -ge 90 ]; then
+        DISK_ISSUES+=("${mount} ${pct}%")
+    elif [ "$pct" -ge 85 ]; then
+        DISK_ISSUES+=("${mount} ${pct}%")
+    fi
+done < <(df -P -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs -x proc -x sysfs -x cgroup2 -x zfs -x aufs 2>/dev/null | awk 'NR>1 && $1 !~ /loop|sr[0-9]/ {print $1, $5, $6}')
+
+if [ ${#DISK_ISSUES[@]} -gt 0 ]; then
+    report fail "disk" "${DISK_ISSUES[*]}"
+else
+    report ok "disk" "max usage ${DISK_PCT_MAX}%"
+fi
+
+# ── RAM / swap ────────────────────────────────────────────────
+mem=($(free -m | awk '/^Mem:/{print $2, $7}'))
+swap=($(free -m | awk '/^Swap:/{print $2, $3}'))
+MEM_TOTAL=${mem[0]:-0}
+MEM_AVAIL=${mem[1]:-0}
+MEM_PCT=100
+if [ "$MEM_TOTAL" -gt 0 ]; then
+    MEM_PCT=$(( (MEM_TOTAL - MEM_AVAIL) * 100 / MEM_TOTAL ))
+fi
+SWAP_PCT=0
+if [ "${swap[0]:-0}" -gt 0 ]; then
+    SWAP_PCT=$(( swap[1] * 100 / swap[0] ))
+fi
+if [ "$MEM_PCT" -ge 95 ] || [ "$SWAP_PCT" -ge 90 ]; then
+    report fail "ram" "mem ${MEM_PCT}% used, swap ${SWAP_PCT}%"
+elif [ "$MEM_PCT" -ge 85 ]; then
+    report warn "ram" "mem ${MEM_PCT}% used, swap ${SWAP_PCT}%"
+else
+    report ok "ram" "mem ${MEM_PCT}% used, swap ${SWAP_PCT}%"
+fi
+
+# ── Failed systemd units ──────────────────────────────────────
+if command -v systemctl >/dev/null 2>&1; then
+    failed_units=()
+    while IFS= read -r u; do
+        [ -n "$u" ] && failed_units+=("${u%% *}")
+    done < <(systemctl --failed --plain --no-legend --no-pager 2>/dev/null || true)
+    if [ "${#failed_units[@]}" -gt 0 ]; then
+        report fail "services" "${#failed_units[@]} failed unit(s): ${failed_units[*]}"
+    else
+        report ok "services" "no failed units"
+    fi
+else
+    report warn "services" "systemd not available"
+fi
+
+# ── Backup age ────────────────────────────────────────────────
+MAX_AGE="${HEALTH_BACKUP_MAX_AGE_DAYS:-2}"
+roots=()
+if [ -n "${BACKUP_SERVICE_ROOTS:-}" ]; then
+    read -r -a roots <<< "$BACKUP_SERVICE_ROOTS"
+else
+    roots=(/srv "$HOME/srv")
+fi
+newest=""
+newest_ts=0
+for root in "${roots[@]}"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r line; do
+        ts="${line%% *}"
+        if [ "${ts%%.*}" -gt "$newest_ts" ]; then
+            newest_ts="${ts%%.*}"
+            newest="${line#* }"
+        fi
+    done < <(find "$root" -maxdepth 2 -type f -name '*.tar.gz.gpg' -printf '%T@ %p\n' 2>/dev/null || true)
+done
+if [ -z "$newest" ]; then
+    report warn "backup" "no backups found under ${roots[*]}"
+else
+    now="$(date +%s)"
+    days=$(( (now - newest_ts) / 86400 ))
+    if [ "$days" -gt "$MAX_AGE" ]; then
+        report warn "backup" "${days}d old: ${newest}"
+    else
+        report ok "backup" "${days}d old: ${newest}"
+    fi
+fi
+
+# ── fail2ban ──────────────────────────────────────────────────
+if command -v fail2ban-client >/dev/null 2>&1; then
+    if fail2ban-client ping >/dev/null 2>&1; then
+        banned=0
+        jails=$(fail2ban-client status 2>/dev/null | awk -F': *' '/Jail list/{print $2}')
+        for j in $jails; do
+            n=$(fail2ban-client status "$j" 2>/dev/null | awk -F': *' '/Total banned/{print $2}')
+            n="${n:-0}"
+            banned=$(( banned + (n > 0 ? n : 0) ))
+        done
+        report ok "fail2ban" "running, ${banned} total banned across ${jails:-0} jail(s)"
+    else
+        report warn "fail2ban" "installed but not running"
+    fi
+fi
+
+# ── Docker ────────────────────────────────────────────────────
+if command -v docker >/dev/null 2>&1; then
+    bad_containers=()
+    running=0
+    while IFS= read -r name state; do
+        case "$state" in
+            restarting|unhealthy) bad_containers+=("${name}(${state})") ;;
+        esac
+    done < <(docker ps -a --format '{{.Names}} {{.State}}' 2>/dev/null || true)
+    if [ "${#bad_containers[@]}" -gt 0 ]; then
+        report fail "docker" "${#bad_containers[@]} problem container(s): ${bad_containers[*]}"
+    else
+        report ok "docker" "no unhealthy/restarting containers"
+    fi
+fi
+
+echo
+if [ "$FAILURES" -gt 0 ]; then
+    verdict="${FAILURES} FAIL, ${WARNINGS} WARN"
+    echo " ${RED}${BOLD}VERDICT${RESET}  ${verdict}"
+elif [ "$WARNINGS" -gt 0 ]; then
+    verdict="${WARNINGS} WARN — mostly healthy"
+    echo " ${YELLOW}${BOLD}VERDICT${RESET}  ${verdict}"
+else
+    verdict="all good"
+    echo " ${GREEN}${BOLD}VERDICT${RESET}  ${verdict}"
+fi
+
+if [ "$SEND" -eq 1 ]; then
+    msg="POS Health — ${host}
+Verdict: ${verdict}"
+    for line in "${REPORT[@]}"; do
+        msg+="
+${line}"
+    done
+    if [ "$MARKDOWN" -eq 1 ]; then
+        notify_send "$msg" --markdown
+    else
+        notify_send "$msg"
+    fi
+fi
+
+[ "$FAILURES" -eq 0 ]

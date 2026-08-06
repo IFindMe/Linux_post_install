@@ -1,0 +1,9 @@
+[Unit]
+Description=POS Health digest (daily report via Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__POS_USER__
+ExecStart=/usr/local/bin/pos system health --send --markdown

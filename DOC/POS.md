@@ -151,9 +151,12 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
-| `sudo pos system firewall` | `bin/pos-system-firewall` | Interactive UFW ("UFW POWER") menu: add/delete rules, status, enable/disable/reset, default policies | Must run as root. Every command is previewed and confirmed before execution; supports `--dry-run`; keeps a history of executed commands |
-| `pos system backup <folder-path>` | `bin/pos-system-backup` | Create a gpg-encrypted (AES-256) `tar.gz` snapshot of a folder and verify it | Prompts twice for a password (never stored). Uses `sudo tar`; needs `gnupg` (in `preinstall.sh` PACKAGES). Artifact `<name>_<date>.tar.gz.gpg` in the current directory, `chmod 600` |
+| `sudo pos system firewall` | `bin/pos-system-firewall` | Interactive UFW ("UFW POWER") menu: add/delete rules, status, enable/disable/reset, default policies | Must run as root. Every command is previewed and confirmed before execution; supports `--dry-run`; keeps a history of executed commands. Executed mutating changes are announced via `lib/notify.sh` |
+| `pos system backup <folder-path>` | `bin/pos-system-backup` | Create a gpg-encrypted (AES-256) `tar.gz` snapshot of a folder and verify it | Prompts twice for a password (never stored). Uses `sudo tar`; needs `gnupg` (in `preinstall.sh` PACKAGES). Artifact `<name>_<date>.tar.gz.gpg` in the current directory, `chmod 600`. Success/failure are announced via `lib/notify.sh` |
 | `pos system backup --service` | `bin/pos-system-backup` | Lists folders under `/srv` and `~/srv`, lets you pick one, then runs the same backup | Roots via `BACKUP_SERVICE_ROOTS` (space-separated, default `/srv $HOME/srv`) |
+| `pos system health [--send] [--markdown]` | `bin/pos-system-health` | Host health dashboard: disk per mount, RAM/swap, failed systemd units, backup age, fail2ban, docker containers. Exits 1 if any check FAILs | `--send`/`--markdown` send the summary via Telegram (`lib/notify.sh`). Backup age threshold via `HEALTH_BACKUP_MAX_AGE_DAYS` (default 2); backup search roots via `BACKUP_SERVICE_ROOTS` |
+
+`systemd/pos-health.service` + `systemd/pos-health.timer` run `pos system health --send --markdown` daily at 08:00 as the installing user. `postinstall.sh` enables the timer automatically once `~/.config/linux_post_install/telegram.env` exists — re-run postinstall after configuring Telegram to pick it up.
 
 ### ssh
 

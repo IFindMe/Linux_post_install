@@ -15,3 +15,4 @@ CRITICAL: real guidance lives in DOC/. When you encounter a reference below, use
 
 - Each tool is `bin/pos-<category>-<command>`; `bin/pos` dispatches via smart arg matching; bash completion derives from filenames.
 - Verify edits with `make check` (runs `bash -n` + the generated-doc sync gate). Generated sections (dispatch table, file table, line counts, completion flags, this doc's Document Map) are code-derived — after changing `bin/pos-*`, `lib/*`, or `completions/`, run `make gen` and commit the refreshed output.
+- Maintain `AGENT_TODO.md` (Now / Next / Later / Done): when you finish a task, move it to **Done** (dated) in the same commit.
