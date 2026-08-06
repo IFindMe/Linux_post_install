@@ -49,6 +49,12 @@ summary (newest last).
 
 ## Done (summary, newest last)
 
+- 2026-08-06: NFS in `pos system` — `pos system nfs-server` (status/share/
+  unshare/list/reload/enable/disable, idempotent /etc/exports edits, generic
+  default with Tailscale/WireGuard/LAN examples) + `pos system nfs-client`
+  (mount/unmount/list + persistent mounts as systemd `.mount` units ordered
+  after network-online.target, no fstab); `nfs-kernel-server` + `nfs-common`
+  added to preinstall PACKAGES.
 - 2026-08-06: `pos` HOW-TO guide set — `DOC/HOWTO.md` index + per-category
   `DOC/howto/*.md` (network, docker, media, system, ssh, usb, communication,
   entertainment) with flags, recipes, config, and troubleshooting; wired into

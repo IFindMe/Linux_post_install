@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system nfs-client — Mount NFS shares (ephemeral or persistent systemd mount units)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+command -v mount.nfs &>/dev/null || err "mount.nfs not found (install nfs-common)"
+command -v systemd-escape &>/dev/null || err "systemd-escape not found"
+
+usage() {
+    cat <<EOF
+Usage: pos system nfs-client <command> [args]
+
+Mount and manage NFS shares from remote servers (nfs-common).
+
+Commands:
+  mount <server:export> <local-dir>    One-shot mount (creates local-dir if needed)
+  unmount <local-dir>                   Unmount the share
+  list                                  Show active NFS mounts
+  persist <server:export> <local-dir>   Persistent mount via a systemd .mount unit
+                                        (ordered after network-online.target)
+  unpersist <local-dir>                 Stop, disable and remove the mount unit
+
+Examples:
+  pos system nfs-client mount 100.100.100.1:/srv/media /mnt/nfs/media
+  pos system nfs-client persist 100.100.100.1:/srv/media /mnt/nfs/media
+  pos system nfs-client list
+  pos system nfs-client unmount /mnt/nfs/media
+EOF
+    exit 0
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    -h|--help) usage ;;
+    mount|unmount|list|persist|unpersist) ;;
+    "") err "Missing command (mount|unmount|list|persist|unpersist)" ;;
+    *) err "Unknown command '$cmd' (see --help)" ;;
+esac
+
+validate_share() {
+    local what="$1"
+    case "$what" in
+        /*) err "Invalid share '$what' — expected <server:export> (e.g. 10.0.0.5:/srv/data)" ;;
+        *:*) ;;
+        *) err "Invalid share '$what' — expected <server:export> (e.g. 10.0.0.5:/srv/data)" ;;
+    esac
+}
+
+validate_dir() {
+    local where="$1"
+    case "$where" in
+        /*) ;;
+        *) err "Mount point must be an absolute path: $where" ;;
+    esac
+}
+
+case "$cmd" in
+    mount)
+        what="${2:-}"
+        where="${3:-}"
+        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos system nfs-client mount <server:export> <local-dir>"
+        validate_share "$what"
+        validate_dir "$where"
+
+        sudo mkdir -p "$where"
+        sudo mount -t nfs -o rw,noatime "$what" "$where"
+        log "Mounted $what at $where"
+        ;;
+
+    unmount)
+        where="${2:-}"
+        [ -n "$where" ] || err "Usage: pos system nfs-client unmount <local-dir>"
+        validate_dir "$where"
+
+        sudo umount "$where"
+        log "Unmounted $where"
+        ;;
+
+    list)
+        if findmnt -t nfs,nfs4 >/dev/null 2>&1; then
+            findmnt -t nfs,nfs4
+        else
+            echo "No NFS mounts"
+        fi
+        ;;
+
+    persist)
+        what="${2:-}"
+        where="${3:-}"
+        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos system nfs-client persist <server:export> <local-dir>"
+        validate_share "$what"
+        validate_dir "$where"
+
+        unit="$(systemd-escape --path --suffix=mount "$where")"
+        unit_file="/etc/systemd/system/${unit}"
+
+        sudo mkdir -p "$where"
+        cat <<UNIT | sudo tee "$unit_file" >/dev/null
+[Unit]
+Description=NFS mount of ${what} at ${where}
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=${what}
+Where=${where}
+Type=nfs
+Options=defaults,_netdev,rw,noatime
+UNIT
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now "$unit"
+        log "Persistent NFS mount: ${what} → ${where} (${unit})"
+        notify_send "NFS mount persisted: ${what} → ${where}"
+        ;;
+
+    unpersist)
+        where="${2:-}"
+        [ -n "$where" ] || err "Usage: pos system nfs-client unpersist <local-dir>"
+        validate_dir "$where"
+
+        unit="$(systemd-escape --path --suffix=mount "$where")"
+        unit_file="/etc/systemd/system/${unit}"
+
+        if [ ! -f "$unit_file" ]; then
+            warn "No systemd mount unit for $where (${unit})"
+            exit 0
+        fi
+
+        sudo systemctl disable "$unit" 2>/dev/null || true
+        sudo systemctl stop "$unit" 2>/dev/null || true
+        sudo rm -f "$unit_file"
+        sudo systemctl daemon-reload
+        log "Removed persistent NFS mount: $where"
+        notify_send "NFS persistent mount removed: $where"
+        ;;
+esac

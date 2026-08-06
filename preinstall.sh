@@ -30,6 +30,7 @@ PACKAGES=(
     unzip zip rsync htop btop telnet
     net-tools iputils-ping traceroute tcpdump nmap
     openssh-client openssh-server ufw fail2ban
+    nfs-common nfs-kernel-server
     hostapd dnsmasq iptables iw
     ca-certificates gnupg lsb-release
     python3 python3-pip rclone

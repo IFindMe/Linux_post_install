@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system nfs-server — Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+command -v exportfs &>/dev/null || err "exportfs not found (install nfs-kernel-server)"
+
+usage() {
+    cat <<EOF
+Usage: pos system nfs-server <command> [args]
+
+Manage the NFS kernel server (nfs-kernel-server, /etc/exports).
+
+Commands:
+  status              Show server status + current exports
+  share <path> [client]  Add or update an export and reload
+                        (default client: *(rw,sync,no_subtree_check))
+  unshare <path>      Remove an export and reload
+  list                Show current exports (exportfs -v)
+  reload              Re-apply /etc/exports after hand edits
+  enable              Start nfs-server and enable it on boot
+  disable             Stop nfs-server and disable it on boot
+
+Clients are /etc/exports entries — restrict them to your trusted network:
+  pos system nfs-server share /mnt/hdd '100.64.0.0/10(rw,sync,no_subtree_check)'   # Tailscale CGNAT
+  pos system nfs-server share /mnt/hdd '10.10.0.0/24(rw,sync,no_subtree_check)'     # WireGuard
+  pos system nfs-server share /mnt/backups '192.168.1.0/24(ro,sync,no_subtree_check)'
+
+Examples:
+  pos system nfs-server status
+  pos system nfs-server share /mnt/hdd
+  pos system nfs-server list
+  pos system nfs-server unshare /mnt/hdd
+EOF
+    exit 0
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    -h|--help) usage ;;
+    status|share|unshare|list|reload|enable|disable) ;;
+    "") err "Missing command (status|share|unshare|list|reload|enable|disable)" ;;
+    *) err "Unknown command '$cmd' (see --help)" ;;
+esac
+
+EXPORTS_FILE=/etc/exports
+
+require_root_dir() {
+    local path="$1"
+    case "$path" in
+        /*) ;;
+        *) err "Path must be absolute: $path" ;;
+    esac
+    [ -d "$path" ] || err "Path not found: $path"
+}
+
+case "$cmd" in
+    status)
+        if systemctl is-active --quiet nfs-server 2>/dev/null; then
+            ok "nfs-server: running"
+        else
+            warn "nfs-server: not running (enable with 'pos system nfs-server enable')"
+        fi
+        echo
+        section "Exports"
+        exportfs -v 2>/dev/null || echo " (none)"
+        ;;
+
+    share)
+        path="${2:-}"
+        client="${3:-*(rw,sync,no_subtree_check)}"
+        [ -n "$path" ] || err "Usage: pos system nfs-server share <path> [client]"
+        require_root_dir "$path"
+        if [ "$client" = "*(rw,sync,no_subtree_check)" ]; then
+            warn "Generic export '$client' — ANY client can mount $path. Restrict it, e.g.:"
+            echo "  pos system nfs-server share $path '100.64.0.0/10(rw,sync,no_subtree_check)'"
+            echo "  pos system nfs-server share $path '10.10.0.0/24(rw,sync,no_subtree_check)'"
+            echo
+        fi
+
+        tmp="$(mktemp)"
+        awk -v p="$path" '$1 != p' "$EXPORTS_FILE" > "$tmp"
+        echo "$path $client" >> "$tmp"
+        sudo cp "$tmp" "$EXPORTS_FILE"
+        rm -f "$tmp"
+
+        sudo exportfs -ra
+        log "Exported: $path $client"
+        notify_send "NFS share added: $path $client"
+        ;;
+
+    unshare)
+        path="${2:-}"
+        [ -n "$path" ] || err "Usage: pos system nfs-server unshare <path>"
+        require_root_dir "$path"
+
+        if ! awk -v p="$path" '$1 == p {found=1} END {exit !found}' "$EXPORTS_FILE"; then
+            warn "No export for $path in $EXPORTS_FILE"
+            exit 0
+        fi
+
+        tmp="$(mktemp)"
+        awk -v p="$path" '$1 != p' "$EXPORTS_FILE" > "$tmp"
+        sudo cp "$tmp" "$EXPORTS_FILE"
+        rm -f "$tmp"
+
+        sudo exportfs -ra
+        log "Removed export: $path"
+        notify_send "NFS share removed: $path"
+        ;;
+
+    list)
+        exportfs -v 2>/dev/null || echo "No exports"
+        ;;
+
+    reload)
+        sudo exportfs -ra
+        log "NFS exports reloaded"
+        ;;
+
+    enable)
+        sudo systemctl enable --now nfs-server
+        log "nfs-server enabled (starts on boot)"
+        notify_send "NFS server enabled"
+        ;;
+
+    disable)
+        sudo systemctl disable --now nfs-server
+        log "nfs-server disabled (will not start on boot)"
+        notify_send "NFS server disabled"
+        ;;
+esac
