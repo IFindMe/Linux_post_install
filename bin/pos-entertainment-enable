@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: entertainment enable — Enable an auto-trigger for a plugin (systemd user timer)
+# POS: entertainment enable — Enable an auto-trigger for a plugin on a schedule
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
@@ -11,8 +11,9 @@ Usage: pos entertainment enable <plugin> [interval]
 
 Enable an auto-trigger: writes '<plugin>, <interval>' into the ENABLED list in
 $CONFIG_FILE
-and creates/enables a systemd user timer that runs 'pos entertainment send <plugin>'
-on the schedule. Re-running without an interval keeps the plugin's current one.
+and schedules 'pos entertainment send <plugin>' to run (systemd user timer, or
+cron when systemd is unavailable). Re-running without an interval keeps the
+plugin's current one.
 
 Available plugins:
 $(list_plugins "$(plugin_dir)" | sed 's/^/  /')

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: communication telegram — Send Telegram messages via Bot API (--send, test, config set)
-# POS_FLAGS: --send
+# POS: communication telegram — Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
+# POS_FLAGS: --send --type --caption --parse-mode --no-preview --token --chat-id
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
@@ -14,12 +14,29 @@ Usage: pos communication telegram [command] [args]
 Send Telegram messages via the Bot API.
 
 Commands:
-  --send "text"             Send a text message to the configured chat
-  --send "text" --token <t> --chat-id <id>   Override token/chat for one send
-  --send "text" --parse-mode <mode>   Format mode: plain (default), markdown, html
-  test                      Send a test message using the current config
-  config                    Show current config (token masked)
-  config set KEY=VALUE      Set TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID
+  send <value> [options]   Send a message, link, or media (auto-detects the type)
+  test                     Send a test message using the current config
+  config                   Show current config (token masked)
+  config set KEY=VALUE     Set TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID
+
+Types (auto-detected when --type is omitted):
+  message    Plain text (default)
+  link       Clickable link            (value starts with http:// https:// www.)
+  file       Any document              (any other existing file)
+  photo      .jpg .jpeg .png .bmp
+  video      .mp4 .mkv .webm .mov .avi
+  audio      .mp3 .wav .flac .m4a .aac
+  voice      .ogg .opus .oga
+  animation  .gif
+  sticker    .webp
+
+Options:
+  --type <type>       Force a type: message|file|link|sticker|photo|video|audio|voice|animation
+  --caption <text>    Caption for file/photo/video/audio/voice/animation
+  --parse-mode <mode> Format mode: plain (default), markdown, html (message/link/caption)
+  --no-preview        Disable the link's web page preview (message/link only)
+  --token <t>         Override token for one send
+  --chat-id <id>      Override chat id for one send
 
 Config file: $CONFIG_FILE
 Keys: TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID
@@ -27,10 +44,13 @@ Keys: TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID
 Precedence: CLI flags > environment > config file.
 
 Examples:
-  pos communication telegram config set TELEGRAM_BOT_TOKEN=123456:ABC-DEF
-  pos communication telegram config set TELEGRAM_CHAT_ID=987654321
-  pos communication telegram --send "Backup finished"
-  pos communication telegram --send "*Backup finished*" --parse-mode markdown
+  pos communication telegram send "Backup finished"
+  pos communication telegram send "/path/to/report.pdf" --caption "Daily report"
+  pos communication telegram send "/path/to/photo.jpg" --caption "Sunset"
+  pos communication telegram send "/path/to/sticker.webp"
+  pos communication telegram send "https://example.com" --no-preview
+  pos communication telegram send "/path/to/video.mp4" --type video
+  pos communication telegram --send "Old style text message"
   pos communication telegram test
 EOF
     exit 0
@@ -63,14 +83,127 @@ mask_token() {
     fi
 }
 
-cmd_send() {
-    local text="$1" parse_mode="${2:-}"
+send_request() {
+    local endpoint="$1"; shift
     [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
     [ -z "${TELEGRAM_CHAT_ID:-}" ] && err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
-    local args=(--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${text}")
+    curl -fsS -m 60 -X POST "$API/bot${TELEGRAM_BOT_TOKEN}/${endpoint}" "$@" >/dev/null
+}
+
+send_message() {
+    local text="$1" parse_mode="${2:-}" no_preview="${3:-}"
+    local args=(--data-urlencode "chat_id=${TELEGRAM_CHAT_ID:-}" --data-urlencode "text=${text}")
     [ -n "$parse_mode" ] && args+=(--data-urlencode "parse_mode=${parse_mode}")
-    curl -fsS -m 20 -X POST "$API/bot${TELEGRAM_BOT_TOKEN}/sendMessage" "${args[@]}" >/dev/null
-    echo "[+] Message sent to chat ${TELEGRAM_CHAT_ID}"
+    [ "$no_preview" = "1" ] && args+=(--data-urlencode "disable_web_page_preview=true")
+    send_request sendMessage "${args[@]}"
+}
+
+send_multipart() {
+    local endpoint="$1" file_field="$2" file_path="$3" caption="${4:-}" parse_mode="${5:-}"
+    [ -f "$file_path" ] && [ -r "$file_path" ] || err "File not found or unreadable: $file_path"
+    local args=(-F "chat_id=${TELEGRAM_CHAT_ID:-}" -F "${file_field}=@${file_path}")
+    [ -n "$caption" ] && args+=(-F "caption=${caption}")
+    [ -n "$parse_mode" ] && args+=(-F "parse_mode=${parse_mode}")
+    send_request "$endpoint" "${args[@]}"
+}
+
+detect_type() {
+    local value="$1" ext
+    if [ -f "$value" ] && [ -r "$value" ]; then
+        ext="${value##*.}"
+        ext="${ext,,}"
+        case "$ext" in
+            webp)        echo sticker ;;
+            gif)         echo animation ;;
+            jpg|jpeg|png|bmp) echo photo ;;
+            mp4|mkv|webm|mov|avi|m4v) echo video ;;
+            ogg|opus|oga) echo voice ;;
+            mp3|wav|flac|m4a|aac) echo audio ;;
+            *)           echo file ;;
+        esac
+    elif [[ "$value" =~ ^(https?://|www\.) ]]; then
+        echo link
+    else
+        echo message
+    fi
+}
+
+cmd_send() {
+    local value="" type="" caption="" parse_mode="" no_preview=0 type_explicit=0 auto=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --type)
+                [ $# -ge 2 ] || err "--type needs a value"
+                case "$2" in
+                    message|file|link|sticker|photo|video|audio|voice|animation) type="$2" ;;
+                    *) err "Unknown type '$2' (allowed: message, file, link, sticker, photo, video, audio, voice, animation)" ;;
+                esac
+                type_explicit=1
+                shift 2 ;;
+            --caption)
+                [ $# -ge 2 ] || err "--caption needs a value"
+                caption="$2"; shift 2 ;;
+            --parse-mode)
+                [ $# -ge 2 ] || err "--parse-mode needs a value"
+                case "$2" in
+                    plain|markdown|html) ;;
+                    *) err "Unknown parse mode '$2' (allowed: plain, markdown, html)" ;;
+                esac
+                parse_mode="$2"; shift 2 ;;
+            --no-preview)
+                no_preview=1; shift ;;
+            --token)
+                [ $# -ge 2 ] || err "--token needs a value"
+                TELEGRAM_BOT_TOKEN="$2"; shift 2 ;;
+            --chat-id)
+                [ $# -ge 2 ] || err "--chat-id needs a value"
+                TELEGRAM_CHAT_ID="$2"; shift 2 ;;
+            --)
+                shift
+                [ $# -ge 1 ] || err "No value given for send"
+                value="$1"; shift
+                [ $# -eq 0 ] || err "Unexpected argument '$1'"
+                ;;
+            -*) err "Unknown option '$1'" ;;
+            *)
+                [ -z "$value" ] || err "Unexpected extra argument '$1'"
+                value="$1"; shift ;;
+        esac
+    done
+    [ -n "$value" ] || err "No value given for send"
+
+    if [ "$type_explicit" -eq 0 ]; then
+        type="$(detect_type "$value")"
+        auto=1
+    fi
+
+    case "$type" in
+        message|link)
+            [ -z "$caption" ] || err "--caption only applies to file/photo/video/audio/voice/animation"
+            ;;
+        sticker)
+            [ -z "$caption" ] || err "--caption is not supported for stickers"
+            ;;
+    esac
+    case "$type" in
+        message|link) ;;
+        *) [ "$no_preview" -eq 0 ] || err "--no-preview only applies to --type message or link" ;;
+    esac
+    [ "$parse_mode" = "plain" ] && parse_mode=""
+
+    load_config
+    case "$type" in
+        message)   send_message "$value" "$parse_mode" "$no_preview" ;;
+        link)      send_message "$value" "$parse_mode" "$no_preview" ;;
+        file)      send_multipart sendDocument  document   "$value" "$caption" "$parse_mode" ;;
+        sticker)   send_multipart sendSticker   sticker    "$value" "" "" ;;
+        photo)     send_multipart sendPhoto     photo      "$value" "$caption" "$parse_mode" ;;
+        video)     send_multipart sendVideo     video      "$value" "$caption" "$parse_mode" ;;
+        audio)     send_multipart sendAudio     audio      "$value" "$caption" "$parse_mode" ;;
+        voice)     send_multipart sendVoice     voice      "$value" "$caption" "$parse_mode" ;;
+        animation) send_multipart sendAnimation animation "$value" "$caption" "$parse_mode" ;;
+    esac
+    echo "[+] $type${auto:+ (auto-detected)} sent to chat ${TELEGRAM_CHAT_ID}"
 }
 
 cmd_config() {
@@ -108,32 +241,19 @@ cmd="${1:-}"
 
 case "$cmd" in
     -h|--help) usage ;;
+    send)
+        shift
+        cmd_send "$@"
+        ;;
     --send)
         shift
         [ $# -ge 1 ] || usage
-        text="$1"
-        shift
-        parse_mode=""
-        while [ $# -gt 0 ]; do
-            case "$1" in
-                --token)   TELEGRAM_BOT_TOKEN="$2"; shift 2 ;;
-                --chat-id) TELEGRAM_CHAT_ID="$2"; shift 2 ;;
-                --parse-mode)
-                    case "$2" in
-                        plain|markdown|html) ;;
-                        *) err "Unknown parse mode '$2' (allowed: plain, markdown, html)" ;;
-                    esac
-                    parse_mode="$2"; shift 2 ;;
-                *) err "Unknown option '$1'" ;;
-            esac
-        done
-        [ "$parse_mode" = "plain" ] && parse_mode=""
-        load_config
-        cmd_send "$text" "$parse_mode"
+        cmd_send "$@"
         ;;
     test)
         load_config
-        cmd_send "Test message from pos $(date '+%Y-%m-%d %H:%M:%S')"
+        send_message "Test message from pos $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "[+] test message sent to chat ${TELEGRAM_CHAT_ID}"
         ;;
     config)
         shift

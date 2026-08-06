@@ -3,7 +3,7 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
-_pos_flags[communication-telegram]="--send"
+_pos_flags[communication-telegram]="--send --type --caption --parse-mode --no-preview --token --chat-id"
 _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[system-backup]="--service"
@@ -158,6 +158,25 @@ _pos() {
                     case "${words[3]}" in
                         create|enter|stop|start|rm)
                             _pos_complete_docker_vbox_names
+                            ;;
+                    esac
+                    ;;
+                communication-telegram)
+                    case "${words[3]}" in
+                        send|--send) _pos_complete_flags communication-telegram ;;
+                    esac
+                    ;;
+            esac
+            ;;
+        6)
+            case "${words[1]}-${words[2]}" in
+                communication-telegram)
+                    case "${words[3]}:${words[4]}" in
+                        send:--type|--send:--type)
+                            COMPREPLY=($(compgen -W "message file link sticker photo video audio voice animation" -- "$cur"))
+                            ;;
+                        send:--parse-mode|--send:--parse-mode)
+                            COMPREPLY=($(compgen -W "plain markdown html" -- "$cur"))
                             ;;
                     esac
                     ;;

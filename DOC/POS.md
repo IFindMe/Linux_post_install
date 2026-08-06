@@ -188,19 +188,26 @@ Subcommands that need input prompt interactively when args are omitted.
 
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
-| `pos communication telegram --send "text"` | `bin/pos-communication-telegram` | Send a text message to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
+| `pos communication telegram send "text"` | `bin/pos-communication-telegram` | Send a message, link, or media file (auto-detects the type) to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
 
 `pos communication telegram` in detail:
 
 | Command | Behavior |
 |---------|----------|
-| `pos communication telegram --send "text"` | POSTs `sendMessage` to the Bot API (20s timeout); prints `[+] Message sent to chat <id>` or fails with a nonzero exit |
-| `pos communication telegram --send "text" --token <t> --chat-id <id>` | One-shot override of token/chat ID |
-| `pos communication telegram --send "text" --parse-mode <mode>` | Send with Telegram formatting; `<mode>` is `plain` (default), `markdown`, or `html` (passed as `parse_mode` to the API). Markdown/HTML use raw Telegram syntax — unescaped characters may be rejected by the API (400) |
+| `pos communication telegram send "text"` | POSTs `sendMessage` to the Bot API (60s timeout); prints `[+] message sent to chat <id>` or fails with a nonzero exit |
+| `pos communication telegram send <value>` | **Auto-detects the type** when `--type` is omitted: existing file → `file` (except `.webp` → sticker, `.gif` → animation, images → photo, video/audio/voice extensions → their type), value starting with `http://`/`https://`/`www.` → `link`, otherwise `message` |
+| `pos communication telegram send <path> --type file [--caption "…"]` | Uploads a file as a `sendDocument` via multipart (`document=@path`); `--caption` adds a caption. Path must exist and be readable |
+| `pos communication telegram send <path> [--caption "…"]` | Media uploads via their Bot API endpoint: `--type photo` → `sendPhoto`, `video` → `sendVideo`, `audio` → `sendAudio`, `voice` → `sendVoice`, `animation` → `sendAnimation`, `sticker` (`.webp`) → `sendSticker` (captions not supported for stickers) |
+| `pos communication telegram send "url" --type link [--no-preview]` | Sends a link as a message (URLs auto-linkify); `--no-preview` adds `disable_web_page_preview=true` |
+| `pos communication telegram send "text" --parse-mode <mode>` | Send with Telegram formatting; `<mode>` is `plain` (default), `markdown`, or `html` (passed as `parse_mode` to the API — also applies to captions). Markdown/HTML use raw Telegram syntax — unescaped characters may be rejected by the API (400) |
+| `pos communication telegram send … --token <t> --chat-id <id>` | One-shot override of token/chat ID |
+| `pos communication telegram --send "text"` | Legacy alias for `send "text"` (kept for the entertainment runner) |
 | `pos communication telegram test` | Sends a canned test message using the current config |
 | `pos communication telegram config` | Shows current config (bot token masked) |
 | `pos communication telegram config set TELEGRAM_BOT_TOKEN=...` | Saves a bot token (600 perms) |
 | `pos communication telegram config set TELEGRAM_CHAT_ID=...` | Saves the target chat ID |
+
+`send` option validation: `--caption` is only valid with media types (file/photo/video/audio/voice/animation), `--no-preview` only with `--type message`/`link`, and `--type` only accepts `message|file|link|sticker|photo|video|audio|voice|animation`. An explicit `--type` always overrides auto-detection.
 
 The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Requires network access to `api.telegram.org`.
 
@@ -216,10 +223,10 @@ The bot token is a secret — it is stored only in `~/.config/linux_post_install
 | `pos entertainment send <plugin> --print` | Print the output locally; do not send |
 | `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram`) |
 | `pos entertainment config` | Show the config file (`~/.config/linux_post_install/entertainment.env`) |
-| `pos entertainment config set KEY=VALUE…` | Set keys (e.g. `ENABLED`, `WEATHER_LAT`) and re-sync timers |
-| `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + create/enable its systemd **user** timer |
-| `pos entertainment disable <plugin>` | Remove plugin from `ENABLED` + disable/remove its timer |
-| `pos entertainment status` | Enabled plugins + timer state + next fire time |
+| `pos entertainment config set KEY=VALUE…` | Set keys (any UPPER_SNAKE key; warns if no installed plugin uses it) and re-sync the schedule |
+| `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + schedule it (systemd user timer or cron, auto-detected) |
+| `pos entertainment disable <plugin>` | Remove plugin from `ENABLED` + remove its scheduled job |
+| `pos entertainment status` | Enabled plugins + scheduler + schedule state |
 
 **Plugin lookup order:** `$ENTERTAINMENT_DIR` → repo `entertainment/` → `/usr/local/bin/` (installed by `install.sh` Phase 2, beside the runner). A plugin name matches the file name with or without the `.sh` suffix.
 
@@ -234,6 +241,16 @@ Plugins:
 **Config auto-install:** `postinstall.sh` copies the repo's `config/entertainment.env` (a commented template showing each key's syntax) to `~/.config/linux_post_install/entertainment.env` on install — but only if you haven't already created your own (no clobber), and prints the template so you can fill in your location. Fill in `WEATHER_LAT`/`WEATHER_LON` (and optionally `WEATHER_CITY`) to enable the weather plugin.
 
 **Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`) with a `# POS_PLUGIN: <name>` marker on line 3 — the runner lists and validates plugins by this marker, so non-plugin `.sh` files in the shared `/usr/local/bin` are ignored. The plugin must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). If it needs coordinates/tokens, read them from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence). No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `command -v … || exit 1`.
+
+**Declaring config keys (pattern):** document every key the plugin reads with one `# POS_KEYS:` line right after `# POS_PLUGIN:` — `KEY`, a description, and `(required)`/`(optional)`:
+
+```
+# POS_PLUGIN: myfeed
+# POS_KEYS: MYFEED_URL <feed url> (required)
+# POS_KEYS: MYFEED_TAG <filter tag> (optional)
+```
+
+The plugin itself still reads the keys as plain env vars (`${MYFEED_URL:-}`). The declaration is what `pos entertainment config` uses to print its Keys section and to decide whether `config set` warns about an undeclared key — add the line whenever a plugin gets a new config key.
 
 **Automation (auto-trigger):** enable plugins on a schedule via the `ENABLED` key in the config — a comma-separated list of `plugin, interval` pairs:
 

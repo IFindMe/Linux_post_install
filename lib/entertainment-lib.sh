@@ -80,6 +80,54 @@ resolve_plugin() {
     err "Plugin '$name' not found in $dir — try one of: $(list_plugins "$dir" | tr '\n' ' ')"
 }
 
+# ── Config keys declared by plugins ────────────────────────────────
+# Pattern: each plugin documents the config keys it reads with
+#   # POS_KEYS: <KEY> <description> (required|optional)
+# on one or more lines (right after # POS_PLUGIN:). 'pos entertainment
+# config' prints them in its Keys section; config set warns when a key is
+# not declared by any installed plugin.
+
+plugin_keys() {
+    # Usage: plugin_keys <plugin-file>  → "KEY|description|required|optional"
+    local file="$1" line key desc req
+    grep '^# POS_KEYS:' "$file" 2>/dev/null | sed 's/^# POS_KEYS:[[:space:]]*//' | while IFS= read -r line; do
+        key="${line%% *}"
+        desc="${line#* }"
+        case "$desc" in
+            *\(required\)) req=required;  desc="${desc% (required)}" ;;
+            *\(optional\)) req=optional;  desc="${desc% (optional)}" ;;
+            *)            req="" ;;
+        esac
+        printf '%s|%s|%s\n' "$key" "$desc" "$req"
+    done
+}
+
+config_keys() {
+    # Usage: config_keys <plugin-dir>  → "KEY|plugin|description|required|optional"
+    local dir="$1" f name line
+    for f in "$dir"/*.sh; do
+        [ -f "$f" ] || continue
+        name="$(plugin_marker "$f")"
+        [ -n "$name" ] || continue
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            printf '%s|%s\n' "$name" "$line"
+        done <<< "$(plugin_keys "$f")"
+    done
+}
+
+config_key_known() {
+    # Usage: config_key_known <plugin-dir> <KEY>  → true if ENABLED or declared by a plugin
+    local dir="$1" key="$2"
+    [ "$key" = "ENABLED" ] && return 0
+    local line _plugin _key _rest
+    while IFS= read -r line; do
+        IFS='|' read -r _plugin _key _rest <<<"$line"
+        [ "$_key" = "$key" ] && return 0
+    done <<< "$(config_keys "$dir")"
+    return 1
+}
+
 # ── ENABLED list parsing ──────────────────────────────────────────
 # Format: comma/space-separated 'plugin[, interval]' pairs, e.g.
 # 'weather, 5m gold, 1h'. Parsed name-aware: a token that resolves to a

@@ -183,12 +183,14 @@ The `entertainment` module routes public-API data to Telegram via the single run
 
 ### 1. Create the plugin
 
-Drop an executable script in `entertainment/<name>.sh` with a `# POS_PLUGIN: <name>` marker on line 3 (this is what makes it a plugin — the installed runner lists plugins by this marker, not by `.sh` files, since `/usr/local/bin` is shared with other tooling):
+Drop an executable script in `entertainment/<name>.sh` with a `# POS_PLUGIN: <name>` marker on line 3 (this is what makes it a plugin — the installed runner lists plugins by this marker, not by `.sh` files, since `/usr/local/bin` is shared with other tooling). Declare every config key the plugin reads with `# POS_KEYS: <KEY> <description> (required|optional)` lines right after it — `pos entertainment config` prints these in its Keys section and uses them to warn/not-warn on `config set`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 # POS_PLUGIN: myplugin
+# POS_KEYS: MYPLUGIN_URL <feed url> (required)
+# POS_KEYS: MYPLUGIN_TAG <filter tag> (optional)
 err() { echo "ERROR: $*" >&2; exit 1; }
 
 command -v curl &>/dev/null || err "curl not found"
@@ -201,7 +203,7 @@ printf 'Title: %s\n' "$data"
 
 ### 2. Config (if needed)
 
-Read runtime values from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence) — same pattern as `telegram.env`. Example: `weather.sh` uses `WEATHER_LAT`/`WEATHER_LON`.
+Read runtime values from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence) — same pattern as `telegram.env`. Example: `weather.sh` uses `WEATHER_LAT`/`WEATHER_LON`. Declare each key with a `# POS_KEYS:` header line (see step 1) so `pos entertainment config` lists it and `config set` recognizes it.
 
 ### 3. Deps
 

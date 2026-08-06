@@ -36,16 +36,16 @@ Linux_post_install/
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
-│   ├── pos-communication-telegram # Send Telegram messages via Bot API (--send, test, config set)
+│   ├── pos-communication-telegram # Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
 │   ├── pos-docker-compose         # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health          # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps              # Enhanced container overview (health, IPs, ports, uptime)
 │   ├── pos-docker-vbox            # Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
 │   ├── pos-entertainment-config   # Show or edit the entertainment config (ENABLED auto-trigger list, weather location)
 │   ├── pos-entertainment-disable  # Disable a plugin's auto-trigger (remove it from ENABLED)
-│   ├── pos-entertainment-enable   # Enable an auto-trigger for a plugin (systemd user timer)
+│   ├── pos-entertainment-enable   # Enable an auto-trigger for a plugin on a schedule
 │   ├── pos-entertainment-send     # Run a public-API plugin and send its output via Telegram (default sender)
-│   ├── pos-entertainment-status   # Show enabled plugins and their timer state
+│   ├── pos-entertainment-status   # Show enabled plugins and scheduler state
 │   ├── pos-media-mp3              # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4              # Download video as MP4 (interactive format select)
 │   ├── pos-network-checkport      # Check TCP port connectivity
@@ -212,16 +212,16 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
-| communication | telegram | `pos-communication-telegram` | Send Telegram messages via Bot API (--send, test, config set) |
+| communication | telegram | `pos-communication-telegram` | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
 | docker | vbox | `pos-docker-vbox` | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | entertainment | config | `pos-entertainment-config` | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | entertainment | disable | `pos-entertainment-disable` | Disable a plugin's auto-trigger (remove it from ENABLED) |
-| entertainment | enable | `pos-entertainment-enable` | Enable an auto-trigger for a plugin (systemd user timer) |
+| entertainment | enable | `pos-entertainment-enable` | Enable an auto-trigger for a plugin on a schedule |
 | entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via Telegram (default sender) |
-| entertainment | status | `pos-entertainment-status` | Show enabled plugins and their timer state |
+| entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (interactive format select) |
 | network | checkport | `pos-network-checkport` | Check TCP port connectivity |
@@ -375,7 +375,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 ### Runtime Config
 
 - `~/.config/linux_post_install/compose.env` — Docker Compose global defaults
-- `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs → systemd user timers via `pos entertainment enable/disable`); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
+- `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers or cron auto-detected); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -490,16 +490,16 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 213 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram` | 150 | Send Telegram messages via Bot API (--send, test, config set) |
+| `bin/pos-communication-telegram` | 270 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
 | `bin/pos-docker-compose` | 364 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 157 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
-| `bin/pos-entertainment-config` | 64 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
+| `bin/pos-entertainment-config` | 85 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
-| `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin (systemd user timer) |
+| `bin/pos-entertainment-enable` | 50 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 93 | Run a public-API plugin and send its output via Telegram (default sender) |
-| `bin/pos-entertainment-status` | 55 | Show enabled plugins and their timer state |
+| `bin/pos-entertainment-status` | 55 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 35 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 38 | Download video as MP4 (interactive format select) |
 | `bin/pos-network-checkport` | 45 | Check TCP port connectivity |
@@ -510,7 +510,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-backup` | 117 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 285 | Interactive UFW management |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 169 | Dynamic bash completion |
+| `completions/pos.bash` | 188 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

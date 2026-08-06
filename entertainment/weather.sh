@@ -3,6 +3,9 @@ set -euo pipefail
 
 # Entertainment plugin: current weather via Open-Meteo (no API key).
 # POS_PLUGIN: weather
+# POS_KEYS: WEATHER_LAT <latitude> (required)
+# POS_KEYS: WEATHER_LON <longitude> (required)
+# POS_KEYS: WEATHER_CITY <city label> (optional)
 # Contract: stdout is the message sent by 'pos entertainment send weather'.
 
 err() { echo "ERROR: $*" >&2; exit 1; }
