@@ -47,6 +47,11 @@ summary (newest last).
 
 ## Done (summary, newest last)
 
+- 2026-08-06: Nested `pos` subcommands — `# POS_SUBCMDS:` header annotation (telegram,
+  docker-compose, docker-vbox) + `make gen` emits a `_pos_subcmds` completion map;
+  nested tools (`telegram listener`) auto-list under their parent instead of as a
+  flat sibling (`telegram-listener`) in `pos <category>` and tab-completion; generic
+  tool-level completion (subcommands + flags + `--help`).
 - 2026-08-06: Telegram **listener** — `pos communication telegram listener`:
   interactive `/command` → bash map editor + owner-only polling daemon as a
   systemd user service (map in `~/.config/linux_post_install/telegram_commands.env`,

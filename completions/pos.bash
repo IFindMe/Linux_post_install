@@ -11,6 +11,12 @@ _pos_flags[system-backup]="--service"
 _pos_flags[system-health]="--send --markdown"
 _pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
 # GEN:END posflags
+# GEN:START possubcmds
+declare -A _pos_subcmds
+_pos_subcmds[communication-telegram]="send test config listener"
+_pos_subcmds[docker-compose]="ls installed up down restart logs update config"
+_pos_subcmds[docker-vbox]="create enter stop start rm ls"
+# GEN:END possubcmds
 
 _pos() {
     local cur prev words cword
@@ -39,11 +45,29 @@ _pos() {
     done
 
     # ── Build category→subcommand map ──────────────────────────
+    # Nested sub-tools (pos-<cat>-<a>-<b> where pos-<cat>-<a> exists) are
+    # offered under their parent tool, not at the category level.
     local -A cat_cmds
+    local -A nested
+    local cmd2 c2 cat2 sub2
     for cmd in "${all_cmds[@]}"; do
         local cat="${cmd%%-*}"
         local sub="${cmd#*-}"
         if [ "$cat" != "$cmd" ]; then
+            for cmd2 in "${all_cmds[@]}"; do
+                cat2="${cmd2%%-*}"
+                sub2="${cmd2#*-}"
+                if [ "$cat2" = "$cat" ] && [ "$sub2" != "$sub" ] && [[ "$sub" == "$sub2-"* ]]; then
+                    nested["$cmd"]=1
+                    break
+                fi
+            done
+        fi
+    done
+    for cmd in "${all_cmds[@]}"; do
+        local cat="${cmd%%-*}"
+        local sub="${cmd#*-}"
+        if [ "$cat" != "$cmd" ] && [ -z "${nested[$cmd]:-}" ]; then
             cat_cmds["$cat"]+="${sub} "
         fi
     done
@@ -56,6 +80,26 @@ _pos() {
     _pos_complete_subcats() {
         local cat="${words[1]}"
         COMPREPLY=($(compgen -W "${cat_cmds[$cat]:-} --help" -- "$cur"))
+    }
+
+    # Complete subcommands + flags + --help for a tool chain, walking up to
+    # the nearest tool that declares anything (e.g. "telegram send" → telegram flags).
+    _pos_complete_tool() {
+        local key="$1" k opts
+        k="$key"
+        while [ -n "$k" ]; do
+            if [ -n "${_pos_subcmds[$k]:-}" ] || [ -n "${_pos_flags[$k]:-}" ]; then
+                if [ "$k" = "$key" ]; then
+                    opts="${_pos_subcmds[$k]:-} ${_pos_flags[$k]:-} --help"
+                else
+                    opts="${_pos_flags[$k]:-} --help"
+                fi
+                COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+                return
+            fi
+            k="${k%-*}"
+        done
+        COMPREPLY=($(compgen -W "--help" -- "$cur"))
     }
 
     _pos_complete_compose_services() {
@@ -81,11 +125,6 @@ _pos() {
         local names
         names=$(docker ps -a --filter label=linux_post_install.vbox=true --format '{{.Names}}' 2>/dev/null)
         COMPREPLY=($(compgen -W "$names" -- "$cur"))
-    }
-
-    _pos_complete_flags() {
-        local tool="$1"
-        COMPREPLY=($(compgen -W "${_pos_flags[$tool]:-} --help" -- "$cur"))
     }
 
     _pos_entertainment_plugins() {
@@ -124,26 +163,14 @@ _pos() {
                 docker-vbox)
                     _pos_complete_docker_vbox_cmds
                     ;;
-                usb-server)
-                    _pos_complete_flags usb-server
-                    ;;
-                communication-telegram)
-                    _pos_complete_flags communication-telegram
-                    ;;
-                entertainment-send)
-                    _pos_complete_flags entertainment-send
-                    ;;
                 entertainment-enable|entertainment-disable)
                     _pos_entertainment_plugins
                     ;;
                 entertainment-config)
                     COMPREPLY=($(compgen -W "set --help" -- "$cur"))
                     ;;
-                network-hotspot)
-                    _pos_complete_flags network-hotspot
-                    ;;
-                system-backup)
-                    _pos_complete_flags system-backup
+                *)
+                    _pos_complete_tool "${words[1]}-${words[2]}"
                     ;;
             esac
             ;;
@@ -163,10 +190,8 @@ _pos() {
                             ;;
                     esac
                     ;;
-                communication-telegram)
-                    case "${words[3]}" in
-                        send|--send) _pos_complete_flags communication-telegram ;;
-                    esac
+                *)
+                    _pos_complete_tool "${words[1]}-${words[2]}-${words[3]}"
                     ;;
             esac
             ;;

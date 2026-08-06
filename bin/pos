@@ -26,6 +26,8 @@ _pos_commands() {
 }
 
 # ── Category list (sorted, filename-derived) ─────────────────────
+# Nested sub-tools (pos-<cat>-<a>-<b> where pos-<cat>-<a> exists) are
+# omitted from the cheat-sheet line — they are shown under their parent tool.
 _pos_category_list() {
     local -A cats=()
     local cmd cat f
@@ -36,10 +38,19 @@ _pos_category_list() {
         [ "$cat" = "$cmd" ] && continue
         cats["$cat"]+="${cmd#*-} "
     done
-    local c line subs joined
+    local c subs joined s s2 top=() is_nested
     for c in $(printf '%s\n' "${!cats[@]}" | sort); do
         subs=(${cats[$c]})
-        joined="$(IFS='|'; echo "${subs[*]}")"
+        top=()
+        for s in "${subs[@]}"; do
+            is_nested=0
+            for s2 in "${subs[@]}"; do
+                [ "$s2" = "$s" ] && continue
+                if [[ "$s" == "$s2-"* ]]; then is_nested=1; break; fi
+            done
+            [ "$is_nested" -eq 1 ] || top+=("$s")
+        done
+        joined="$(IFS='|'; echo "${top[*]}")"
         printf "  %-14s%s\n" "$c" "$joined"
     done
 }
@@ -55,11 +66,36 @@ _pos_category_exists() {
 }
 
 _pos_category_help() {
-    local cat="$1" sub subs=()
-    local f
+    local cat="$1" f
+    local files=() s d
     for f in "$self"/pos-"$cat"-*; do
         [ -x "$f" ] || continue
-        subs+=("${f##*/pos-$cat-}")
+        files+=("${f##*/pos-$cat-}")
+    done
+    mapfile -t files < <(printf '%s\n' "${files[@]}" | sort -u)
+
+    local -A desc subcmds
+    local sc
+    for s in "${files[@]}"; do
+        d="$(sed -n '/^# POS: /{s/^# POS: //;p;q}' "$self/pos-$cat-$s" 2>/dev/null)"
+        [ -n "$d" ] && desc["$s"]="${d#*— }"
+        sc="$(sed -n '/^# POS_SUBCMDS: /{s/^# POS_SUBCMDS: //;p;q}' "$self/pos-$cat-$s" 2>/dev/null)"
+        [ -n "$sc" ] && subcmds["$s"]="$sc"
+    done
+
+    # Nested sub-tools: pos-<cat>-<a>-<b> lists "b" under <a>.
+    local s2 extra
+    for s in "${files[@]}"; do
+        for s2 in "${files[@]}"; do
+            [ "$s2" = "$s" ] && continue
+            if [[ "$s2" == "$s-"* ]]; then
+                extra="${s2#$s-}"
+                case " ${subcmds[$s]:-} " in
+                    *" $extra "*) ;;
+                    *) subcmds["$s"]="${subcmds[$s]:-}${subcmds[$s]:+ }$extra" ;;
+                esac
+            fi
+        done
     done
 
     echo "pos $cat — $cat tools"
@@ -68,7 +104,19 @@ _pos_category_help() {
     echo "  pos $cat <command> [args]"
     echo
     echo "COMMANDS"
-    printf "  %s\n" "${subs[@]}"
+    local is_nested c
+    for s in "${files[@]}"; do
+        is_nested=0
+        for s2 in "${files[@]}"; do
+            [ "$s2" = "$s" ] && continue
+            if [[ "$s" == "$s2-"* ]]; then is_nested=1; break; fi
+        done
+        [ "$is_nested" -eq 1 ] && continue
+        printf '  %-28s%s\n' "$s" "${desc[$s]:-}"
+        for c in ${subcmds[$s]:-}; do
+            printf '    %s %s\n' "$s" "$c"
+        done
+    done
     echo
     echo "Run 'pos $cat <command> --help' for details on a command."
     exit 0

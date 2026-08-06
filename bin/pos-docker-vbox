@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: docker vbox — Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
+# POS_SUBCMDS: create enter stop start rm ls
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
 usage() {

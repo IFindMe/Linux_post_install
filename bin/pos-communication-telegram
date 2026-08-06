@@ -2,6 +2,7 @@
 set -euo pipefail
 # POS: communication telegram — Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
 # POS_FLAGS: --send --type --caption --parse-mode --no-preview --token --chat-id
+# POS_SUBCMDS: send test config
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"

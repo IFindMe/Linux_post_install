@@ -125,8 +125,10 @@ esac
   ```bash
   # POS: <category> <command> — one-line description rendered by `make gen`
   # POS_FLAGS: --flag1 --flag2      # ONLY for flag-style tools
+  # POS_SUBCMDS: sub1 sub2          # ONLY for multi-command tools
   ```
-  The description feeds the dispatch table, bin tree and file table in `DOC/AGENT_Context_Project.md`; `POS_FLAGS` feeds flag completion in `completions/pos.bash`. Both update via `make gen`.
+  The description feeds the dispatch table, bin tree and file table in `DOC/AGENT_Context_Project.md`; `POS_FLAGS` feeds flag completion and `POS_SUBCMDS` feeds subcommand completion in `completions/pos.bash` (both update via `make gen`).
+- Nested tools (e.g. `bin/pos-communication-telegram-listener`) are auto-detected from filenames: the trailing segment (`listener`) is offered as a subcommand of the parent tool (`communication-telegram`) in `pos <category> --help` and tab-completion, instead of appearing as a flat sibling (`telegram-listener`). The flat dash-form (`pos communication telegram-listener`) still dispatches.
 - Optionally add an EXAMPLES line in `bin/pos` `usage()` to showcase the tool in `pos --help`.
 - If the command **reads stdin** (prompts/selection), add it to `INTERACTIVE_CMDS` in `bin/pos` — see [The `pos` CLI](#the-pos-cli).
 

@@ -9,6 +9,7 @@ set -euo pipefail
 #   - bin/pos-* filenames  → category, subcommand
 #   - "# POS:" header line → one-line description
 #   - "# POS_FLAGS:" line  → flag completion list (flag-style tools only)
+#   - "# POS_SUBCMDS:" line → subcommand completion list (multi-command tools)
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 mode="write"
@@ -17,7 +18,7 @@ mode="write"
 ctx="$root/DOC/AGENT_Context_Project.md"
 comp="$root/completions/pos.bash"
 
-# ── Collect tools: "cat|sub|desc|flags" ────────────────────────
+# ── Collect tools: "cat|sub|desc|flags|subcmds" ────────────────
 tools=()
 for f in "$root"/bin/pos-*; do
     [ -x "$f" ] || continue
@@ -28,7 +29,8 @@ for f in "$root"/bin/pos-*; do
     [ -n "$desc" ] || { echo "gen-docs: no '# POS:' header in $f" >&2; exit 1; }
     desc="${desc#*— }"
     flags="$(sed -n '/^# POS_FLAGS: /{s/^# POS_FLAGS: //;p;q}' "$f")"
-    tools+=("$cat|$sub|$desc|$flags")
+    subcmds="$(sed -n '/^# POS_SUBCMDS: /{s/^# POS_SUBCMDS: //;p;q}' "$f")"
+    tools+=("$cat|$sub|$desc|$flags|$subcmds")
 done
 mapfile -t tools < <(printf '%s\n' "${tools[@]}" | sort)
 
@@ -36,12 +38,12 @@ mapfile -t tools < <(printf '%s\n' "${tools[@]}" | sort)
 gen_tree() {
     local width=0 cat sub desc flags name t
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         name="pos-$cat-$sub"
         [ ${#name} -gt "$width" ] && width=${#name}
     done
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         name="pos-$cat-$sub"
         printf '│   ├── %-*s# %s\n' "$((width + 1))" "$name" "$desc"
     done
@@ -50,7 +52,7 @@ gen_tree() {
 gen_dispatch() {
     local cat sub desc flags t
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         printf '| %s | %s | `pos-%s-%s` | %s |\n' "$cat" "$sub" "$cat" "$sub" "$desc"
     done
 }
@@ -72,7 +74,7 @@ gen_filetable() {
     local cat sub desc flags name t
     printf '| `bin/pos` | %s | CLI dispatcher with smart arg matching + logging + category help |\n' "$(wc -l < "$root/bin/pos")"
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         name="bin/pos-$cat-$sub"
         printf '| `%s` | %s | %s |\n' "$name" "$(wc -l < "$root/$name")" "$desc"
     done
@@ -83,9 +85,30 @@ gen_posflags() {
     local cat sub desc flags t
     echo "declare -A _pos_flags"
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         [ -n "$flags" ] || continue
         printf '_pos_flags[%s-%s]="%s"\n' "$cat" "$sub" "$flags"
+    done
+}
+
+gen_possubcmds() {
+    # Subcommand completion: "# POS_SUBCMDS:" list + nested sub-tools from
+    # filenames (pos-<cat>-<sub>-<extra> → "extra" completes under <cat>-<sub>).
+    local cat sub desc flags subcmds rest f t
+    echo "declare -A _pos_subcmds"
+    for t in "${tools[@]}"; do
+        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
+        subcmds="${subcmds:-}"
+        for f in "$root"/bin/pos-"$cat"-"$sub"-*; do
+            [ -x "$f" ] || continue
+            rest="${f##*/pos-$cat-$sub-}"
+            case " $subcmds " in
+                *" $rest "*) ;;
+                *) subcmds="${subcmds:+$subcmds }$rest" ;;
+            esac
+        done
+        [ -n "$subcmds" ] || continue
+        printf '_pos_subcmds[%s-%s]="%s"\n' "$cat" "$sub" "$subcmds"
     done
 }
 
@@ -155,6 +178,7 @@ regen_block "$ctx" tree
 regen_block "$ctx" dispatch
 regen_block "$ctx" selfcontained
 regen_block "$comp" posflags
+regen_block "$comp" possubcmds
 regen_block "$ctx" filetable
 
 # docmap is self-referential: its own block size shifts the section line

@@ -484,7 +484,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 ### Adding a New Tool
 
 1. Create `bin/pos-<category>-<command>` from `templates/pos-tool.sh` — must be executable (`100755`); it auto-appears in `pos <category> --help` (filename-derived, no registration)
-2. Add the `# POS: <cat> <cmd> — <one-line description>` header right after the shebang (plus `# POS_FLAGS: ...` for flag-style tools) — this is the single source of truth for the generated docs
+2. Add the `# POS: <cat> <cmd> — <one-line description>` header right after the shebang (plus `# POS_FLAGS: ...` for flag-style tools and `# POS_SUBCMDS: ...` for multi-command tools) — this is the single source of truth for the generated docs; nested tools (`pos-<cat>-<a>-<b>`) auto-list under their parent tool
 3. Add to `INTERACTIVE_CMDS` in `bin/pos` if it reads stdin
 4. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed); non-apt/manual installers → `command -v` guard in the tool instead
 5. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
@@ -532,13 +532,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 219 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 267 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-communication-telegram-listener` | 408 | Telegram bot listener: map /command → bash, run them on chat messages |
-| `bin/pos-communication-telegram` | 274 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
-| `bin/pos-docker-compose` | 364 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
+| `bin/pos-communication-telegram` | 275 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
+| `bin/pos-docker-compose` | 365 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
-| `bin/pos-docker-vbox` | 157 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
+| `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 98 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 50 | Enable an auto-trigger for a plugin on a schedule |
@@ -557,7 +557,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 190 | Dynamic bash completion |
+| `completions/pos.bash` | 215 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
