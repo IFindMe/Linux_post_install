@@ -5,6 +5,7 @@ Telegram messaging and alerts. Tools: `telegram`, `matrix`.
 | Tool | What it does |
 |------|--------------|
 | `pos communication telegram` | Send messages/files, manage config, webhook state, message logs |
+| `pos communication telegram listener` | Bot listener: map `/command` → bash and run it from chat (systemd user daemon) |
 | `pos communication matrix` | Matrix/Synapse sender (extensible; not yet implemented) |
 
 `telegram` is the workhorse: it backs the whole **notify system** — health
@@ -68,6 +69,44 @@ pos communication telegram clear-logs            # wipe message logs
   still work (we disable the webhook automatically when it owns it) — but if
   another process registered the webhook, polls fail; `deletemenu`/webhook
   state shows ownership. See `getwebhookinfo`.
+
+---
+
+## `pos communication telegram listener`
+
+Turns your bot into a two-way remote control: map `/command` → bash, then
+message the bot from your phone to run it.
+
+```bash
+pos communication telegram listener             # edit the /command → bash map
+pos communication telegram listener --status    # service state + mapped commands
+pos communication telegram listener --enable    # install the systemd user daemon
+pos communication telegram listener --disable   # remove it
+```
+
+- **Map file:** `~/.config/linux_post_install/telegram_commands.env` (chmod 600),
+  one `/cmd=bash command` per line — re-read on every message, so edits apply
+  instantly. Example:
+  ```
+  /status=systemctl --user is-active pos-telegram-listener.service
+  /temp=sensors | grep -i 'Tctl\|package id 0'
+  /update=cd /path/to/repo && git pull
+  ```
+- **Owner-only:** the bot only reacts to `TELEGRAM_CHAT_ID` (your own chat);
+  others are ignored. `/help` lists mapped commands; unknown → "Unknown command".
+- **Runs as you:** mapped commands execute as your user with a 60s timeout,
+  stdout + stderr are replied to the chat (truncated ~3800 chars; empty → `OK`).
+  `sudo` inside a command needs a NOPASSWD rule.
+- **Daemon lifecycle:** the service is a systemd **user** unit; it stops at
+  logout unless you enable linger: `sudo loginctl enable-linger $(whoami)`.
+  `--enable` prints this warning if linger is off.
+
+**Troubleshooting:**
+- Bot doesn't answer → send `/help`; if silent, check the service with
+  `systemctl --user status pos-telegram-listener.service`.
+- A webhook on the bot blocks `getUpdates` → delete it with
+  `pos communication telegram setwebhook ""`.
+- Needs `jq` (in preinstall PACKAGES).
 
 ---
 

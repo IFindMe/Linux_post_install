@@ -194,6 +194,7 @@ Subcommands that need input prompt interactively when args are omitted.
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
 | `pos communication telegram send "text"` | `bin/pos-communication-telegram` | Send a message, link, or media file (auto-detects the type) to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
+| `pos communication telegram listener` | `bin/pos-communication-telegram-listener` | Telegram bot listener: map `/command` → bash commands and run them from chat; interactive editor for the map | Same `telegram.env` (the bot is the owner, `TELEGRAM_CHAT_ID`). Map lives in `~/.config/linux_post_install/telegram_commands.env` (`/cmd=bash command` lines, chmod 600) |
 
 `pos communication telegram` in detail:
 
@@ -215,6 +216,18 @@ Subcommands that need input prompt interactively when args are omitted.
 `send` option validation: `--caption` is only valid with media types (file/photo/video/audio/voice/animation), `--no-preview` only with `--type message`/`link`, and `--type` only accepts `message|file|link|sticker|photo|video|audio|voice|animation`. An explicit `--type` always overrides auto-detection.
 
 The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Requires network access to `api.telegram.org`.
+
+`pos communication telegram listener` in detail:
+
+| Command | Behavior |
+|---------|----------|
+| `pos communication telegram listener` | Interactive editor for the `/command` → bash map (`a`dd / `e`dit / `r`emove / `t`est / `q`uit); test-runs run `bash -n` first and may execute the command live |
+| `pos communication telegram listener --status` | Shows service state (running/autostart), config + map file paths, and the mapped commands |
+| `pos communication telegram listener --enable` | Installs + starts a systemd **user** service (`pos-telegram-listener.service`); the daemon polls `getUpdates` and runs mapped commands |
+| `pos communication telegram listener --disable` | Stops, disables, and removes the service |
+| `pos communication telegram listener --run` | Run the polling loop in the foreground (what the service executes) |
+
+The map file is re-read for every message — edits apply without a restart. The listener only reacts to the owner chat (`TELEGRAM_CHAT_ID`); anyone else's message is ignored. `/help` lists mapped commands; an unmapped command replies "Unknown command". Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`), so `sudo` inside them needs a NOPASSWD rule. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
 
 ### entertainment
 

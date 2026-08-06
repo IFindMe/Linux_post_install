@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: communication telegram-listener — Telegram bot listener: map /command → bash, run them on chat messages
+# POS_FLAGS: --enable --disable --status --run
+
+CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_FILE="$CONFIG_DIR/telegram.env"
+MAP_FILE="$CONFIG_DIR/telegram_commands.env"
+API="https://api.telegram.org"
+SERVICE="pos-telegram-listener.service"
+USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+err()  { echo "ERROR: $*" >&2; exit 1; }
+log()  { echo "[+] $*"; }
+warn() { echo "[!] $*"; }
+
+usage() {
+    cat <<EOF
+Usage: pos communication telegram listener [command]
+
+Telegram bot listener: map /command → bash commands and run them from chat.
+
+Commands:
+  (none)       Interactive editor for the /command → bash map
+  --enable     Install + start the systemd user service (autostarts on login)
+  --disable    Stop + disable + remove the service
+  --status     Show service state and the command map
+  --run        Run the polling loop in the foreground (used by the service)
+
+Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+Map:     $MAP_FILE — one '/cmd=bash command' per line
+
+The listener only reacts to the owner chat (TELEGRAM_CHAT_ID). Commands run
+as your user, so 'sudo' inside them needs a NOPASSWD rule. The interactive
+editor runs 'bash -n' to syntax-check commands before saving.
+
+Examples:
+  pos communication telegram listener
+  pos communication telegram listener --enable
+  pos communication telegram listener --status
+EOF
+    exit 0
+}
+
+# ── telegram.env (same pattern as pos-communication-telegram) ────
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+# ── command map (MAP_FILE) ──────────────────────────────────────
+# Lines: /cmd=bash command. Keys keep the leading slash; read via awk so
+# values may contain '='. The map is re-read per message — edits apply
+# without restarting the listener.
+
+map_entries() {
+    [ -f "$MAP_FILE" ] || return 0
+    grep -E '^/[A-Za-z0-9_.-]+=' "$MAP_FILE" | while IFS= read -r line; do
+        printf '%s|%s\n' "${line%%=*}" "${line#*=}"
+    done
+}
+
+map_has() {
+    [ -f "$MAP_FILE" ] && awk -F= -v k="$1" '$1==k{exit 0} END{exit 1}' "$MAP_FILE"
+}
+
+map_get() {
+    [ -f "$MAP_FILE" ] || return 0
+    awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print}' "$MAP_FILE"
+}
+
+map_set() {
+    local cmd="$1" value="$2"
+    mkdir -p "$CONFIG_DIR"
+    touch "$MAP_FILE"
+    chmod 600 "$MAP_FILE"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$cmd" 'index($0, k "=") != 1 { print }' "$MAP_FILE" > "$tmp"
+    printf '%s=%s\n' "$cmd" "$value" >> "$tmp"
+    mv "$tmp" "$MAP_FILE"
+    chmod 600 "$MAP_FILE"
+}
+
+map_del() {
+    [ -f "$MAP_FILE" ] || return 0
+    local cmd="$1" tmp
+    tmp="$(mktemp)"
+    awk -v k="$cmd" 'index($0, k "=") != 1 { print }' "$MAP_FILE" > "$tmp"
+    mv "$tmp" "$MAP_FILE"
+    chmod 600 "$MAP_FILE"
+}
+
+MAP_CMDS=(); MAP_VALS=(); MAP_N=0
+load_map() {
+    MAP_CMDS=(); MAP_VALS=(); MAP_N=0
+    [ -f "$MAP_FILE" ] || return 0
+    local i=0 line cmd value
+    while IFS='|' read -r cmd value; do
+        [ -n "$cmd" ] || continue
+        i=$((i + 1))
+        MAP_CMDS[$i]="$cmd"; MAP_VALS[$i]="$value"
+    done <<< "$(map_entries)"
+    MAP_N="$i"
+}
+
+map_cmds_list() {
+    load_map
+    local out="" i
+    for ((i=1; i<=MAP_N; i++)); do
+        [ -n "$out" ] && out+=", "
+        out+="${MAP_CMDS[$i]}"
+    done
+    printf '%s' "${out:-none}"
+}
+
+check_syntax() {
+    bash -n -c "$1" 2>&1
+}
+
+# ── interactive editor ──────────────────────────────────────────
+ui_pick() {
+    load_map
+    if [ "$MAP_N" -eq 0 ]; then
+        warn "no commands mapped yet — add one first"
+        return 1
+    fi
+    echo
+    local i
+    for ((i=1; i<=MAP_N; i++)); do
+        printf '  %2d) %-16s -> %s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}"
+    done
+    local idx
+    read -rp "Entry number: " idx
+    if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > MAP_N )); then
+        warn "invalid number '$idx'"
+        return 1
+    fi
+    echo "$idx"
+}
+
+ui_run_command() {
+    local value="$1" output rc
+    echo
+    echo "--- running: $value"
+    if output="$(timeout 60 bash -c "$value" 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    printf '%s\n' "$output" | head -c 3800
+    [ -z "$output" ] || echo
+    echo "--- exit $rc"
+}
+
+ui_add() {
+    local cmd value out
+    read -rp "/command name (e.g. /status): " cmd
+    [ -n "$cmd" ] || { warn "empty command name"; return; }
+    case "$cmd" in
+        /[A-Za-z0-9_.-]*) ;;
+        *) warn "command must start with '/' and use [A-Za-z0-9_.-]: $cmd"; return ;;
+    esac
+    read -rp "bash command: " value
+    [ -n "$value" ] || { warn "empty bash command"; return; }
+    if out="$(check_syntax "$value")"; then
+        map_set "$cmd" "$value"
+        log "saved $cmd -> $value"
+    else
+        warn "syntax error — not saved:"
+        printf '%s\n' "$out" | sed 's/^/    /'
+        return
+    fi
+    local yn
+    read -rp "Test-run it now? [y/N] " yn
+    case "$yn" in
+        y|Y) ui_run_command "$value" ;;
+    esac
+}
+
+ui_edit() {
+    local idx cmd value out
+    idx="$(ui_pick)" || return
+    cmd="${MAP_CMDS[$idx]}"
+    echo "Editing: $cmd -> ${MAP_VALS[$idx]}"
+    read -rp "bash command: " value
+    [ -n "$value" ] || { warn "empty bash command"; return; }
+    if out="$(check_syntax "$value")"; then
+        map_set "$cmd" "$value"
+        log "updated $cmd -> $value"
+    else
+        warn "syntax error — not saved:"
+        printf '%s\n' "$out" | sed 's/^/    /'
+    fi
+}
+
+ui_remove() {
+    local idx cmd yn
+    idx="$(ui_pick)" || return
+    cmd="${MAP_CMDS[$idx]}"
+    read -rp "Remove '$cmd'? [y/N] " yn
+    case "$yn" in
+        y|Y) map_del "$cmd"; log "removed $cmd" ;;
+        *) warn "canceled" ;;
+    esac
+}
+
+ui_test() {
+    local idx
+    idx="$(ui_pick)" || return
+    ui_run_command "${MAP_VALS[$idx]}"
+}
+
+ui() {
+    local choice
+    while true; do
+        echo
+        echo "Telegram listener — /command -> bash map"
+        echo "-----------------------------------------"
+        load_map
+        if [ "$MAP_N" -eq 0 ]; then
+            echo "  (no commands mapped yet)"
+        else
+            local i
+            for ((i=1; i<=MAP_N; i++)); do
+                printf '  %2d) %-16s -> %s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}"
+            done
+        fi
+        echo
+        read -rp "Menu: [a]dd  [e]dit  [r]emove  [t]est  [q]uit > " choice
+        case "$choice" in
+            a|A|add) ui_add ;;
+            e|E|edit) ui_edit ;;
+            r|R|remove) ui_remove ;;
+            t|T|test) ui_test ;;
+            q|Q|quit|exit) echo; log "bye"; return 0 ;;
+            *) warn "unknown choice '$choice'" ;;
+        esac
+    done
+}
+
+# ── systemd user service ────────────────────────────────────────
+enable_service() {
+    command -v systemctl &>/dev/null || err "systemctl not found — cannot create the listener service"
+    mkdir -p "$USER_SYSTEMD_DIR"
+
+    local runner
+    if [ -x /usr/local/bin/pos-communication-telegram-listener ]; then
+        runner=/usr/local/bin/pos-communication-telegram-listener
+    else
+        runner="$(cd "$(dirname "$0")/.." && pwd)/bin/pos-communication-telegram-listener"
+        warn "using repo path $runner — re-run 'install.sh' so the service survives a deleted repo"
+    fi
+
+    cat >"$USER_SYSTEMD_DIR/$SERVICE" <<EOF
+[Unit]
+Description=pos Telegram listener (/command to bash)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$runner --run
+Restart=always
+RestartSec=5
+Environment=HOME=$HOME
+
+[Install]
+WantedBy=default.target
+EOF
+    chmod 644 "$USER_SYSTEMD_DIR/$SERVICE"
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$SERVICE"
+    log "listener service enabled: $SERVICE"
+    warn "commands run as $(id -un) — 'sudo' inside them needs a NOPASSWD rule"
+    if command -v loginctl >/dev/null 2>&1; then
+        if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
+            warn "enable linger so the listener survives logout: sudo loginctl enable-linger $(id -un)"
+        fi
+    fi
+}
+
+disable_service() {
+    if [ ! -f "$USER_SYSTEMD_DIR/$SERVICE" ]; then
+        warn "no listener service installed ($SERVICE)"
+        exit 0
+    fi
+    systemctl --user disable --now "$SERVICE" 2>/dev/null || true
+    rm -f "$USER_SYSTEMD_DIR/$SERVICE"
+    systemctl --user daemon-reload
+    log "listener service disabled"
+}
+
+status() {
+    if systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; then
+        echo "listener:  running"
+    else
+        echo "listener:  not running"
+    fi
+    if systemctl --user is-enabled "$SERVICE" >/dev/null 2>&1; then
+        echo "autostart: enabled (starts on login)"
+    else
+        echo "autostart: disabled"
+    fi
+    echo "config:    $CONFIG_FILE"
+    echo "map file:  $MAP_FILE"
+    load_map
+    echo "commands:  $MAP_N mapped"
+    local i
+    for ((i=1; i<=MAP_N; i++)); do
+        printf '  %-16s -> %s\n' "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}"
+    done
+}
+
+# ── polling daemon ──────────────────────────────────────────────
+reply() {
+    local text="$1" msg_id="$2" rc="${3:-}"
+    text="${text:0:3800}"
+    local args=(--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${text}")
+    [ -n "$msg_id" ] && args+=(--data-urlencode "reply_to_message_id=${msg_id}")
+    curl -fsS -m 60 -X POST "${API}/bot${TELEGRAM_BOT_TOKEN}/sendMessage" "${args[@]}" >/dev/null 2>&1 \
+        || warn "reply failed (rc ${rc:-?})"
+}
+
+handle_message() {
+    local text="$1" msg_id="$2" value output rc
+    case "$text" in
+        /help|/start)
+            reply "Mapped commands: $(map_cmds_list)" "$msg_id"
+            return ;;
+    esac
+    value="$(map_get "$text")"
+    if [ -z "$value" ]; then
+        reply "Unknown command: $text (send /help)" "$msg_id"
+        return
+    fi
+    log "exec: $text"
+    if output="$(timeout 60 bash -c "$value" 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if [ -z "$output" ]; then
+        output="OK"
+    fi
+    if [ "$rc" -ne 0 ]; then
+        reply "$(printf 'exit %s\n%s' "$rc" "$output")" "$msg_id" "$rc"
+    else
+        reply "$output" "$msg_id"
+    fi
+}
+
+run_daemon() {
+    command -v jq &>/dev/null || err "jq not found (install jq — in preinstall PACKAGES)"
+    load_config
+    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
+    [ -n "${TELEGRAM_CHAT_ID:-}" ] || err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
+
+    local offset=0
+    log "listener running (owner chat ${TELEGRAM_CHAT_ID}) — Ctrl+C to stop"
+    while true; do
+        local resp n i
+        resp="$(curl -fsS -m 45 "${API}/bot${TELEGRAM_BOT_TOKEN}/getUpdates" \
+            --data-urlencode "timeout=30" \
+            --data-urlencode "offset=${offset}" \
+            --data-urlencode 'allowed_updates=["message"]' 2>/dev/null)" || { sleep 5; continue; }
+        if [ "$(printf '%s' "$resp" | jq -r '.ok // false')" != "true" ]; then
+            sleep 5
+            continue
+        fi
+        n="$(printf '%s' "$resp" | jq -r '.result | length')"
+        for ((i=0; i<n; i++)); do
+            local u text chat from_id msg_id
+            u="$(printf '%s' "$resp" | jq -r ".result[$i].update_id")"
+            text="$(printf '%s' "$resp" | jq -r ".result[$i].message.text // empty")"
+            chat="$(printf '%s' "$resp" | jq -r ".result[$i].message.chat.id // empty")"
+            from_id="$(printf '%s' "$resp" | jq -r ".result[$i].message.from.id // empty")"
+            msg_id="$(printf '%s' "$resp" | jq -r ".result[$i].message.message_id // empty")"
+            offset=$((u + 1))
+            [ -n "$text" ] || continue
+            if [ -n "$chat" ] && [ "$chat" != "$TELEGRAM_CHAT_ID" ] && [ "$from_id" != "$TELEGRAM_CHAT_ID" ]; then
+                continue
+            fi
+            handle_message "$text" "$msg_id"
+        done
+    done
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+    --enable)  enable_service ;;
+    --disable) disable_service ;;
+    --status)  status ;;
+    --run)     run_daemon ;;
+    "")        ui ;;
+    *)         err "Unknown option '$1' (see --help)" ;;
+esac

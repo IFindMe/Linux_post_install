@@ -40,8 +40,6 @@ summary (newest last).
   re-run install.sh to refresh `/usr/local/bin`.
 - **Tier 4: `pos new`** — scaffold a new tool from `templates/pos-tool.sh`
   (category, name, POS header, exec bit, doc stubs).
-- **NOT NOW:** Telegram inbound bot (command handling) — outbound alerting
-  covers current needs; revisit if remote control is wanted.
 - **NOT NOW:** per-category `bin/` subdirectories — flat `bin/` + filename
   dispatch scales fine; revisit only if `bin/` passes ~40 files.
 - **NOT NOW:** split `lib/entertainment-lib.sh` — fine under 600 lines; revisit
@@ -49,6 +47,10 @@ summary (newest last).
 
 ## Done (summary, newest last)
 
+- 2026-08-06: Telegram **listener** — `pos communication telegram listener`:
+  interactive `/command` → bash map editor + owner-only polling daemon as a
+  systemd user service (map in `~/.config/linux_post_install/telegram_commands.env`,
+  re-read per message; `/help`, unknown-command reply, 60s timeout, stdout reply).
 - 2026-08-06: NFS in `pos system` — `pos system nfs-server` (status/share/
   unshare/list/reload/enable/disable, idempotent /etc/exports edits, generic
   default with Tailscale/WireGuard/LAN examples) + `pos system nfs-client`

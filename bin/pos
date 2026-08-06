@@ -116,6 +116,9 @@ EXAMPLES
 
   pos communication telegram --send "Backup done"
                                           Send a Telegram message
+  pos communication telegram listener     Edit the /command → bash map
+  pos communication telegram listener --enable
+                                          Install the Telegram bot listener
 
   pos entertainment send weather          Fetch Open-Meteo weather → Telegram
   pos entertainment send joke --print     Preview a joke locally (no send)
@@ -180,7 +183,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"
