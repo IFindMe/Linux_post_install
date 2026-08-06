@@ -10,6 +10,7 @@ CRITICAL: real guidance lives in DOC/. When you encounter a reference below, use
 - @DOC/DEV.md — conventions, verification, and the "Adding a new Feature/App/Tool" checklists. Read before creating or changing code/docs.
 - @DOC/POS.md — `pos` CLI reference (dispatcher + every command). Read when working on `bin/pos*` scripts or their docs.
 - @DOC/README.md — index of all docs. Read to find the right doc.
+- @DOC/HOWTO.md — hands-on per-category guides (network, docker, media, system, ssh, usb, communication, entertainment) with flags, recipes, and troubleshooting. Read when a task is about *using* `pos` day-to-day rather than extending it.
 
 ## Quick facts
 

@@ -49,6 +49,10 @@ summary (newest last).
 
 ## Done (summary, newest last)
 
+- 2026-08-06: `pos` HOW-TO guide set — `DOC/HOWTO.md` index + per-category
+  `DOC/howto/*.md` (network, docker, media, system, ssh, usb, communication,
+  entertainment) with flags, recipes, config, and troubleshooting; wired into
+  DOC/README, root README, AGENTS.md.
 - 2026-08-06: Multi-platform alerting — `lib/notify.sh` routes via `NOTIFY_PLATFORM`
   (`notify.env`, default telegram; sender contract for Matrix/Synapse later),
   `system.env` shared config for health/backup, dynamic effective values in

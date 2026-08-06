@@ -43,6 +43,7 @@ cd Linux_post_install
 | Topic | Where |
 |-------|-------|
 | Docs index | [DOC/README.md](DOC/README.md) |
+| `pos` HOW-TO guides (recipes + troubleshooting) | [DOC/HOWTO.md](DOC/HOWTO.md) |
 | Core scripts (installer, libs, features) — how they work + config | [DOC/SCRIPTS.md](DOC/SCRIPTS.md) |
 | `pos` CLI reference (all commands, compose config, wrappers) | [DOC/POS.md](DOC/POS.md) |
 | Optional apps (picker + full catalog) | [DOC/APPS.md](DOC/APPS.md) |
