@@ -10,7 +10,7 @@ keys_section() {
     # plugins (via their # POS_KEYS: headers), aligned by key name.
     local d="$1" maxw=8 line key plugin desc req
     while IFS= read -r line; do
-        IFS='|' read -r key _desc _req <<<"$line"
+        IFS='|' read -r _plugin key _desc _req <<<"$line"
         [ ${#key} -gt "$maxw" ] && maxw=${#key}
     done <<< "$(config_keys "$d")"
 
@@ -19,7 +19,7 @@ keys_section() {
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         IFS='|' read -r plugin key desc req <<<"$line"
-        printf '  %-*s %s (%s)   [%s]\n' "$maxw" "$key" "$desc" "$req" "$plugin"
+        printf '  %-*s %s (%s)  [%s]\n' "$maxw" "$key" "$desc" "$req" "$plugin"
     done <<< "$(config_keys "$d")"
     printf '  %-*s %s\n' "$maxw" "<any>" "UPPER_SNAKE key settable freely; a warning is shown if no installed plugin declares it"
 }
