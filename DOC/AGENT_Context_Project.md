@@ -533,7 +533,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 267 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram-listener` | 408 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 433 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram` | 275 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
 | `bin/pos-docker-compose` | 365 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
@@ -553,7 +553,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 125 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
-| `bin/pos-system-health` | 243 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
+| `bin/pos-system-health` | 254 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |

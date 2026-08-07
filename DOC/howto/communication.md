@@ -88,7 +88,7 @@ pos communication telegram listener --disable   # remove it
   one `/cmd=bash command` per line — re-read on every message, so edits apply
   instantly. Example:
   ```
-  /status=systemctl --user is-active pos-telegram-listener.service
+  /status=@quiet pos system health --send
   /temp=sensors | grep -i 'Tctl\|package id 0'
   /update=cd /path/to/repo && git pull
   ```
@@ -97,6 +97,10 @@ pos communication telegram listener --disable   # remove it
 - **Runs as you:** mapped commands execute as your user with a 60s timeout,
   stdout + stderr are replied to the chat (truncated ~3800 chars; empty → `OK`).
   `sudo` inside a command needs a NOPASSWD rule.
+- **`@quiet` prefix:** a map value starting with `@quiet ` runs the command but
+  does NOT reply — for commands that already send their own notification, so
+  you don't get it twice. `/status=@quiet pos system health --send` delivers
+  one digest via the notify system and nothing else.
 - **Daemon lifecycle:** the service is a systemd **user** unit; it stops at
   logout unless you enable linger: `sudo loginctl enable-linger $(whoami)`.
   `--enable` prints this warning if linger is off.

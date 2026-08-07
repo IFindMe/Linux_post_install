@@ -14,6 +14,10 @@ summary (newest last).
 - When a task is completed: move it from Now/Next into **Done** (dated one-line)
   in the same commit that finishes the work.
 
+## Done
+
+- **2026-08-07** — `pos system health --send` notification-only; listener `@quiet` prefix (run mapped command without replying, for commands that self-notify). `/status=@quiet pos system health --send` = exactly one digest.
+
 ## Now
 
 - (none — Tier 1 shipped: `pos system health`, `lib/notify.sh`, digest timer)

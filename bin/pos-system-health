@@ -20,7 +20,9 @@ Host health dashboard: disk, RAM/swap, failed systemd units, backup age,
 fail2ban, docker containers. Exits 1 if any check FAILs.
 
 Flags:
-  --send       Send the summary via the configured notify platform(s)
+  --send       Send the summary via the configured notify platform(s) and do
+               NOT print the dashboard (notification-only — for cron/timers or
+               wrappers like the Telegram listener that reply with output)
                (uses lib/notify.sh; see NOTIFY_PLATFORM below)
   --markdown   Same as --send, with markdown parse mode
   -h, --help   Show this help
@@ -54,6 +56,13 @@ done
 
 if [ "$MARKDOWN" -eq 1 ]; then
     SEND=1
+fi
+
+# --send is notification-only: suppress the dashboard output (so a wrapper
+# such as the Telegram listener doesn't echo it back as a duplicate reply).
+if [ "$SEND" -eq 1 ]; then
+    exec 3>&1
+    exec 1>/dev/null
 fi
 
 FAILURES=0
@@ -227,6 +236,7 @@ else
 fi
 
 if [ "$SEND" -eq 1 ]; then
+    exec 1>&3 3>&-
     msg="POS Health — ${host}
 Verdict: ${verdict}"
     for line in "${REPORT[@]}"; do
@@ -238,6 +248,7 @@ ${line}"
     else
         notify_send "$msg"
     fi
+    echo "sent: POS Health — ${host} (${verdict})"
 fi
 
 [ "$FAILURES" -eq 0 ]

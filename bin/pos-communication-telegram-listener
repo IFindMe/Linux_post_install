@@ -30,6 +30,10 @@ Commands:
 Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
 Map:     $MAP_FILE — one '/cmd=bash command' per line
 
+Prefix a map value with '@quiet ' to run the command without replying —
+for commands that already send their own notification, so you don't get it
+twice (e.g. '/status=@quiet pos system health --send').
+
 The listener only reacts to the owner chat (TELEGRAM_CHAT_ID). Commands run
 as your user, so 'sudo' inside them needs a NOPASSWD rule. The interactive
 editor runs 'bash -n' to syntax-check commands before saving.
@@ -125,7 +129,7 @@ map_cmds_list() {
 }
 
 check_syntax() {
-    bash -n -c "$1" 2>&1
+    bash -n -c "$(strip_quiet "$1")" 2>&1
 }
 
 # ── interactive editor ──────────────────────────────────────────
@@ -149,8 +153,24 @@ ui_pick() {
     echo "$idx"
 }
 
+# Map entries may be prefixed with '@quiet ' to run the command without
+# replying — for commands that deliver their own notification (e.g. the
+# health check's --send). The marker is stripped before running and before
+# the editor's bash -n syntax check.
+QUIET_PREFIX="@quiet"
+
+strip_quiet() {
+    local value="$1"
+    if [ "${value#"$QUIET_PREFIX "}" != "$value" ]; then
+        printf '%s' "${value#"$QUIET_PREFIX "}"
+    else
+        printf '%s' "$value"
+    fi
+}
+
 ui_run_command() {
     local value="$1" output rc
+    value="$(strip_quiet "$value")"
     echo
     echo "--- running: $value"
     if output="$(timeout 60 bash -c "$value" 2>&1)"; then
@@ -334,7 +354,7 @@ reply() {
 }
 
 handle_message() {
-    local text="$1" msg_id="$2" value output rc
+    local text="$1" msg_id="$2" value output rc quiet=0
     case "$text" in
         /help|/start)
             reply "Mapped commands: $(map_cmds_list)" "$msg_id"
@@ -345,12 +365,17 @@ handle_message() {
         reply "Unknown command: $text (send /help)" "$msg_id"
         return
     fi
+    if [ "${value#"$QUIET_PREFIX "}" != "$value" ]; then
+        quiet=1
+        value="${value#"$QUIET_PREFIX "}"
+    fi
     log "exec: $text"
     if output="$(timeout 60 bash -c "$value" 2>&1)"; then
         rc=0
     else
         rc=$?
     fi
+    [ "$quiet" -eq 1 ] && return
     if [ -z "$output" ]; then
         output="OK"
     fi
