@@ -42,8 +42,8 @@ pos entertainment status                   # plugins + active schedules
 
 ## How it works
 
-- **Scheduling** uses systemd **user** timers (unit `pos-ent-<plugin>.timer`,
-  fallback to cron when systemd user units are unavailable). Interval is
+- **Scheduling** uses systemd **user** timers only (unit
+  `pos-entertainment-<plugin>.timer` in `~/.config/systemd/user/`). Interval is
   resolved through the same systemd-time parser used by `.timer` units —
   invalid values are rejected with a clear message.
 - **Delivery** goes through `notify_send`, so the platform follows

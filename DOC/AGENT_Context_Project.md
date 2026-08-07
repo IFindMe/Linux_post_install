@@ -541,9 +541,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 98 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
-| `bin/pos-entertainment-enable` | 50 | Enable an auto-trigger for a plugin on a schedule |
+| `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 93 | Run a public-API plugin and send its output via Telegram (default sender) |
-| `bin/pos-entertainment-status` | 55 | Show enabled plugins and scheduler state |
+| `bin/pos-entertainment-status` | 49 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 35 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 38 | Download video as MP4 (interactive format select) |
 | `bin/pos-network-checkport` | 45 | Check TCP port connectivity |

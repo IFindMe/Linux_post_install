@@ -11,7 +11,7 @@ Usage: pos entertainment disable <plugin>
 
 Remove a plugin from the ENABLED list in
 $CONFIG_FILE
-and remove its scheduled job (systemd user timer or cron line).
+and remove its scheduled systemd user timer.
 
 Examples:
   pos entertainment disable weather

@@ -209,17 +209,12 @@ interval_to_oncalendar() {
     if [[ "$i" =~ ^([0-9]+)m$ ]]; then
         local n="${BASH_REMATCH[1]}"
         [ "$n" -ge 1 ] && [ "$n" -le 59 ] || return 1
-        printf '*:0/%s:00' "$n"; return 0
+        printf '*:00/%s:00' "$n"; return 0
     fi
     if [[ "$i" =~ ^([0-9]+)h$ ]]; then
         local n="${BASH_REMATCH[1]}"
         [ "$n" -ge 1 ] && [ "$n" -le 23 ] || return 1
-        printf '*-*-* */%s:00:00' "$n"; return 0
-    fi
-    if [[ "$i" =~ ^([0-9]+)d$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 30 ] || return 1
-        printf '*-*-*/%s 08:00:00' "$n"; return 0
+        printf '*-*-* 00/%s:00:00' "$n"; return 0
     fi
     case "$i" in
         hourly) printf '*-*-* *:00:00' ;;
@@ -293,15 +288,12 @@ ensure_linger() {
 }
 
 # Reconcile the auto-trigger schedule with the ENABLED list in the config.
-# Backend is auto-detected: systemd user timers if a user systemd manager is
-# reachable, otherwise user crontab (cron fires without login, reads $HOME).
+# Backend: systemd user timers (requires a reachable user systemd manager).
 sync_timers() {
     if systemctl --user show-environment >/dev/null 2>&1; then
         sync_systemd
-    elif command -v crontab >/dev/null 2>&1; then
-        sync_cron
     else
-        warn "no scheduler available (systemd user manager or cron) — run 'pos entertainment send <plugin>' manually"
+        warn "no systemd user manager available — run 'pos entertainment send <plugin>' manually"
     fi
 }
 
@@ -357,72 +349,3 @@ sync_systemd() {
     done
 }
 
-# ── Backend: user crontab (fallback when no systemd user manager) ──
-CRON_BEGIN="# POS-ENTERTAINMENT-BEGIN"
-CRON_END="# POS-ENTERTAINMENT-END"
-
-interval_to_cron() {
-    local i="$1"
-    case "$i" in
-        1h|hourly)      printf '0 * * * *'; return 0 ;;
-        1d|daily)       printf '0 8 * * *'; return 0 ;;
-        weekly)         printf '0 8 * * 1'; return 0 ;;
-        OnCalendar=*)   return 1 ;;
-    esac
-    if [[ "$i" =~ ^([0-9]+)m$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 59 ] || return 1
-        printf '*/%s * * * *' "$n"; return 0
-    fi
-    if [[ "$i" =~ ^([0-9]+)h$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 23 ] || return 1
-        printf '0 */%s * * *' "$n"; return 0
-    fi
-    if [[ "$i" =~ ^([0-9]+)d$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 30 ] || return 1
-        printf '0 8 */%s * *' "$n"; return 0
-    fi
-    return 1
-}
-
-sync_cron() {
-    local raw entry plugin interval cron runner
-    raw="$(config_value ENABLED)"
-    parse_enabled "$raw"
-    runner="$(command -v pos-entertainment-send 2>/dev/null || echo /usr/local/bin/pos-entertainment-send)"
-
-    local -a lines=()
-    for entry in "${ENABLED_ENTRIES[@]}"; do
-        plugin="${entry%%,*}"; interval="${entry##*,}"
-        [ "$interval" = "$plugin" ] && interval="$DEFAULT_INTERVAL"
-        if ! plugin_exists "$(plugin_dir)" "$plugin"; then
-            warn "plugin '$plugin' not installed — skipping"
-            continue
-        fi
-        if ! cron="$(interval_to_cron "$interval")"; then
-            warn "interval '$interval' cannot be mapped to cron for '$plugin' — skipping (use a named interval)"
-            continue
-        fi
-        lines+=("$cron $runner $plugin")
-    done
-
-    local head block=""
-    head="$(crontab -l 2>/dev/null | sed "/^${CRON_BEGIN}$/,/^${CRON_END}$/d" || true)"
-    [ "${#lines[@]}" -gt 0 ] && block="$CRON_BEGIN"$'\n'"$(printf '%s\n' "${lines[@]}")"$'\n'"$CRON_END"
-    if [ -n "$block" ]; then
-        [ -n "$head" ] && head+=$'\n'
-        head+="$block"
-    fi
-    printf '%s\n' "$head" | crontab - 2>/dev/null || \
-        err "could not write crontab — check 'crontab -l' permissions"
-    local jobs
-    jobs="$(crontab -l 2>/dev/null | sed -n "/^${CRON_BEGIN}$/,/^${CRON_END}$/p" | grep -c '^\*/\|^0 ' || true)"
-    [ -z "$jobs" ] && jobs=0
-    log "cron schedule synced ($jobs job(s))"
-}
-
-cron_block() {
-    crontab -l 2>/dev/null | sed -n "/^${CRON_BEGIN}$/,/^${CRON_END}$/p" || true
-}

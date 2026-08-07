@@ -183,7 +183,7 @@ make check                    # full self-consistency gate (syntax, exec bits, d
 
 ## Adding an Entertainment Plugin
 
-The `entertainment` module routes public-API data to Telegram via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`). Auto-triggering is config-driven: `ENABLED` in `entertainment.env` holds `plugin, interval` pairs; the tools `pos entertainment config|enable|disable|status` (`bin/pos-entertainment-*`) reconcile the schedule. All shared logic (ENABLED parsing, interval→schedule mapping, scheduler sync) lives in `lib/entertainment-lib.sh` — sourced by the `pos-entertainment-*` tools (never by plugins). The scheduler is auto-detected: systemd user timers when a user systemd manager exists, otherwise a managed user crontab block.
+The `entertainment` module routes public-API data to Telegram via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`). Auto-triggering is config-driven: `ENABLED` in `entertainment.env` holds `plugin, interval` pairs; the tools `pos entertainment config|enable|disable|status` (`bin/pos-entertainment-*`) reconcile the schedule. All shared logic (ENABLED parsing, interval→schedule mapping, scheduler sync) lives in `lib/entertainment-lib.sh` — sourced by the `pos-entertainment-*` tools (never by plugins). The scheduler is **systemd user timers** — the only backend (requires a reachable user systemd manager).
 
 ### 1. Create the plugin
 
@@ -203,7 +203,7 @@ data="$(curl -fsS --max-time 20 https://api.example.com/foo)"
 printf 'Title: %s\n' "$data"
 ```
 
-**Contract:** plugins are **self-contained** — do **not** source `lib/common.sh`. Its `log`/`warn`/`ok` helpers print to **stdout**, and the runner captures stdout as the message to send (helper chatter would be sent to Telegram). All stdout is the message; errors go to stderr and exit nonzero. Plugins must be non-interactive (no prompts) — the module is designed for cron/systemd timers.
+**Contract:** plugins are **self-contained** — do **not** source `lib/common.sh`. Its `log`/`warn`/`ok` helpers print to **stdout**, and the runner captures stdout as the message to send (helper chatter would be sent to Telegram). All stdout is the message; errors go to stderr and exit nonzero. Plugins must be non-interactive (no prompts) — the module is designed for systemd user timers.
 
 ### 2. Config (if needed)
 

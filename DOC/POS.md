@@ -242,7 +242,7 @@ The map file is re-read for every message — edits apply without a restart. The
 | `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram`) |
 | `pos entertainment config` | Show the config file (`~/.config/linux_post_install/entertainment.env`) |
 | `pos entertainment config set KEY=VALUE…` | Set keys (any UPPER_SNAKE key; warns if no installed plugin uses it) and re-sync the schedule |
-| `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + schedule it (systemd user timer or cron, auto-detected) |
+| `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + schedule it as a systemd user timer |
 | `pos entertainment disable <plugin>` | Remove plugin from `ENABLED` + remove its scheduled job |
 | `pos entertainment status` | Enabled plugins + scheduler + schedule state |
 
@@ -276,16 +276,15 @@ The plugin itself still reads the keys as plain env vars (`${MYFEED_URL:-}`). Th
 ENABLED="weather, 5m gold, 1h joke, daily"
 ```
 
-`pos entertainment enable <plugin> [interval]` appends/updates one entry and re-syncs; `pos entertainment disable <plugin>` removes it; `pos entertainment config set ENABLED="…"` replaces the whole list. The scheduler backend is auto-detected on each sync:
+`pos entertainment enable <plugin> [interval]` appends/updates one entry and re-syncs; `pos entertainment disable <plugin>` removes it; `pos entertainment config set ENABLED="…"` replaces the whole list. Scheduling uses **systemd user timers** (requires a reachable user systemd manager):
 
-- **systemd** (when a user systemd manager is reachable): one **user timer** per enabled plugin (`~/.config/systemd/user/pos-entertainment-<plugin>.{service,timer}`), running `pos entertainment send <plugin>` as your user on that schedule (`OnCalendar` + `Persistent=true`). `pos entertainment enable` also tries `sudo loginctl enable-linger $USER` once so timers fire without login.
-- **cron** (fallback when no systemd user manager, e.g. this dev box): a managed block in your user crontab (`# POS-ENTERTAINMENT-BEGIN`…`END`), one line per plugin. Cron runs as your user and fires without login.
+- One **user timer** per enabled plugin (`~/.config/systemd/user/pos-entertainment-<plugin>.{service,timer}`), running `pos entertainment send <plugin>` as your user on that schedule (`OnCalendar` + `Persistent=true`). `pos entertainment enable` also tries `sudo loginctl enable-linger $USER` once so timers fire without login.
 
-Either way the job runs as you, so it reads your `$HOME` configs (weather location, Telegram token) natively — no `Environment=HOME=` hacks.
+The job runs as you, so it reads your `$HOME` configs (weather location, Telegram token) natively — no `Environment=HOME=` hacks.
 
-Intervals: `5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly`, or a raw `OnCalendar=…` spec (systemd mode only; cron mode uses the named intervals). Default when omitted: `daily`.
+Intervals: `5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly`, or a raw `OnCalendar=…` spec. Default when omitted: `daily`.
 
-`pos entertainment status` shows the enabled plugins, the detected scheduler, and each plugin's interval + next/next-ish fire time (`systemctl --user list-timers` or the crontab block).
+`pos entertainment status` shows the enabled plugins, the scheduler, and each plugin's interval + next fire time (`systemctl --user list-timers`).
 
 Notes:
 - The runner is headless/timer-friendly — no TTY prompts, exit 0 on success / 1 on failure.

@@ -39,17 +39,11 @@ for entry in "${ENABLED_ENTRIES[@]}"; do
 done
 
 echo
-echo "Scheduler: $(if systemctl --user show-environment >/dev/null 2>&1; then echo 'systemd user timers'; elif command -v crontab >/dev/null 2>&1; then echo 'cron (user crontab)'; else echo 'none available'; fi)"
 if systemctl --user show-environment >/dev/null 2>&1; then
+    echo "Scheduler: systemd user timers"
     echo "Timers (systemd --user):"
     systemctl --user list-timers --no-pager 'pos-entertainment-*.timer' 2>/dev/null || \
         echo "  (no timers)"
-elif command -v crontab >/dev/null 2>&1; then
-    echo "Cron jobs (user crontab):"
-    block="$(cron_block)"
-    if [ -n "$block" ]; then
-        printf '%s\n' "$block" | sed 's/^/  /'
-    else
-        echo "  (none)"
-    fi
+else
+    echo "Scheduler: none available (no systemd user manager)"
 fi

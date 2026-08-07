@@ -47,6 +47,11 @@ summary (newest last).
 
 ## Done (summary, newest last)
 
+- 2026-08-06: Fix entertainment timer `1h` not firing — `interval_to_oncalendar`
+  emitted invalid `OnCalendar=*-*-* */N:00:00` (systemd rejects `*/N` in the hour
+  field); now `*-*-* 00/N:00:00`. Dropped the cron fallback entirely: scheduling
+  is systemd user timers only (`sync_cron`/`interval_to_cron`/`cron_block`
+  removed), `status` simplified, `Nd` intervals rejected with a clear error.
 - 2026-08-06: Nested `pos` subcommands — `# POS_SUBCMDS:` header annotation (telegram,
   docker-compose, docker-vbox) + `make gen` emits a `_pos_subcmds` completion map;
   nested tools (`telegram listener`) auto-list under their parent instead of as a
