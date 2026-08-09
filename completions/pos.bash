@@ -117,6 +117,7 @@ _pos() {
                 COMPREPLY=($(compgen -W "$opts" -- "$cur"))
                 return
             fi
+            [[ "$k" == *-* ]] || break
             k="${k%-*}"
         done
         COMPREPLY=($(compgen -W "--help" -- "$cur"))

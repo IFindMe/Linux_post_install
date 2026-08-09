@@ -578,7 +578,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 278 | Dynamic bash completion |
+| `completions/pos.bash` | 279 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
