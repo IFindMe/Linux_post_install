@@ -176,6 +176,8 @@ EXAMPLES
   pos config telegram                     Edit Telegram config interactively
   pos config                              Pick a config scope to edit
 
+  pos tree                                Show the command tree (categories + subcommands)
+
   pos docker vbox create lab1              Create disposable Docker VM
   pos docker vbox create lab1 --dir .      Create VM using current directory
   pos docker vbox enter lab1               Shell into a Docker VM

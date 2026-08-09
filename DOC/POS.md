@@ -14,6 +14,8 @@
   - [communication](#communication)
   - [entertainment](#entertainment)
   - [flags](#flags)
+  - [config](#config)
+  - [tree](#tree)
 - [Legacy wrappers](#legacy-wrappers)
 
 ---
@@ -47,6 +49,8 @@ Every non-interactive `pos` invocation logs to `~/.local/share/linux_post_instal
 ---
 
 ## Commands
+
+Category-less tools (`config`, `tree`) live outside any category and are documented in their own `###` sections below.
 
 ### network
 
@@ -300,6 +304,25 @@ Feature-flag management CLIs (see [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libfl
 | `flag-reader --raw <name>` | Print only the stored value (script-friendly) |
 | `flag-set <name> [value]` | Set a flag, optionally with a value (requires sudo) |
 | `flag-clear <name>` | Unset a flag (requires sudo) |
+
+### config
+
+`pos config` is the interactive editor for the tools' runtime config (see [DEV.md](DEV.md#config-files) and §10 of AGENT_Context). Every tool exposes its configuration by declaring a `# POS_CONFIG:` header; `pos config` reads those at runtime — it knows nothing about the variables themselves. Values live in `~/.config/linux_post_install/<scope>.env` (chmod 600).
+
+| Command | Purpose |
+|---------|---------|
+| `pos config` | Scope picker (on a TTY), otherwise the scope list |
+| `pos config <scope>` | Edit that scope's variables (masked secrets, validation, `-` to clear) |
+| `pos config <scope> set KEY=VALUE` | Set a value non-interactively (each tool's `config set` form) |
+
+### tree
+
+`pos tree` prints the `pos` command tree — every category, command, and subcommand the dispatcher can reach, annotated with each tool's `# POS:` description. Data is derived live from the `bin/pos-*` filenames and their `# POS_SUBCMDS:` headers, so it always matches what `pos` can actually run.
+
+| Command | Purpose |
+|---------|---------|
+| `pos tree` | Full command tree |
+| `pos tree --depth N` | Limit nesting depth (1 = root only) |
 
 ---
 

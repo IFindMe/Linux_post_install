@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: tree — Show the pos CLI command tree: categories, commands, and subcommands
+# POS_FLAGS: --depth
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos tree [--depth N]
+
+Print the `pos` command tree: every category, command, and subcommand the
+dispatcher can reach, annotated with each tool's # POS: description.
+
+  pos tree            Full command tree
+  pos tree --depth N  Limit nesting depth (1 = root only)
+  pos tree --help     This help
+EOF
+    exit 0
+}
+
+depth=""
+case "${1:-}" in
+    -h|--help) usage ;;
+    --depth)
+        [ $# -ge 2 ] || err "--depth requires a number"
+        depth="$2"
+        [[ "$depth" =~ ^[0-9]+$ ]] || err "--depth must be a number"
+        shift 2
+        ;;
+    -*) err "unknown flag: $1" ;;
+esac
+
+self="$(cd "$(dirname "$0")" && pwd)"
+
+declare -A children meta
+maxw=0
+
+# add <parent> <word> <type> <desc> — parent "/" is the root.
+add() {
+    local parent="$1" word="$2" type="$3" desc="$4" path
+    if [ "$parent" = "/" ]; then path="$word"; else path="$parent/$word"; fi
+    children["$parent"]+=" $word"
+    meta["$path"]="$type|$desc"
+}
+
+for f in "$self"/pos-*; do
+    [ -x "$f" ] || continue
+    name="${f##*/pos-}"
+    desc="$(sed -n '/^# POS: /{s/^# POS: //;p;q}' "$f")"
+    desc="${desc#*— }"
+    sc="$(sed -n '/^# POS_SUBCMDS: /{s/^# POS_SUBCMDS: //;p;q}' "$f")"
+    words=(${name//-/ })
+    parent="/"
+    for ((i=0; i<${#words[@]}; i++)); do
+        word="${words[$i]}"
+        if [ "$parent" = "/" ]; then path="$word"; else path="$parent/$word"; fi
+        if [ $((i + 1)) -eq ${#words[@]} ]; then
+            add "$parent" "$word" "tool" "$desc"
+        else
+            [ -n "${meta[$path]:-}" ] || add "$parent" "$word" "cat" ""
+        fi
+        parent="$path"
+    done
+    for s in $sc; do
+        add "$parent" "$s" "sub" ""
+    done
+done
+
+# pad = widest "pos <full path>" leaf, so descriptions align
+for p in "${!meta[@]}"; do
+    case "${meta[$p]%%|*}" in
+        tool|sub)
+            len=$(( ${#p} + 4 ))
+            [ "$len" -gt "$maxw" ] && maxw=$len
+            ;;
+    esac
+done
+
+render() {
+    local parent="$1" prefix="$2" lvl="$3"
+    if [ -n "$depth" ] && [ "$lvl" -ge "$depth" ]; then return; fi
+    local -a kids
+    mapfile -t kids < <(printf '%s\n' ${children[$parent]:-} | sort -u)
+    local i word path type desc conn nextpref last
+    for ((i=0; i<${#kids[@]}; i++)); do
+        word="${kids[$i]}"
+        if [ "$parent" = "/" ]; then path="$word"; else path="$parent/$word"; fi
+        last=$(( i == ${#kids[@]} - 1 ))
+        if [ "$last" -eq 1 ]; then conn="└── "; nextpref="$prefix    "; else conn="├── "; nextpref="$prefix│   "; fi
+        type="${meta[$path]%%|*}"
+        desc="${meta[$path]#*|}"
+        case "$type" in
+            cat)
+                printf '%s%s%s/\n' "$prefix" "$conn" "$word"
+                render "$path" "$nextpref" $((lvl+1))
+                ;;
+            tool)
+                printf '%s%s%-*s# %s\n' "$prefix" "$conn" "$((maxw+1))" "pos ${path//\// }" "$desc"
+                [ -n "${children[$path]:-}" ] && render "$path" "$nextpref" $((lvl+1))
+                ;;
+            sub)
+                printf '%s%s%s\n' "$prefix" "$conn" "pos ${path//\// }"
+                ;;
+        esac
+    done
+}
+
+printf 'pos\n'
+render "/" "" 1

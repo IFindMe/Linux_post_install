@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–180 |
-| ## 3. Installation Flow | 181–233 |
-| ## 4. The `pos` CLI System | 234–295 |
-| ## 5. Shared Library — `lib/common.sh` | 296–327 |
-| ## 6. Docker Compose / ScaleTail | 328–370 |
-| ## 7. Optional Apps (`apps/`) | 371–400 |
-| ## 8. Entertainment Module | 401–414 |
-| ## 9. Systemd Services | 415–427 |
-| ## 10. Configuration Files | 428–453 |
-| ## 11. Coding Conventions | 454–486 |
-| ## 12. Development Workflow | 487–538 |
-| ## 13. Key File Quick Reference | 539–586 |
-| ## 14. Common Tasks for Agents | 587–611 |
+| ## 2. Directory Structure | 44–181 |
+| ## 3. Installation Flow | 182–234 |
+| ## 4. The `pos` CLI System | 235–297 |
+| ## 5. Shared Library — `lib/common.sh` | 298–329 |
+| ## 6. Docker Compose / ScaleTail | 330–372 |
+| ## 7. Optional Apps (`apps/`) | 373–402 |
+| ## 8. Entertainment Module | 403–416 |
+| ## 9. Systemd Services | 417–429 |
+| ## 10. Configuration Files | 430–455 |
+| ## 11. Coding Conventions | 456–488 |
+| ## 12. Development Workflow | 489–541 |
+| ## 13. Key File Quick Reference | 542–590 |
+| ## 14. Common Tasks for Agents | 591–615 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -82,6 +82,7 @@ Linux_post_install/
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-nfs-client               # Mount NFS shares (ephemeral or persistent systemd mount units)
 │   ├── pos-system-nfs-server               # Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+│   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 │   ├── pos-usb-server                      # USB Redirector server control (--ls, --share; prompts when args omitted)
 <!-- GEN:END tree -->
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
@@ -274,6 +275,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | system | nfs-client | `pos-system-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | system | nfs-server | `pos-system-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+|  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
 | usb | server | `pos-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
 <!-- GEN:END dispatch -->
 
@@ -502,7 +504,8 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 
 ### Adding a New Tool
 
-1. Create `bin/pos-<category>-<command>` from `templates/pos-tool.sh` — must be executable (`100755`); it auto-appears in `pos <category> --help` (filename-derived, no registration)
+0. Define the exact CLI verb (`pos <category> <command> [<subcommand>]`) and its runtime context before writing code: a **dev/repo-only** tool (e.g. reads repo files, like `pos tree`) or a **runtime** tool that must work from `/usr/local/bin` after the repo is deleted. Category-less `bin/pos-<cmd>` is for dispatcher/dev-level commands that fit no category (`pos-config`, `pos-tree`); everything else goes in a category.
+1. Create `bin/pos-<category>-<command>` (or `bin/pos-<cmd>` for category-less) from `templates/pos-tool.sh` — must be executable (`100755`); it auto-appears in `pos <category> --help` (filename-derived, no registration)
 2. Add the `# POS: <cat> <cmd> — <one-line description>` header right after the shebang (plus `# POS_FLAGS: ...` for flag-style tools and `# POS_SUBCMDS: ...` for multi-command tools) — this is the single source of truth for the generated docs; nested tools (`pos-<cat>-<a>-<b>`) auto-list under their parent tool
 3. Add to `INTERACTIVE_CMDS` in `bin/pos` if it reads stdin
 4. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed); non-apt/manual installers → `command -v` guard in the tool instead
@@ -552,7 +555,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 270 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 272 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-communication-telegram-listener` | 509 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 220 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -577,8 +580,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| `bin/pos-tree` | 110 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 279 | Dynamic bash completion |
+| `completions/pos.bash` | 280 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
