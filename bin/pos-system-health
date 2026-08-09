@@ -1,95 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: system health — Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
-# POS_FLAGS: --send --markdown
 # POS_CONFIG: system | system.env | BACKUP_SERVICE_ROOTS=:Roots scanned by backup --service and the health backup-age check (default: /srv $HOME/srv) | HEALTH_BACKUP_MAX_AGE_DAYS=num:Max backup age in days before health warns (default 2)
-# POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram)
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
-source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 
 load_system_env
 
 # Effective dynamic values (environment > system.env > defaults) shown in --help
-EFF_PLATFORMS="$(notify_platforms)"
 EFF_MAX_AGE="${HEALTH_BACKUP_MAX_AGE_DAYS:-2}"
 EFF_ROOTS="${BACKUP_SERVICE_ROOTS:-/srv $HOME/srv}"
 
 usage() {
     cat <<EOF
-Usage: pos system health [--send] [--markdown]
+Usage: pos system health
 
 Host health dashboard: disk, RAM/swap, failed systemd units, backup age,
-fail2ban, docker containers. Exits 1 if any check FAILs.
+fail2ban, docker containers. Prints the report and exits 1 if any check FAILs.
 
-Flags:
-  --send       Send the summary via the configured notify platform(s) and do
-               NOT print the dashboard (notification-only — for cron/timers or
-               wrappers like the Telegram listener that reply with output)
-               (uses lib/notify.sh; see NOTIFY_PLATFORM below)
-  --markdown   Same as --send, with markdown parse mode
-  -h, --help   Show this help
+The dashboard is meant to be read on a terminal or forwarded by a wrapper
+such as the Telegram listener (map '/status=pos system health'). Sending is
+the wrapper's job — health itself never sends notifications.
 
 Environment (effective values):
-  NOTIFY_PLATFORM             ${EFF_PLATFORMS}
   HEALTH_BACKUP_MAX_AGE_DAYS  ${EFF_MAX_AGE}
   BACKUP_SERVICE_ROOTS        ${EFF_ROOTS}
 
-Loaded from ~/.config/linux_post_install/system.env (health/backup settings)
-and ~/.config/linux_post_install/notify.env (NOTIFY_PLATFORM) unless already
-exported. Defaults apply when neither is set.
+Loaded from ~/.config/linux_post_install/system.env unless already exported.
+Defaults apply when the file is absent.
 
 Examples:
   pos system health
-  pos system health --send
 EOF
     exit 0
 }
 
-SEND=0
-MARKDOWN=0
 for arg in "$@"; do
     case "$arg" in
         -h|--help) usage ;;
-        --send)    SEND=1 ;;
-        --markdown) MARKDOWN=1 ;;
         *)         err "Unknown option '$arg' (see --help)" ;;
     esac
 done
 
-if [ "$MARKDOWN" -eq 1 ]; then
-    SEND=1
-fi
-
-# --send is notification-only: suppress the dashboard output (so a wrapper
-# such as the Telegram listener doesn't echo it back as a duplicate reply).
-if [ "$SEND" -eq 1 ]; then
-    exec 3>&1
-    exec 1>/dev/null
-fi
-
 FAILURES=0
 WARNINGS=0
-REPORT=()
 
 report() {
-    local st="$1" label="$2" detail="$3" line
+    local st="$1" label="$2" detail="$3"
     case "$st" in
         ok)
             echo " ${GREEN}${BOLD}[ OK ]${RESET}  ${label}: ${detail}"
-            printf -v line "[ OK ]  %s: %s" "$label" "$detail"
             ;;
         warn)
             echo " ${YELLOW}${BOLD}[WARN]${RESET}  ${label}: ${detail}"
-            printf -v line "[WARN]  %s: %s" "$label" "$detail"
             WARNINGS=$((WARNINGS + 1))
             ;;
         fail)
             echo " ${RED}${BOLD}[FAIL]${RESET}  ${label}: ${detail}"
-            printf -v line "[FAIL]  %s: %s" "$label" "$detail"
             FAILURES=$((FAILURES + 1))
             ;;
     esac
-    REPORT+=("$line")
 }
 
 host="$(hostname -s 2>/dev/null || echo "localhost")"
@@ -235,41 +204,6 @@ elif [ "$WARNINGS" -gt 0 ]; then
 else
     verdict="all good"
     echo " ${GREEN}${BOLD}VERDICT${RESET}  ${verdict}"
-fi
-
-if [ "$SEND" -eq 1 ]; then
-    exec 1>&3 3>&-
-    msg="POS Health — ${host}
-Verdict: ${verdict}"
-    for line in "${REPORT[@]}"; do
-        msg+="
-${line}"
-    done
-    if [ "$MARKDOWN" -eq 1 ]; then
-        notify_send "$msg" --markdown
-    else
-        notify_send "$msg"
-    fi
-    # notify_send is silent-fail by design — confirm delivery only when a
-    # platform sender actually exists, otherwise warn on stderr (still visible
-    # here since only stdout was redirected while --send ran).
-    delivered=0
-    IFS=',' read -r -a platforms <<< "$(notify_platforms)"
-    for p in "${platforms[@]}"; do
-        p="${p// /}"
-        [ -n "$p" ] || continue
-        sname="$(notify_sender_name "$p")"
-        if command -v "pos-communication-$sname" &>/dev/null \
-            || [ -x "$(dirname "$0")/pos-communication-$sname" ] \
-            || [ -x "$(dirname "$0")/../bin/pos-communication-$sname" ]; then
-            delivered=1
-        fi
-    done
-    if [ "$delivered" -eq 1 ]; then
-        echo "sent: POS Health — ${host} (${verdict})"
-    else
-        warn "notify: no platform sender found (NOTIFY_PLATFORM=$(notify_platforms)) — digest not delivered"
-    fi
 fi
 
 [ "$FAILURES" -eq 0 ]

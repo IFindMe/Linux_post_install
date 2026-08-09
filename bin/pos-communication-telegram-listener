@@ -32,7 +32,11 @@ Map:     $MAP_FILE — one '/cmd=bash command' per line
 
 Prefix a map value with '@quiet ' to run the command without replying —
 for commands that already send their own notification, so you don't get it
-twice (e.g. '/status=@quiet pos system health --send').
+twice (e.g. '/backup=@quiet pos system backup --send').
+
+To reply with a command's stdout (e.g. the health dashboard), just map it
+without '@quiet' and the listener forwards the output:
+  '/status=pos system health'
 
 The listener only reacts to the owner chat (TELEGRAM_CHAT_ID). Commands run
 as your user, so 'sudo' inside them needs a NOPASSWD rule. The interactive
@@ -154,9 +158,9 @@ ui_pick() {
 }
 
 # Map entries may be prefixed with '@quiet ' to run the command without
-# replying — for commands that deliver their own notification (e.g. the
-# health check's --send). The marker is stripped before running and before
-# the editor's bash -n syntax check.
+# replying — for commands that deliver their own notification (e.g. backup's
+# --send). The marker is stripped before running and before the editor's
+# bash -n syntax check.
 QUIET_PREFIX="@quiet"
 
 strip_quiet() {

@@ -8,7 +8,6 @@ _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-pr
 _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[system-backup]="--service"
-_pos_flags[system-health]="--send --markdown"
 _pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
 # GEN:END posflags
 # GEN:START possubcmds
