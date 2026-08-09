@@ -452,7 +452,7 @@ strip_markdown() {
 }
 
 handle_message() {
-    local text="$1" msg_id="$2" value output rc quiet=0
+    local text="$1" msg_id="$2" reply_text="${3:-}" value output rc quiet=0
     case "$text" in
         /help|/start)
             reply "Mapped commands: $(map_cmds_list)" "$msg_id"
@@ -476,6 +476,9 @@ handle_message() {
             return
         fi
         log "ai: $prompt"
+        if [ -n "$reply_text" ]; then
+            prompt="[Reply context — the message you are replying to]\n${reply_text}\n\n${prompt}"
+        fi
         if answer="$(timeout 120 pos ai gemini ask --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
             reply "$(strip_markdown "$answer")" "$msg_id"
         else
@@ -531,18 +534,19 @@ run_daemon() {
         fi
         n="$(printf '%s' "$resp" | jq -r '.result | length')"
         for ((i=0; i<n; i++)); do
-            local u text chat from_id msg_id
+            local u text chat from_id msg_id reply_text
             u="$(printf '%s' "$resp" | jq -r ".result[$i].update_id")"
             text="$(printf '%s' "$resp" | jq -r ".result[$i].message.text // empty")"
             chat="$(printf '%s' "$resp" | jq -r ".result[$i].message.chat.id // empty")"
             from_id="$(printf '%s' "$resp" | jq -r ".result[$i].message.from.id // empty")"
             msg_id="$(printf '%s' "$resp" | jq -r ".result[$i].message.message_id // empty")"
+            reply_text="$(printf '%s' "$resp" | jq -r ".result[$i].message.reply_to_message.text // .result[$i].message.reply_to_message.caption // empty")"
             offset=$((u + 1))
             [ -n "$text" ] || continue
             if [ -n "$chat" ] && [ "$chat" != "$TELEGRAM_CHAT_ID" ] && [ "$from_id" != "$TELEGRAM_CHAT_ID" ]; then
                 continue
             fi
-            handle_message "$text" "$msg_id"
+            handle_message "$text" "$msg_id" "$reply_text"
         done
     done
 }

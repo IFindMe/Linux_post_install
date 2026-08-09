@@ -63,6 +63,14 @@ prompt telling the model it is answering in a Telegram chat — so it uses emoji
 and stays lively — and strips markdown (`**x**`, backticks, `#`, links…) from
 the reply before sending it, since messages go out as plain text.
 
+Replying to a message before `ai …` makes that message part of the prompt, so
+the model can answer about it:
+
+```
+you:    /status                    → bot: (system health output…)
+you:    ai check this details about my linux   ← reply to the /status message
+```
+
 ## Recipes
 
 - **Answer from a file:** `pos ai gemini ask "$(cat notes.txt)"`

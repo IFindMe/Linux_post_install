@@ -561,7 +561,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 <!-- GEN:START filetable -->
 | `bin/pos` | 277 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
-| `bin/pos-communication-telegram-listener` | 559 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 563 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
