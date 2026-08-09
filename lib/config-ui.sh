@@ -5,9 +5,10 @@
 # (mirrors lib/notify.sh). Sourced opt-in by bin/pos-config.
 #
 # Header grammar — one "# POS_CONFIG:" line per scope a tool exposes:
-#   # POS_CONFIG: <scope> | <env-file> | <KEY>=<flags>:<desc> | ... | *plugins
+#   # POS_CONFIG: <scope> | <env-file> | <KEY>=<flags>:<desc>[::<example>] | ... | *plugins
 #     <env-file>  basename of the config file under ~/.config/linux_post_install/
 #     <flags>     secret (masked display + stty -echo input) | digits | num | float
+#     <example>   optional value format hint shown in the editor, e.g. "weather,5m joke,10m"
 #     *plugins    marker: also list every key declared by the installed
 #                 entertainment plugins' "# POS_KEYS:" headers (dynamic)
 #   Example:
@@ -85,9 +86,11 @@ cfg_scope_envfile() {
     return 1
 }
 
-# One key field → "KEY|flags|description" (deduped via _cfg_seen).
+# One key field → "KEY|flags|description|example" (deduped via _cfg_seen).
+# The optional example is "desc::example" — a literal "::" separates the
+# value-format hint from the description.
 _cfg_key_line() {
-    local field="$1" key flags desc rest
+    local field="$1" key flags desc rest example
     key="${field%%=*}"
     if [[ "$field" == *"="* ]]; then
         rest="${field#*=}"
@@ -97,11 +100,15 @@ _cfg_key_line() {
         else
             flags="$rest"
         fi
+        if [[ "$desc" == *"::"* ]]; then
+            example="${desc##*::}"
+            desc="${desc%%::*}"
+        fi
     fi
     [ -n "$key" ] || return 0
     [ -n "${_cfg_seen[$key]:-}" ] && return 0
     _cfg_seen[$key]=1
-    printf '%s|%s|%s\n' "$key" "$flags" "$desc"
+    printf '%s|%s|%s|%s\n' "$key" "$flags" "$desc" "$example"
 }
 
 # "*plugins" expansion: keys declared by the installed entertainment
@@ -124,7 +131,7 @@ _cfg_plugin_keys() {
         [ -n "$key" ] || continue
         [ -n "${_cfg_seen[$key]:-}" ] && continue
         _cfg_seen[$key]=1
-        printf '%s|%s|%s (%s) [%s]\n' "$key" "" "$desc" "$req" "$plugin"
+        printf '%s|%s|%s (%s) [%s]|\n' "$key" "" "$desc" "$req" "$plugin"
     done < <(config_keys "$pdir")
     return 0
 }
@@ -247,15 +254,16 @@ _cfg_post_write() {
 # Edit one key: Enter keeps the current value, "-" clears it.
 _cfg_edit_one() {
     local file="$1" keystr="$2"
-    local key flags desc cur val errmsg
-    IFS='|' read -r key flags desc <<<"$keystr"
+    local key flags desc example cur val errmsg hint
+    IFS='|' read -r key flags desc example <<<"$keystr"
     cur="$(cfg_value "$file" "$key")"
+    hint="${example:+ (e.g. ${example})}"
 
     if [[ ",$flags," == *,secret,* ]]; then
-        printf '  %s [%s] (input hidden): ' "$key" "$(cfg_display "$cur" "$flags")"
+        printf '  %s [%s]%s (input hidden): ' "$key" "$(cfg_display "$cur" "$flags")" "$hint"
         val="$(cfg_read_secret)"
     else
-        read -rp "  ${key} [${cur:-unset}]: " val || return 0
+        read -rp "  ${key}${hint} [${cur:-unset}]: " val || return 0
     fi
 
     if [ -z "$val" ]; then
@@ -295,7 +303,7 @@ cfg_ui() {
         return 1
     fi
 
-    local choice i k f d v
+    local choice i k f d e v
     while true; do
         echo
         echo "pos config — ${scope} (${envfile})"
@@ -303,11 +311,14 @@ cfg_ui() {
         i=0
         for line in "${keys[@]}"; do
             i=$((i + 1))
-            IFS='|' read -r k f d <<<"$line"
+            IFS='|' read -r k f d e <<<"$line"
             v="$(cfg_value "$file" "$k")"
             printf '  %2d) %-28s %s\n' "$i" "$k" "$(cfg_display "$v" "$f")"
             if [ -n "$d" ]; then
                 printf '      %s\n' "$d"
+            fi
+            if [ -n "$e" ]; then
+                printf '      e.g. %s\n' "$e"
             fi
         done
         echo

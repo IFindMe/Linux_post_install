@@ -46,7 +46,7 @@ plugin_dir() {
 }
 
 plugin_marker() {
-    grep -m1 '^# POS_PLUGIN:' "$1" 2>/dev/null | sed 's/^# POS_PLUGIN:[[:space:]]*//;s/[[:space:]]*$//'
+    grep -m1 '^# POS_PLUGIN:' "$1" 2>/dev/null | sed 's/^# POS_PLUGIN:[[:space:]]*//;s/[[:space:]]*$//' || true
 }
 
 list_plugins() {
@@ -98,7 +98,7 @@ plugin_keys() {
             *)            req="" ;;
         esac
         printf '%s|%s|%s\n' "$key" "$desc" "$req"
-    done
+    done || true
 }
 
 config_keys() {
