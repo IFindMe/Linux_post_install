@@ -72,7 +72,7 @@ Linux_post_install/
 │   ├── pos-entertainment-send              # Run a public-API plugin and send its output via Telegram (default sender)
 │   ├── pos-entertainment-status            # Show enabled plugins and scheduler state
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
-│   ├── pos-media-mp4                       # Download video as MP4 (interactive format select)
+│   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
 │   ├── pos-network-checkport               # Check TCP port connectivity
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
 │   ├── pos-network-ip                      # Show interfaces, routes, public IP + location
@@ -267,7 +267,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via Telegram (default sender) |
 | entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
-| media | mp4 | `pos-media-mp4` | Download video as MP4 (interactive format select) |
+| media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
 | network | checkport | `pos-network-checkport` | Check TCP port connectivity |
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |
@@ -573,8 +573,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 93 | Run a public-API plugin and send its output via Telegram (default sender) |
 | `bin/pos-entertainment-status` | 49 | Show enabled plugins and scheduler state |
-| `bin/pos-media-mp3` | 35 | Download audio as MP3 (yt-dlp) |
-| `bin/pos-media-mp4` | 38 | Download video as MP4 (interactive format select) |
+| `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
+| `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 45 | Check TCP port connectivity |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
@@ -587,7 +587,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-tree` | 110 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 282 | Dynamic bash completion |
+| `completions/pos.bash` | 284 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
