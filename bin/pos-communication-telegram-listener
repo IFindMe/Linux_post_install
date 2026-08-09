@@ -207,10 +207,10 @@ ui_pick() {
         warn "no commands mapped yet — add one first"
         return 1
     fi
-    echo
+    echo >&2
     local i
     for ((i=1; i<=MAP_N; i++)); do
-        printf '  %2d) %-16s -> %s%s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
+        printf '  %2d) %-16s -> %s%s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}" >&2
     done
     local idx
     read -rp "Entry number: " idx

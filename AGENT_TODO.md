@@ -16,6 +16,8 @@ summary (newest last).
 
 ## Done
 
+- **2026-08-09** — Fixed telegram listener editor crash on remove/edit/test: `ui_pick` printed its menu listing to **stdout**, so `idx="$(ui_pick)"` captured the menu *and* the number, and `MAP_CMDS[$idx]` (arithmetic array subscript) blew up with "syntax error in expression". Menu decoration now goes to stderr; only the picked index is emitted on stdout. Pre-existing bug (before the `::desc` work), exposed by the description column.
+
 - **2026-08-09** — Telegram listener pushes its mapped `/commands` to the bot's `/` menu via `setMyCommands` (auto after every map edit, on `--enable`, and at daemon start; manual `--sync-commands` flag). Map lines may carry a menu description: `/cmd::short description=bash command` (falls back to the bash command, ~40 chars). Names are validated against Telegram's lowercase `[a-z0-9_]` rule — invalid ones are skipped from the menu with a warning but still resolve when typed; empty map clears the menu. Fixed latent bugs found by the sync work: `map_has` (awk `END{exit 1}` overrode the match), and `warn()` went to stdout so it leaked into the generated JSON (now stderr).
 
 - **2026-08-09** — `pos config <TAB>` scope completion is now cached at gen time (`_pos_config_scopes` array emitted by `make gen` from the `# POS_CONFIG:` registry) instead of scanning ~40 tools per TAB — a per-keypress subshell storm that wedged interactive shells for minutes on the loaded homelab box. Two stuck `-bash` sessions (69%/38% CPU) killed. `plugin_marker`/`plugin_keys` hardened with `|| true` so `config_keys` no longer aborts mid-scan under `set -euo pipefail` on mixed lib/plugin dirs (installed layout) — fixes missing plugin keys in `pos config entertainment`.
