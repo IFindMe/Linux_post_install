@@ -49,6 +49,26 @@ for tpl in system.env notify.env ai.env event.env; do
     fi
 done
 
+# ── event-trigger starter rules (interactive) ──────────────────
+# config/event-rules.template has a ready-made rule set (CPU, memory,
+# disk, NVMe, network, processes). Ask the user before copying — only if
+# event.env has no rules yet (never overwrite existing rules).
+if [ -f config/event-rules.template ] && [ -f "$ENT_DIR/event.env" ]; then
+    if ! grep -vE '^[[:space:]]*(#.*)?$' "$ENT_DIR/event.env" >/dev/null 2>&1; then
+        if confirm "Copy the starter event-trigger rules into event.env?"; then
+            if [ "${DRY_RUN:-0}" -eq 1 ]; then
+                log "(dry-run) would copy config/event-rules.template → $ENT_DIR/event.env"
+            else
+                run cp config/event-rules.template "$ENT_DIR/event.env"
+                run chmod 600 "$ENT_DIR/event.env"
+                log "Installed starter rules — check them with 'pos system event-trigger list'"
+            fi
+        else
+            log "Skipping starter rules"
+        fi
+    fi
+fi
+
 # ── Ensure all bin dirs are in PATH ────────────────────────────
 PATH_LINE='export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin:$PATH"'
 BASHRC="$HOME/.bashrc"
