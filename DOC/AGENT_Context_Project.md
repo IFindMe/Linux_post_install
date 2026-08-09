@@ -584,7 +584,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 126 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-event-trigger` | 212 | State-based rule monitors; alerts via notify when a check crosses a threshold |
+| `bin/pos-system-event-trigger` | 217 | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |

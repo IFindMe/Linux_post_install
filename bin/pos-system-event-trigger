@@ -64,14 +64,15 @@ set -- "${args[@]}"
 # ── run ──────────────────────────────────────────────────────────
 run_rules() {
     eventer_read_rules
-    local n fired hash msg line
+    local n fired hash msg line skipped
     n=0
+    skipped=0
     for line in "${RULES[@]}"; do
         case "$line" in
             ""|\#*) continue ;;
         esac
-        eventer_parse_rule "$line" || { warn "skipping unparseable rule: $line"; continue; }
-        eventer_eval_check || { warn "check produced no number — $RULE_CMD"; continue; }
+        eventer_parse_rule "$line" || { warn "skipping unparseable rule: $line"; skipped=$((skipped + 1)); continue; }
+        eventer_eval_check || { warn "check produced no number — $RULE_CMD"; skipped=$((skipped + 1)); continue; }
         n=$((n + 1))
         if eventer_compare "$VALUE_NUM" "$RULE_OP" "$RULE_NUM"; then fired=1; else fired=0; fi
         hash="$(eventer_hash "$line")"
@@ -95,7 +96,11 @@ run_rules() {
             log "(dry-run) OK: $RULE_CMD = $VALUE_DISPLAY (no change)"
         fi
     done
-    log "evaluated $n rule(s)"
+    if [ "$skipped" -gt 0 ]; then
+        log "evaluated $n rule(s), skipped $skipped (no number / unparseable)"
+    else
+        log "evaluated $n rule(s)"
+    fi
 }
 
 # ── list ─────────────────────────────────────────────────────────

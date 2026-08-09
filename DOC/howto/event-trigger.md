@@ -46,7 +46,11 @@ Examples:
 Behavior:
 
 - The check runs on every pass. Non-numeric/empty output, or an unparseable
-  line → the rule is skipped with a warning (other rules still run).
+  line → the rule is skipped with a warning (other rules still run). The
+  `run` summary reports how many rules evaluated and how many were skipped.
+- `sensors` rules need `lm-sensors` installed (`preinstall.sh` installs it;
+  verify with `sensors -u` before adding a rule — sensor names differ by
+  chip, check `sensors -u` output for the real `*_input` key).
 - Alerts fire **once** when the condition turns true, and once more when it
   recovers — a hot CPU for two hours is one message, not twenty.
 - State is tracked per rule in `~/.local/share/linux_post_install/eventer/state/`
