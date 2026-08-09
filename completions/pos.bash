@@ -11,6 +11,7 @@ _pos_flags[media-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
 _pos_flags[media-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[system-backup]="--service"
+_pos_flags[system-event-trigger]="--dry-run"
 _pos_flags[tree]="--depth"
 _pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
 # GEN:END posflags
@@ -20,6 +21,7 @@ _pos_subcmds[ai-gemini]="ask chat models sessions"
 _pos_subcmds[communication-telegram-sender]="send test"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
+_pos_subcmds[system-event-trigger]="run config list enable disable status"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment notify system telegram)

@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system event-trigger — State-based rule monitors; alerts via notify when a check crosses a threshold
+# POS_SUBCMDS: run config list enable disable status
+# POS_FLAGS: --dry-run
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/eventer-lib.sh" 2>/dev/null || source "$(dirname "$0")/eventer-lib.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos system event-trigger <subcommand> [--dry-run]
+
+State-based rule monitors. Each line in event.env is an independent rule:
+
+    "<message>" if <check-command> <op> <threshold>
+    <check-command> <op> <threshold>
+
+The check command is run on every pass; when its first numeric output
+crosses the threshold the message is sent via lib/notify.sh (Telegram by
+default). Rules fire on false→true only, plus one recovery message.
+
+Subcommands:
+  run                 Evaluate every rule once (the systemd timer calls this)
+  config              Interactive editor: add / remove <n> / edit <n> / quit
+  list                Show rules with their live check values
+  enable [interval]   Install + start the user timer (default 5m; also:
+                      10m 15m 30m 45m hourly 2h 6h 12h daily weekly, OnCalendar=…)
+  disable             Stop + remove the timer
+  status              Timer + rule count
+
+Options:
+  --dry-run           Preview what would fire / be written, without sending
+  -h, --help          This help
+
+Rules file:  $CONFIG_FILE  (chmod 600)
+
+Examples:
+  pos system event-trigger list
+  pos system event-trigger config
+  pos system event-trigger enable 5m
+  pos system event-trigger run --dry-run
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+DRY_RUN=0
+args=()
+for a in "$@"; do
+    case "$a" in
+        --dry-run) DRY_RUN=1 ;;
+        *)         args+=("$a") ;;
+    esac
+done
+set -- "${args[@]}"
+
+[ -f "$CONFIG_FILE" ] || { log "no rules file yet — run 'pos system event-trigger config'"; }
+
+# ── run ──────────────────────────────────────────────────────────
+run_rules() {
+    eventer_read_rules
+    local n fired hash msg line
+    n=0
+    for line in "${RULES[@]}"; do
+        case "$line" in
+            ""|\#*) continue ;;
+        esac
+        eventer_parse_rule "$line" || { warn "skipping unparseable rule: $line"; continue; }
+        eventer_eval_check || { warn "check produced no number — $RULE_CMD"; continue; }
+        n=$((n + 1))
+        if eventer_compare "$VALUE_NUM" "$RULE_OP" "$RULE_NUM"; then fired=1; else fired=0; fi
+        hash="$(eventer_hash "$line")"
+        if [ "$fired" -eq 1 ] && ! eventer_state_is_firing "$hash"; then
+            msg="$(eventer_alert_msg)"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log "(dry-run) TRIGGER: $msg"
+            else
+                notify_send "$msg"
+                eventer_state_set "$hash" 1
+            fi
+        elif [ "$fired" -eq 0 ] && eventer_state_is_firing "$hash"; then
+            msg="$(eventer_recover_msg)"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log "(dry-run) RECOVER: $msg"
+            else
+                notify_send "$msg"
+                eventer_state_set "$hash" 0
+            fi
+        elif [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) OK: $RULE_CMD = $VALUE_DISPLAY (no change)"
+        fi
+    done
+    log "evaluated $n rule(s)"
+}
+
+# ── list ─────────────────────────────────────────────────────────
+list_rules() {
+    eventer_read_rules
+    local i=0 line
+    for line in "${RULES[@]}"; do
+        i=$((i + 1))
+        case "$line" in
+            ""|\#*) printf '%2d  (comment/blank)\n' "$i"; continue ;;
+        esac
+        if eventer_parse_rule "$line"; then
+            if eventer_eval_check; then
+                printf '%2d  [%s %s %s]  %s  = %s\n' "$i" "$RULE_CMD" "$RULE_OP" "$RULE_THRESH" \
+                    "${RULE_MSG:+msg: $RULE_MSG; }" "$VALUE_DISPLAY"
+            else
+                printf '%2d  [%s %s %s]  (check produced no number)\n' "$i" "$RULE_CMD" "$RULE_OP" "$RULE_THRESH"
+            fi
+        else
+            printf '%2d  INVALID — %s\n' "$i" "$line"
+        fi
+    done
+    [ "$i" -gt 0 ] || echo "(no rules — run 'pos system event-trigger config')"
+}
+
+# ── config editor ────────────────────────────────────────────────
+config_editor() {
+    eventer_read_rules
+    local n rule action ok
+    while true; do
+        echo "── rules in $CONFIG_FILE ──" >&2
+        if [ "${#RULES[@]}" -eq 0 ]; then
+            echo "  (empty)" >&2
+        else
+            for i in "${!RULES[@]}"; do
+                printf '  %2d  %s\n' "$((i + 1))" "${RULES[i]}" >&2
+            done
+        fi
+        read -rp "action [add / remove <n> / edit <n> / quit]: " action
+        case "$action" in
+            quit|q) break ;;
+            add)
+                read -rp "Rule (\"msg\" if <cmd> <op> <thr>): " rule
+                [ -n "$rule" ] || continue
+                if ! eventer_parse_rule "$rule"; then
+                    warn "not a valid rule — need: <command> <op> <threshold> (op: > < >= <= == !=)"
+                    continue
+                fi
+                if ! eventer_eval_check; then
+                    warn "check '$RULE_CMD' produced no number — rule added anyway (it will warn on run)"
+                else
+                    ok "check '$RULE_CMD' currently reports $VALUE_DISPLAY"
+                fi
+                if grep -Fxq "$rule" "$CONFIG_FILE" 2>/dev/null; then
+                    warn "rule already present, not added"
+                elif [ "$DRY_RUN" -eq 1 ]; then
+                    log "(dry-run) would add: $rule"
+                else
+                    mkdir -p "$(dirname "$CONFIG_FILE")"
+                    printf '%s\n' "$rule" >>"$CONFIG_FILE"
+                    chmod 600 "$CONFIG_FILE"
+                    eventer_read_rules
+                fi
+                ;;
+            remove*)
+                n="${action#remove }"
+                [[ "$n" =~ ^[0-9]+$ ]] || { warn "use: remove <line-number>"; continue; }
+                if [ "$n" -lt 1 ] || [ "$n" -gt "${#RULES[@]}" ]; then
+                    warn "no line $n"; continue
+                fi
+                read -rp "remove line $n: '${RULES[$((n - 1))]}'? [y/N]: " ok
+                [[ "$ok" =~ ^[Yy] ]] || continue
+                if [ "$DRY_RUN" -eq 1 ]; then
+                    log "(dry-run) would remove line $n"
+                else
+                    unset "RULES[$((n - 1))]"
+                    RULES=("${RULES[@]}")
+                    eventer_write_rules
+                fi
+                ;;
+            edit*)
+                n="${action#edit }"
+                [[ "$n" =~ ^[0-9]+$ ]] || { warn "use: edit <line-number>"; continue; }
+                if [ "$n" -lt 1 ] || [ "$n" -gt "${#RULES[@]}" ]; then
+                    warn "no line $n"; continue
+                fi
+                printf '  current: %s\n' "${RULES[$((n - 1))]}" >&2
+                read -rp "  new rule (blank = keep): " rule
+                [ -n "$rule" ] || continue
+                if ! eventer_parse_rule "$rule"; then
+                    warn "not a valid rule — edit cancelled"
+                    continue
+                fi
+                if [ "$DRY_RUN" -eq 1 ]; then
+                    log "(dry-run) would replace line $n"
+                else
+                    RULES[$((n - 1))]="$rule"
+                    eventer_write_rules
+                fi
+                ;;
+            *) warn "unknown action (add | remove <n> | edit <n> | quit)" ;;
+        esac
+    done
+}
+
+case "${1:-}" in
+    run)          run_rules ;;
+    config)       config_editor ;;
+    list)         list_rules ;;
+    enable)       eventer_enable "${2:-5m}" ;;
+    disable)      eventer_disable ;;
+    status)       eventer_status ;;
+    *)            err "unknown subcommand '${1:-}' (see --help)" ;;
+esac

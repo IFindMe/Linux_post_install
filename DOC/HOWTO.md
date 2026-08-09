@@ -14,6 +14,7 @@ authoritative one-line reference (every command + flag), see
 | `pos docker` | Compose services, container dashboards, disposable VMs | [docker](howto/docker.md) |
 | `pos media` | Download audio/video via yt-dlp | [media](howto/media.md) |
 | `pos system` | Backups, firewall, health dashboard | [system](howto/system.md) |
+| `pos system event-trigger` | Threshold-rule monitors that alert on crossing | [event-trigger](howto/event-trigger.md) |
 | `pos ssh` | Load keys into the agent | [ssh](howto/ssh.md) |
 | `pos usb` | Share USB devices over the network | [usb](howto/usb.md) |
 | `pos communication` | Send Telegram messages/files/alerts | [communication](howto/communication.md) |

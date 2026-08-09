@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–183 |
-| ## 3. Installation Flow | 184–236 |
-| ## 4. The `pos` CLI System | 237–300 |
-| ## 5. Shared Library — `lib/common.sh` | 301–332 |
-| ## 6. Docker Compose / ScaleTail | 333–375 |
-| ## 7. Optional Apps (`apps/`) | 376–405 |
-| ## 8. Entertainment Module | 406–419 |
-| ## 9. Systemd Services | 420–432 |
-| ## 10. Configuration Files | 433–459 |
-| ## 11. Coding Conventions | 460–492 |
-| ## 12. Development Workflow | 493–545 |
-| ## 13. Key File Quick Reference | 546–595 |
-| ## 14. Common Tasks for Agents | 596–621 |
+| ## 2. Directory Structure | 44–184 |
+| ## 3. Installation Flow | 185–237 |
+| ## 4. The `pos` CLI System | 238–302 |
+| ## 5. Shared Library — `lib/common.sh` | 303–334 |
+| ## 6. Docker Compose / ScaleTail | 335–377 |
+| ## 7. Optional Apps (`apps/`) | 378–407 |
+| ## 8. Entertainment Module | 408–421 |
+| ## 9. Systemd Services | 422–434 |
+| ## 10. Configuration Files | 435–461 |
+| ## 11. Coding Conventions | 462–494 |
+| ## 12. Development Workflow | 495–547 |
+| ## 13. Key File Quick Reference | 548–599 |
+| ## 14. Common Tasks for Agents | 600–625 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -79,6 +79,7 @@ Linux_post_install/
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
+│   ├── pos-system-event-trigger            # State-based rule monitors; alerts via notify when a check crosses a threshold
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-nfs-client               # Mount NFS shares (ephemeral or persistent systemd mount units)
@@ -274,6 +275,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| system | event-trigger | `pos-system-event-trigger` | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | system | nfs-client | `pos-system-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |
@@ -554,12 +556,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
 | `lib/entertainment-lib.sh` | 350 | Entertainment module lib (ENABLED parsing, scheduler sync) |
+| `lib/eventer-lib.sh` | 312 | Eventer lib (rule parsing, float compare, per-rule state, user-timer sync) |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 277 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 280 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-telegram-listener` | 563 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
@@ -581,13 +584,14 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 126 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-event-trigger` | 212 | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-tree` | 110 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 284 | Dynamic bash completion |
+| `completions/pos.bash` | 286 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
