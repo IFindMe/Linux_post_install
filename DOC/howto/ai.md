@@ -6,8 +6,13 @@ Tools: `gemini` (`ask`, `chat`, `models`).
 | Tool | What it does |
 |------|--------------|
 | `pos ai gemini ask "<prompt>"` | One-shot answer to stdout (scriptable) |
+| `pos ai gemini ask --session <name> "…"` | Same, but remembers prior turns |
 | `pos ai gemini chat` | Interactive multi-turn conversation |
 | `pos ai gemini models` | List available model ids |
+| `pos ai gemini sessions` | List/clear persistent sessions (`reset <name>`) |
+
+Shared flags: `--model <id>` overrides the model; `--system "<text>"` adds a
+system instruction to every turn (kept out of the session file).
 
 ---
 
@@ -49,6 +54,14 @@ Set a different model per message:
 ```
 you:    ai --model gemini-2.5-flash explain a Raft consensus log
 ```
+
+### Telegram memory & formatting
+
+Each chat has its own persistent session (`telegram-<chat id>`), so the model
+remembers the conversation; `ai /reset` clears it. The listener passes a system
+prompt telling the model it is answering in a Telegram chat — so it uses emojis
+and stays lively — and strips markdown (`**x**`, backticks, `#`, links…) from
+the reply before sending it, since messages go out as plain text.
 
 ## Recipes
 

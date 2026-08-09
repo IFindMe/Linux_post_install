@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: ai gemini — Chat with Google Gemini (ask, chat, models)
-# POS_SUBCMDS: ask chat models
-# POS_FLAGS: --model
+# POS: ai gemini — Chat with Google Gemini (ask, chat, models, sessions)
+# POS_SUBCMDS: ask chat models sessions
+# POS_FLAGS: --model --session --system
 # POS_CONFIG: ai | ai.env | AI_GEMINI_API_KEY=secret:API key from aistudio.google.com | AI_GEMINI_MODEL=:Model id (default gemini-2.5-flash)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -10,22 +10,35 @@ source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")
 CONFIG_FILE="$HOME/.config/linux_post_install/ai.env"
 API="https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_MODEL="gemini-2.5-flash"
+SESSION_DIR="$HOME/.local/share/linux_post_install/ai"
+SESSION=""
+SYSTEM_PROMPT=""
+MAX_SESSION_TURNS=40
 
 usage() {
     cat <<EOF
-Usage: pos ai gemini <subcommand> [--model <id>]
+Usage: pos ai gemini <subcommand> [--model <id>] [--session <name>] [--system <text>]
 
 Chat with Google Gemini via the REST API (generativelanguage.googleapis.com).
 
 Subcommands:
   ask "<prompt>"    One-shot answer; prints ONLY the answer text to stdout
                     (pipe/script/Telegram-friendly). The prompt may also be
-                    piped in via stdin when no argument is given.
+                    piped in via stdin when no argument is given. With
+                    --session, previous turns are sent as context.
   chat              Interactive multi-turn conversation.
   models            List models that support generateContent.
+  sessions          List persistent sessions / clear one:
+                    'sessions' and 'sessions reset <name>'.
 
 Options:
   --model <id>      Override the model for this invocation.
+  --session <name>  Persistent memory: ask/chat remember prior turns in
+                    ~/.local/share/linux_post_install/ai/<name>.json
+                    (capped at $MAX_SESSION_TURNS turns). ask without
+                    --session stays one-shot.
+  --system <text>   System instruction sent with every turn (kept out of the
+                    session file), e.g. "Reply like a friendly Telegram chat".
   -h|--help         This help.
 
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
@@ -38,6 +51,10 @@ Examples:
   pos ai gemini chat
   pos ai gemini models
   pos ai gemini ask --model gemini-2.5-flash "hi"
+  pos ai gemini ask --session work "my name is joe"
+  pos ai gemini ask --session work "what is my name?"   # remembers
+  pos ai gemini sessions
+  pos ai gemini sessions reset work
 EOF
     exit 0
 }
@@ -74,24 +91,69 @@ resolve_model() {
     fi
 }
 
-# One generateContent call. $1 = model, $2 = contents JSON array.
+# ── Persistent session memory ───────────────────────────────────
+# History lives as a Gemini "contents" JSON document per session name under
+# SESSION_DIR. Names are sanitized to [A-Za-z0-9_-]; ask/chat only touch the
+# session layer when --session is given (otherwise they stay stateless).
+session_file() {
+    local name="${1:-$SESSION}"
+    name="${name//[^A-Za-z0-9_-]/_}"
+    printf '%s/%s.json' "$SESSION_DIR" "$name"
+}
+
+session_load() {
+    [ -n "$SESSION" ] || { printf '{"contents":[]}'; return 0; }
+    local f
+    f="$(session_file)"
+    if [ -s "$f" ] && jq -e '.contents' "$f" >/dev/null 2>&1; then
+        cat "$f"
+    else
+        printf '{"contents":[]}'
+    fi
+}
+
+session_save() {
+    [ -n "$SESSION" ] || return 0
+    local f tmp
+    f="$(session_file)"
+    mkdir -p "$SESSION_DIR"
+    tmp="$(mktemp)"
+    printf '%s\n' "$1" >"$tmp"
+    mv "$tmp" "$f"
+    chmod 600 "$f"
+}
+
+# Append a turn and prune to the last MAX_SESSION_TURNS entries. stdout = JSON.
+session_push() {
+    local contents="$1" role="$2" text="$3"
+    printf '%s' "$contents" | jq -c --arg r "$role" --arg t "$text" \
+        '.contents += [{role:$r, parts:[{text:$t}]}] | .contents |= .[-'"$MAX_SESSION_TURNS"':]'
+}
+
+# One generateContent call. $1 = model, $2 = contents JSON, $3 = optional
+# system instruction (added as systemInstruction, not stored in the session).
 # stdout = the answer text on success; an error message on failure (exit 1).
 gemini_generate() {
-    local model="$1" contents="$2"
-    local resp code body errmsg
+    local model="$1" contents="$2" system="${3:-}" body
+    body="$contents"
+    if [ -n "$system" ]; then
+        body="$(printf '%s' "$contents" | jq -c --arg s "$system" \
+            '. + {systemInstruction:{role:"system",parts:[{text:$s}]}}')"
+    fi
+    local resp code body_out errmsg
     resp="$(curl -sS -m 60 -X POST "${API}/models/${model}:generateContent" \
         -H "x-goog-api-key: ${AI_GEMINI_API_KEY}" \
         -H "Content-Type: application/json" \
         --write-out $'\n%{http_code}' \
-        --data "$contents")" || { echo "request failed (curl exit $?)" >&2; return 1; }
+        --data "$body")" || { echo "request failed (curl exit $?)" >&2; return 1; }
     code="${resp##*$'\n'}"
-    body="${resp%$'\n'*}"
+    body_out="${resp%$'\n'*}"
     if [ "$code" != "200" ]; then
-        errmsg="$(printf '%s' "$body" | jq -r '.error.message // empty' 2>/dev/null || true)"
+        errmsg="$(printf '%s' "$body_out" | jq -r '.error.message // empty' 2>/dev/null || true)"
         echo "API error $code${errmsg:+: $errmsg}" >&2
         return 1
     fi
-    printf '%s' "$body" | jq -r '[.candidates[0].content.parts[]?.text] | join("")'
+    printf '%s' "$body_out" | jq -r '[.candidates[0].content.parts[]?.text] | join("")'
 }
 
 cmd_ask() {
@@ -103,9 +165,18 @@ cmd_ask() {
     fi
     [ -n "$prompt" ] || err "No prompt given — usage: pos ai gemini ask \"<prompt>\""
     require_key
-    contents="$(jq -nc --arg t "$prompt" '{contents:[{role:"user",parts:[{text:$t}]}]}')"
-    if ! out="$(gemini_generate "$(resolve_model)" "$contents" 2>&1)"; then
+    if [ -n "$SESSION" ]; then
+        contents="$(session_load)"
+        contents="$(session_push "$contents" user "$prompt")"
+    else
+        contents="$(jq -nc --arg t "$prompt" '{contents:[{role:"user",parts:[{text:$t}]}]}')"
+    fi
+    if ! out="$(gemini_generate "$(resolve_model)" "$contents" "$SYSTEM_PROMPT" 2>&1)"; then
         err "$out"
+    fi
+    if [ -n "$SESSION" ]; then
+        contents="$(session_push "$contents" model "$out")"
+        session_save "$contents"
     fi
     printf '%s\n' "$out"
 }
@@ -115,7 +186,12 @@ cmd_chat() {
     local model contents text answer
     model="$(resolve_model)"
     require_key
-    contents='{"contents":[]}'
+    if [ -n "$SESSION" ]; then
+        contents="$(session_load)"
+        printf 'session: %s (resumed %s prior turns)\n' "$SESSION" "$(printf '%s' "$contents" | jq -r '.contents | length')"
+    else
+        contents='{"contents":[]}'
+    fi
     trap 'echo; echo "bye"; exit 0' INT
     echo "Gemini · ${model} — type a message; q=quit, /reset=clear history"
     while true; do
@@ -124,18 +200,48 @@ cmd_chat() {
         case "$text" in
             "" ) continue ;;
             q|Q|quit|exit) echo; echo "bye"; return 0 ;;
-            /reset) contents='{"contents":[]}'; echo "[history cleared]"; continue ;;
+            /reset)
+                contents='{"contents":[]}'
+                [ -n "$SESSION" ] && session_save "$contents"
+                echo "[history cleared]"
+                continue ;;
         esac
-        contents="$(printf '%s' "$contents" | jq -c --arg t "$text" '.contents += [{role:"user",parts:[{text:$t}]}]')"
-        if ! answer="$(gemini_generate "$model" "$contents" 2>&1)"; then
+        contents="$(session_push "$contents" user "$text")"
+        if ! answer="$(gemini_generate "$model" "$contents" "$SYSTEM_PROMPT" 2>&1)"; then
             warn "AI error: $answer"
             continue
         fi
-        contents="$(printf '%s' "$contents" | jq -c --arg t "$answer" '.contents += [{role:"model",parts:[{text:$t}]}]')"
+        contents="$(session_push "$contents" model "$answer")"
+        [ -n "$SESSION" ] && session_save "$contents"
         printf '\n%s\n\n' "$answer"
     done
     echo
     return 0
+}
+
+cmd_sessions() {
+    local action="${1:-list}" name f n
+    case "$action" in
+        list|"")
+            [ -d "$SESSION_DIR" ] || { echo "no sessions"; return 0; }
+            local found=0
+            for f in "$SESSION_DIR"/*.json; do
+                [ -f "$f" ] || continue
+                found=1
+                n="$(jq -r '.contents | length' "$f" 2>/dev/null || echo 0)"
+                printf '  %-32s %s turns\n' "$(basename "$f" .json)" "${n:-0}"
+            done
+            [ "$found" -eq 1 ] || echo "no sessions"
+            ;;
+        reset)
+            [ $# -ge 2 ] || err "usage: pos ai gemini sessions reset <name>"
+            name="$2"
+            if rm -f "$(session_file "$name")"; then
+                ok "session '$name' cleared"
+            fi
+            ;;
+        *) err "Unknown sessions subcommand '$action' (list | reset <name>)" ;;
+    esac
 }
 
 cmd_models() {
@@ -178,6 +284,12 @@ while [ $# -gt 0 ]; do
         --model)
             [ $# -ge 2 ] || err "--model needs a value"
             MODEL_OVERRIDE="$2"; shift 2 ;;
+        --session)
+            [ $# -ge 2 ] || err "--session needs a value"
+            SESSION="$2"; shift 2 ;;
+        --system)
+            [ $# -ge 2 ] || err "--system needs a value"
+            SYSTEM_PROMPT="$2"; shift 2 ;;
         -*) err "Unknown option '$1' (see --help)" ;;
         *)
             if [ -z "$cmd" ]; then
@@ -194,5 +306,6 @@ case "${cmd:-}" in
     ask)    cmd_ask "${args[@]}" ;;
     chat)   cmd_chat "${args[@]}" ;;
     models) cmd_models "${args[@]}" ;;
+    sessions) cmd_sessions "${args[@]}" ;;
     *)      err "Unknown ai gemini subcommand '$cmd' (see --help)" ;;
 esac

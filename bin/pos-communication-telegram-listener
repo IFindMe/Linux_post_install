@@ -10,6 +10,10 @@ API="https://api.telegram.org"
 SERVICE="pos-telegram-listener.service"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+# System prompt for the "ai " bridge: replies are posted straight into the
+# chat, so ask for concise, emoji-friendly Telegram-style answers.
+AI_SYSTEM="You are a friendly assistant chatting in a Telegram chat. Keep replies concise, use emojis and light formatting to make them lively, and never claim to send messages yourself."
+
 err()  { echo "ERROR: $*" >&2; exit 1; }
 log()  { echo "[+] $*"; }
 warn() { echo "[!] $*" >&2; }
@@ -429,6 +433,24 @@ reply() {
         || warn "reply failed (rc ${rc:-?})"
 }
 
+# Strip common markdown so AI output reads cleanly in a plain-text
+# Telegram message (no parse_mode is used).
+strip_markdown() {
+    local t="$1"
+    t="$(printf '%s' "$t" | sed -E \
+        -e 's/!\[[^]]*\]\([^)]*\)//g' \
+        -e 's/\[([^]]*)\]\([^)]*\)/\1/g' \
+        -e 's/\*\*([^*]*)\*\*/\1/g' \
+        -e 's/\*([^*]*)\*/\1/g' \
+        -e 's/__([^_]*)__/\1/g' \
+        -e 's/`([^`]*)`/\1/g' \
+        -e 's/^[[:space:]]*#{1,6}[[:space:]]+//' \
+        -e 's/^[[:space:]]*>[[:space:]]?//' \
+        -e 's/^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]+/• /')"
+    t="$(printf '%s' "$t" | sed -E '/^[[:space:]]*([-*_][[:space:]]*){3,}[[:space:]]*$/d')"
+    printf '%s' "$t"
+}
+
 handle_message() {
     local text="$1" msg_id="$2" value output rc quiet=0
     case "$text" in
@@ -437,14 +459,25 @@ handle_message() {
             return ;;
     esac
     # AI bridge: non-command text starting with "ai " (case-insensitive) is
-    # forwarded to Gemini; the model's answer is replied verbatim. Future
-    # non-command intents (e.g. reminders) slot in as more case arms here.
+    # forwarded to Gemini; the model's answer is replied verbatim. Each chat
+    # gets its own persistent memory session ("telegram-<chat_id>"); the exact
+    # prompt "ai /reset" clears it. Future non-command intents (e.g. reminders)
+    # slot in as more case arms here.
     if [[ "$text" != /* && "$text" =~ ^[Aa][Ii][[:space:]](.*)$ ]]; then
-        local prompt="${BASH_REMATCH[1]}" answer
+        local prompt="${BASH_REMATCH[1]}" answer session
         [ -n "$prompt" ] || { reply "Usage: ai <prompt> — e.g. 'ai what is Nvidia'" "$msg_id"; return; }
+        session="telegram-${TELEGRAM_CHAT_ID}"
+        if [[ "$prompt" =~ ^/?reset[[:space:]]*$ ]]; then
+            if pos ai gemini sessions reset "$session" >/dev/null 2>&1; then
+                reply "Memory cleared." "$msg_id"
+            else
+                reply "AI error: could not clear memory" "$msg_id"
+            fi
+            return
+        fi
         log "ai: $prompt"
-        if answer="$(timeout 120 pos ai gemini ask "$prompt" 2>&1)"; then
-            reply "$answer" "$msg_id"
+        if answer="$(timeout 120 pos ai gemini ask --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
+            reply "$(strip_markdown "$answer")" "$msg_id"
         else
             [ -n "$answer" ] || answer="timed out after 120s"
             reply "AI error: $answer" "$msg_id"
