@@ -162,7 +162,7 @@ EXAMPLES
 
   pos usb server --ls                     List USB devices + connected clients
 
-  pos communication telegram --send "Backup done"
+  pos communication telegram sender send "Backup done"
                                           Send a Telegram message
   pos communication telegram listener     Edit the /command → bash map
   pos communication telegram listener --enable

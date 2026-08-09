@@ -50,7 +50,7 @@ pos docker compose up jellyfin
 
 All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 
-`pos help <full command>` shows a tool's help, e.g. `pos help communication telegram` (all words joined with dashes → `pos-communication-telegram --help`). `pos <category>` or `pos <category> --help` shows a category's subcommands (derived from the `pos-<category>-*` filenames in `bin/` — no script execution, so it works even for root-only/interactive tools like `system-firewall`).
+`pos help <full command>` shows a tool's help, e.g. `pos help communication telegram-sender` (all words joined with dashes → `pos-communication-telegram-sender --help`). `pos <category>` or `pos <category> --help` shows a category's subcommands (derived from the `pos-<category>-*` filenames in `bin/` — no script execution, so it works even for root-only/interactive tools like `system-firewall`).
 
 **When adding a command, `bin/pos` itself has one thing to keep in sync:**
 
@@ -150,7 +150,7 @@ PACKAGES=(
 Two kinds of config, don't mix them up:
 
 - **Machine defaults shipped by the installer:** place the file in `config/` and add copy logic to `postinstall.sh`. If it contains secrets, add to `.gitignore` and document in `DOC/`.
-- **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`), `pos-communication-telegram` (`telegram.env`, token masked in `config` output), and the shared ones below. Never store tokens in the repo.
+- **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`), `pos-communication-telegram-sender` (`telegram.env`, token masked in `config` output), and the shared ones below. Never store tokens in the repo.
   - `system.env` — shared "system" settings loaded by `pos-system-*` tools via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS`). Env already exported wins over the file.
   - `notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`), read by `lib/notify.sh`.
 
@@ -297,7 +297,7 @@ notify_send "**disk full**" --markdown
 pos-communication-<platform> send <value> [--markdown]   # exit 0 on delivery
 ```
 
-then listing it in `NOTIFY_PLATFORM`. `pos-communication-telegram` already follows this (`--markdown` is an alias for `--parse-mode markdown`). No changes to `lib/notify.sh` are needed for a new platform.
+then listing it in `NOTIFY_PLATFORM`. Platform keys map to tool names via `notify_sender_name()` in `lib/notify.sh` — the telegram platform key stays `telegram` but its tool is `pos-communication-telegram-sender`. `pos-communication-telegram-sender` already follows this (`--markdown` is an alias for `--parse-mode markdown`). No changes to `lib/notify.sh` are needed for a new platform.
 
 ### Idempotency
 
@@ -334,7 +334,7 @@ run sudo apt install -y git
 
 - Never hardcode secrets — put them in `config/` (gitignored) or, for runtime tool config, `~/.config/linux_post_install/<tool>.env`
 - `chmod 600` for sensitive files
-- Mask secrets in `config` output (see `pos-communication-telegram`'s `mask_token`)
+- Mask secrets in `config` output (see `pos-communication-telegram-sender`'s `mask_token`)
 - Validate input before shell commands
 - Use `sudo` only where needed
 

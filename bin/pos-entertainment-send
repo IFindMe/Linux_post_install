@@ -82,12 +82,12 @@ if [ "$PRINT" -eq 1 ]; then
     exit 0
 fi
 
-telegram="$(dirname "$0")/pos-communication-telegram"
-[ -x "$telegram" ] || telegram="$(command -v pos-communication-telegram 2>/dev/null || true)"
-[ -n "$telegram" ] && [ -x "$telegram" ] || err "pos-communication-telegram not found next to this script"
+telegram="$(dirname "$0")/pos-communication-telegram-sender"
+[ -x "$telegram" ] || telegram="$(command -v pos-communication-telegram-sender 2>/dev/null || true)"
+[ -n "$telegram" ] && [ -x "$telegram" ] || err "pos-communication-telegram-sender not found next to this script"
 
 if [ "$MARKDOWN" -eq 1 ]; then
-    exec "$telegram" --send "$output" --parse-mode markdown
+    exec "$telegram" send "$output" --parse-mode markdown
 else
-    exec "$telegram" --send "$output"
+    exec "$telegram" send "$output"
 fi

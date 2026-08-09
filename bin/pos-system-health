@@ -256,9 +256,10 @@ ${line}"
     for p in "${platforms[@]}"; do
         p="${p// /}"
         [ -n "$p" ] || continue
-        if command -v "pos-communication-$p" &>/dev/null \
-            || [ -x "$(dirname "$0")/pos-communication-$p" ] \
-            || [ -x "$(dirname "$0")/../bin/pos-communication-$p" ]; then
+        sname="$(notify_sender_name "$p")"
+        if command -v "pos-communication-$sname" &>/dev/null \
+            || [ -x "$(dirname "$0")/pos-communication-$sname" ] \
+            || [ -x "$(dirname "$0")/../bin/pos-communication-$sname" ]; then
             delivered=1
         fi
     done

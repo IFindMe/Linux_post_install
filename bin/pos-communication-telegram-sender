@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: communication telegram — Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
-# POS_FLAGS: --send --type --caption --parse-mode --no-preview --token --chat-id
+# POS: communication telegram-sender — Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
+# POS_FLAGS: --type --caption --parse-mode --no-preview --token --chat-id --markdown
 # POS_SUBCMDS: send test config
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
@@ -10,7 +10,7 @@ API="https://api.telegram.org"
 
 usage() {
     cat <<EOF
-Usage: pos communication telegram [command] [args]
+Usage: pos communication telegram sender [command] [args]
 
 Send Telegram messages via the Bot API.
 
@@ -46,14 +46,13 @@ Keys: TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID
 Precedence: CLI flags > environment > config file.
 
 Examples:
-  pos communication telegram send "Backup finished"
-  pos communication telegram send "/path/to/report.pdf" --caption "Daily report"
-  pos communication telegram send "/path/to/photo.jpg" --caption "Sunset"
-  pos communication telegram send "/path/to/sticker.webp"
-  pos communication telegram send "https://example.com" --no-preview
-  pos communication telegram send "/path/to/video.mp4" --type video
-  pos communication telegram --send "Old style text message"
-  pos communication telegram test
+  pos communication telegram sender send "Backup finished"
+  pos communication telegram sender send "/path/to/report.pdf" --caption "Daily report"
+  pos communication telegram sender send "/path/to/photo.jpg" --caption "Sunset"
+  pos communication telegram sender send "/path/to/sticker.webp"
+  pos communication telegram sender send "https://example.com" --no-preview
+  pos communication telegram sender send "/path/to/video.mp4" --type video
+  pos communication telegram sender test
 EOF
     exit 0
 }
@@ -250,11 +249,6 @@ case "$cmd" in
         shift
         cmd_send "$@"
         ;;
-    --send)
-        shift
-        [ $# -ge 1 ] || usage
-        cmd_send "$@"
-        ;;
     test)
         load_config
         send_message "Test message from pos $(date '+%Y-%m-%d %H:%M:%S')"
@@ -269,7 +263,7 @@ case "$cmd" in
         ;;
     *)
         echo "ERROR: Unknown telegram command '$cmd'"
-        echo "Run 'pos communication telegram --help' for usage."
+        echo "Run 'pos communication telegram-sender --help' for usage."
         exit 1
         ;;
 esac

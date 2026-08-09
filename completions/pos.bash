@@ -4,7 +4,7 @@
 # GEN:START posflags
 declare -A _pos_flags
 _pos_flags[communication-telegram-listener]="--enable --disable --status --run"
-_pos_flags[communication-telegram]="--send --type --caption --parse-mode --no-preview --token --chat-id"
+_pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
 _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[system-backup]="--service"
@@ -13,7 +13,7 @@ _pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callba
 # GEN:END posflags
 # GEN:START possubcmds
 declare -A _pos_subcmds
-_pos_subcmds[communication-telegram]="send test config listener"
+_pos_subcmds[communication-telegram-sender]="send test config"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
 # GEN:END possubcmds
@@ -82,18 +82,36 @@ _pos() {
         COMPREPLY=($(compgen -W "${cat_cmds[$cat]:-} --help" -- "$cur"))
     }
 
+    # Nested sub-tool group (pos-<key>-* with no direct tool) → suggest suffixes.
+    _pos_complete_group() {
+        local key="$1" out=() f
+        for f in "$pos_dir"/pos-"$key"-*; do
+            [ -x "$f" ] || continue
+            out+=("${f##*/pos-$key-}")
+        done
+        COMPREPLY=($(compgen -W "${out[*]} --help" -- "$cur"))
+    }
+
     # Complete subcommands + flags + --help for a tool chain, walking up to
-    # the nearest tool that declares anything (e.g. "telegram send" → telegram flags).
+    # the nearest tool that declares anything. A key that is a group of nested
+    # sub-tools (no direct tool) completes to the group's suffixes.
     _pos_complete_tool() {
         local key="$1" k opts
+        if [ -n "${_pos_subcmds[$key]:-}" ] || [ -n "${_pos_flags[$key]:-}" ]; then
+            opts="${_pos_subcmds[$key]:-} ${_pos_flags[$key]:-} --help"
+            COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+            return
+        fi
+        for f in "$pos_dir"/pos-"$key"-*; do
+            if [ -x "$f" ]; then
+                _pos_complete_group "$key"
+                return
+            fi
+        done
         k="$key"
         while [ -n "$k" ]; do
             if [ -n "${_pos_subcmds[$k]:-}" ] || [ -n "${_pos_flags[$k]:-}" ]; then
-                if [ "$k" = "$key" ]; then
-                    opts="${_pos_subcmds[$k]:-} ${_pos_flags[$k]:-} --help"
-                else
-                    opts="${_pos_flags[$k]:-} --help"
-                fi
+                opts="${_pos_flags[$k]:-} --help"
                 COMPREPLY=($(compgen -W "$opts" -- "$cur"))
                 return
             fi
@@ -197,14 +215,31 @@ _pos() {
             ;;
         6)
             case "${words[1]}-${words[2]}" in
+                docker-compose)
+                    case "${words[3]}" in
+                        up|down|restart|logs)
+                            _pos_complete_compose_services
+                            ;;
+                    esac
+                    ;;
+                docker-vbox)
+                    case "${words[3]}" in
+                        create|enter|stop|start|rm)
+                            _pos_complete_docker_vbox_names
+                            ;;
+                    esac
+                    ;;
+                *)
+                    _pos_complete_tool "${words[1]}-${words[2]}-${words[3]}-${words[4]}"
+                    ;;
+            esac
+            ;;
+        7)
+            case "${words[1]}-${words[2]}" in
                 communication-telegram)
-                    case "${words[3]}:${words[4]}" in
-                        send:--type|--send:--type)
-                            COMPREPLY=($(compgen -W "message file link sticker photo video audio voice animation" -- "$cur"))
-                            ;;
-                        send:--parse-mode|--send:--parse-mode)
-                            COMPREPLY=($(compgen -W "plain markdown html" -- "$cur"))
-                            ;;
+                    case "${words[5]}" in
+                        --type) COMPREPLY=($(compgen -W "message file link sticker photo video audio voice animation" -- "$cur")) ;;
+                        --parse-mode) COMPREPLY=($(compgen -W "plain markdown html" -- "$cur")) ;;
                     esac
                     ;;
             esac

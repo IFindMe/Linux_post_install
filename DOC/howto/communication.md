@@ -1,52 +1,40 @@
 # How-To: `pos communication`
 
-Telegram messaging and alerts. Tools: `telegram`, `matrix`.
+Telegram messaging and alerts. Tools: `telegram-sender`, `telegram-listener`,
+`matrix`.
 
 | Tool | What it does |
 |------|--------------|
-| `pos communication telegram` | Send messages/files, manage config, webhook state, message logs |
+| `pos communication telegram sender` | Send messages/files/links/stickers, test, config (token + chat id) |
 | `pos communication telegram listener` | Bot listener: map `/command` → bash and run it from chat (systemd user daemon) |
 | `pos communication matrix` | Matrix/Synapse sender (extensible; not yet implemented) |
 
-`telegram` is the workhorse: it backs the whole **notify system** — health
-digests, backup alerts, firewall changes — and can be used directly.
+`telegram-sender` is the workhorse: it backs the whole **notify system** —
+health digests, backup alerts, firewall changes — and can be used directly.
 
 ---
 
-## `pos communication telegram`
+## `pos communication telegram sender`
 
 ### One-time setup
 
 ```bash
-pos communication telegram config set TELEGRAM_BOT_TOKEN=123456:ABC...
-pos communication telegram config set TELEGRAM_CHAT_ID=987654321
-pos communication telegram config set TELEGRAM_DISABLE_WEBHOOK=true   # if used with webhooks
-pos communication telegram config
+pos communication telegram sender config set TELEGRAM_BOT_TOKEN=123456:ABC...
+pos communication telegram sender config set TELEGRAM_CHAT_ID=987654321
+pos communication telegram sender config
 # config lives in ~/.config/linux_post_install/telegram.env (chmod 600)
 ```
 
 The bot token comes from @BotFather, the chat ID from @userinfobot (or by
-starting a chat and reading it). To set your display name once: message
-`/start` to your bot, then `pos communication telegram chat-id` prints it.
+starting a chat and reading it). `sender config` shows the configured chat id.
 
 ### Send
 
 ```bash
-pos communication telegram send "hello from my server"      # plain text
-pos communication telegram send --markdown "**bold** ok"    # parse as markdown
-pos communication telegram send --help                     # list all flags
-pos communication telegram file /path/to/report.pdf         # send a document
-pos communication telegram broadcast "restarting in 5min"   # to all known chat IDs
-```
-
-### State & logs
-
-```bash
-pos communication telegram getwebhookinfo        # current webhook + pending count
-pos communication telegram setwebhook https://... # point a webhook URL (or "")
-pos communication telegram deletemenu            # clear the bot menu
-pos communication telegram logs                  # recent send history (logs dir)
-pos communication telegram clear-logs            # wipe message logs
+pos communication telegram sender send "hello from my server"    # plain text
+pos communication telegram sender send --markdown "**bold** ok"  # parse as markdown
+pos communication telegram sender send --help                    # list all flags
+pos communication telegram sender send /path/to/report.pdf       # auto-detects file
 ```
 
 **Recipes:**
@@ -54,21 +42,20 @@ pos communication telegram clear-logs            # wipe message logs
   `notify_send` (below) on success *and* failure.
 - **Warn before a service update:**
   ```bash
-  pos communication telegram send "Maintenance: docker compose down in 2min"
+  pos communication telegram sender send "Maintenance: docker compose down in 2min"
   ```
-- **On-call file drop:** `pos communication telegram file ~/log/nginx-error.log`
+- **On-call file drop:** `pos communication telegram sender send ~/log/nginx-error.log`
 
 **Troubleshooting:**
-- "Not configured (no token or chat id)" → run `config set` for both values.
+- "Not configured (no token or chat id)" → run `sender config set` for both values.
 - Send succeeds but nothing arrives → the chat must have started the bot
   (press `Start` / send `/start` once).
 - **Markdown silently empty** → Telegram uses its own MarkdownV2; unmatched
   syntax makes the message vanish. Use `--markdown` only when the text is
   Telegram-safe (the health digest output is).
-- **Webhook vs getUpdates:** if your bot has an active webhook, `send` may
-  still work (we disable the webhook automatically when it owns it) — but if
-  another process registered the webhook, polls fail; `deletemenu`/webhook
-  state shows ownership. See `getwebhookinfo`.
+- **Webhook vs getUpdates:** the sender uses polling (`getUpdates`), so a
+  webhook registered on the bot (e.g. via BotFather) blocks sends; remove it
+  with BotFather's `/deletewebhook`.
 
 ---
 
@@ -108,8 +95,8 @@ pos communication telegram listener --disable   # remove it
 **Troubleshooting:**
 - Bot doesn't answer → send `/help`; if silent, check the service with
   `systemctl --user status pos-telegram-listener.service`.
-- A webhook on the bot blocks `getUpdates` → delete it with
-  `pos communication telegram setwebhook ""`.
+- A webhook on the bot blocks `getUpdates` → remove it with BotFather's
+  `/deletewebhook`.
 - Needs `jq` (in preinstall PACKAGES).
 
 ---

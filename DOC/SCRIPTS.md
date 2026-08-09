@@ -186,7 +186,7 @@ notify_send "Backup completed"
 notify_send "**disk full**" --markdown
 ```
 
-Platform selection: `~/.config/linux_post_install/notify.env` (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out; env var wins over the file). Adding a platform = drop a `bin/pos-communication-<platform>` sender + list it — no change to `lib/notify.sh`.
+Platform selection: `~/.config/linux_post_install/notify.env` (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out; env var wins over the file). Adding a platform = drop a `bin/pos-communication-<platform>` sender + list it — no change to `lib/notify.sh`. The telegram platform key maps to tool `pos-communication-telegram-sender` via `notify_sender_name()`.
 
 ---
 

@@ -193,25 +193,24 @@ Subcommands that need input prompt interactively when args are omitted.
 
 | Command | File | Purpose | Configuration |
 |---------|------|---------|---------------|
-| `pos communication telegram send "text"` | `bin/pos-communication-telegram` | Send a message, link, or media file (auto-detects the type) to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
+| `pos communication telegram sender send "text"` | `bin/pos-communication-telegram-sender` | Send a message, link, or media file (auto-detects the type) to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
 | `pos communication telegram listener` | `bin/pos-communication-telegram-listener` | Telegram bot listener: map `/command` → bash commands and run them from chat; interactive editor for the map | Same `telegram.env` (the bot is the owner, `TELEGRAM_CHAT_ID`). Map lives in `~/.config/linux_post_install/telegram_commands.env` (`/cmd=bash command` lines, chmod 600) |
 
-`pos communication telegram` in detail:
+`pos communication telegram sender` in detail:
 
 | Command | Behavior |
 |---------|----------|
-| `pos communication telegram send "text"` | POSTs `sendMessage` to the Bot API (60s timeout); prints `[+] message sent to chat <id>` or fails with a nonzero exit |
-| `pos communication telegram send <value>` | **Auto-detects the type** when `--type` is omitted: existing file → `file` (except `.webp` → sticker, `.gif` → animation, images → photo, video/audio/voice extensions → their type), value starting with `http://`/`https://`/`www.` → `link`, otherwise `message` |
-| `pos communication telegram send <path> --type file [--caption "…"]` | Uploads a file as a `sendDocument` via multipart (`document=@path`); `--caption` adds a caption. Path must exist and be readable |
-| `pos communication telegram send <path> [--caption "…"]` | Media uploads via their Bot API endpoint: `--type photo` → `sendPhoto`, `video` → `sendVideo`, `audio` → `sendAudio`, `voice` → `sendVoice`, `animation` → `sendAnimation`, `sticker` (`.webp`) → `sendSticker` (captions not supported for stickers) |
-| `pos communication telegram send "url" --type link [--no-preview]` | Sends a link as a message (URLs auto-linkify); `--no-preview` adds `disable_web_page_preview=true` |
-| `pos communication telegram send "text" --parse-mode <mode>` | Send with Telegram formatting; `<mode>` is `plain` (default), `markdown`, or `html` (passed as `parse_mode` to the API — also applies to captions). Markdown/HTML use raw Telegram syntax — unescaped characters may be rejected by the API (400) |
-| `pos communication telegram send … --token <t> --chat-id <id>` | One-shot override of token/chat ID |
-| `pos communication telegram --send "text"` | Legacy alias for `send "text"` (kept for the entertainment runner) |
-| `pos communication telegram test` | Sends a canned test message using the current config |
-| `pos communication telegram config` | Shows current config (bot token masked) |
-| `pos communication telegram config set TELEGRAM_BOT_TOKEN=...` | Saves a bot token (600 perms) |
-| `pos communication telegram config set TELEGRAM_CHAT_ID=...` | Saves the target chat ID |
+| `pos communication telegram sender send "text"` | POSTs `sendMessage` to the Bot API (60s timeout); prints `[+] message sent to chat <id>` or fails with a nonzero exit |
+| `pos communication telegram sender send <value>` | **Auto-detects the type** when `--type` is omitted: existing file → `file` (except `.webp` → sticker, `.gif` → animation, images → photo, video/audio/voice extensions → their type), value starting with `http://`/`https://`/`www.` → `link`, otherwise `message` |
+| `pos communication telegram sender send <path> --type file [--caption "…"]` | Uploads a file as a `sendDocument` via multipart (`document=@path`); `--caption` adds a caption. Path must exist and be readable |
+| `pos communication telegram sender send <path> [--caption "…"]` | Media uploads via their Bot API endpoint: `--type photo` → `sendPhoto`, `video` → `sendVideo`, `audio` → `sendAudio`, `voice` → `sendVoice`, `animation` → `sendAnimation`, `sticker` (`.webp`) → `sendSticker` (captions not supported for stickers) |
+| `pos communication telegram sender send "url" --type link [--no-preview]` | Sends a link as a message (URLs auto-linkify); `--no-preview` adds `disable_web_page_preview=true` |
+| `pos communication telegram sender send "text" --parse-mode <mode>` | Send with Telegram formatting; `<mode>` is `plain` (default), `markdown`, or `html` (passed as `parse_mode` to the API — also applies to captions). Markdown/HTML use raw Telegram syntax — unescaped characters may be rejected by the API (400) |
+| `pos communication telegram sender send … --token <t> --chat-id <id>` | One-shot override of token/chat ID |
+| `pos communication telegram sender test` | Sends a canned test message using the current config |
+| `pos communication telegram sender config` | Shows current config (bot token masked) |
+| `pos communication telegram sender config set TELEGRAM_BOT_TOKEN=...` | Saves a bot token (600 perms) |
+| `pos communication telegram sender config set TELEGRAM_CHAT_ID=...` | Saves the target chat ID |
 
 `send` option validation: `--caption` is only valid with media types (file/photo/video/audio/voice/animation), `--no-preview` only with `--type message`/`link`, and `--type` only accepts `message|file|link|sticker|photo|video|audio|voice|animation`. An explicit `--type` always overrides auto-detection.
 

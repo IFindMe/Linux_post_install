@@ -16,6 +16,8 @@
 # that MUST implement:
 #   pos-communication-<platform> send <value> [--markdown]
 #   (exit 0 on delivery; non-zero on failure)
+# NOTE: the telegram sender tool is named `pos-communication-telegram-sender`;
+# notify_sender_name() maps the platform key "telegram" → "telegram-sender".
 # To add a platform (e.g. Matrix/Synapse), add `bin/pos-communication-matrix`
 # implementing that interface and put `matrix` in NOTIFY_PLATFORM.
 #
@@ -23,6 +25,14 @@
 # never changes the caller's exit code.
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install"
+
+# Platform key → sender tool name (bin/pos-communication-<name>).
+notify_sender_name() {
+    case "${1:-}" in
+        telegram) echo telegram-sender ;;
+        *)        echo "${1:-}" ;;
+    esac
+}
 
 # Effective platform list (env > notify.env > "telegram").
 notify_platforms() {
@@ -51,15 +61,16 @@ notify_send() {
     local -a plist
     IFS=',' read -r -a plist <<< "$(notify_platforms)"
 
-    local p sender
+    local p sender sname
     for p in "${plist[@]}"; do
         p="${p// /}"
         [ -n "$p" ] || continue
-        sender="$(command -v "pos-communication-${p}" 2>/dev/null)" || \
-            sender="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../bin/pos-communication-${p}"
+        sname="$(notify_sender_name "$p")"
+        sender="$(command -v "pos-communication-${sname}" 2>/dev/null)" || \
+            sender="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../bin/pos-communication-${sname}"
 
         if [ ! -x "$sender" ]; then
-            warn "notify_send: pos-communication-${p} not found, notification skipped" 2>/dev/null || true
+            warn "notify_send: pos-communication-${sname} not found, notification skipped" 2>/dev/null || true
             continue
         fi
 

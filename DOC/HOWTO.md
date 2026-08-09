@@ -40,8 +40,8 @@ templates (without overwriting an existing file):
 | `entertainment.env` | `pos entertainment *` | plugin keys (`WEATHER_LAT`…), `ENABLED` |
 
 ```bash
-pos communication telegram config set TELEGRAM_BOT_TOKEN=123:ABC
-pos communication telegram config set TELEGRAM_CHAT_ID=98765
+pos communication telegram sender config set TELEGRAM_BOT_TOKEN=123:ABC
+pos communication telegram sender config set TELEGRAM_CHAT_ID=98765
 pos entertainment config set WEATHER_LAT=36.51 WEATHER_LON=40.75
 ```
 

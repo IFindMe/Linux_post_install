@@ -137,7 +137,7 @@ if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
                     run sudo systemctl enable pos-health.timer
                 log "Daily health digest timer enabled for $DIGEST_USER"
             else
-                warn "Telegram not configured — skipping health digest timer (run 'pos communication telegram config set ...' then re-run postinstall)"
+                warn "Telegram not configured — skipping health digest timer (run 'pos communication telegram sender config set ...' then re-run postinstall)"
             fi
             continue
         fi
