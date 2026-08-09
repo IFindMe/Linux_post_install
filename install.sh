@@ -14,7 +14,9 @@ fi
 source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/flags.sh"
 
-DRY_RUN=0
+# Exported so child phases (preinstall.sh, postinstall.sh) inherit it —
+# otherwise '--dry-run' silently executes them for real.
+export DRY_RUN=0
 RUN_APPS=0
 RUN_FEATURES=0
 SKIP_PHASES=""

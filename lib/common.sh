@@ -65,10 +65,14 @@ timer_stop()  { _elapsed "$TIMER_START"; }
 
 # ── Timed command runner ───────────────────────────────────────
 # Shows a spinner while the command runs in background,
-# then prints result + elapsed time.
+# then prints result + elapsed time. Honors $DRY_RUN like run().
 spawn() {
     local msg="$1"
     shift
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) ${msg}: $*"
+        return 0
+    fi
     local start
     start=$(_nano_now)
 

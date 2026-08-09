@@ -11,6 +11,7 @@ Everything that runs during the bootstrap install: `install.sh`, `preinstall.sh`
 - [postinstall.sh — user configuration](#postinstallsh--user-configuration)
 - [lib/common.sh — shared library](#libcommonsh--shared-library)
 - [lib/flags.sh — feature flags](#libflagssh--feature-flags)
+- [lib/notify.sh — multi-platform alerting](#libnotifysh--multi-platform-alerting)
 - [features/autostart.sh — boot-time feature](#featuresautostartsh--boot-time-feature)
 - [x64_bin/ — precompiled binaries](#x64_bin--precompiled-binaries)
 
@@ -36,7 +37,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/entertainment-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -172,10 +173,27 @@ flag_clear autostart
 
 ---
 
+## lib/notify.sh — multi-platform alerting
+
+**File:** `lib/notify.sh` (installed to `/usr/local/bin/notify.sh`)
+**Purpose:** opt-in alerting helper for tools that announce events. Delivers to every platform in `NOTIFY_PLATFORM` via the sender contract `pos-communication-<platform> send <value> [--markdown]` (default platform: `telegram`).
+
+Self-contained by design: defines **only** `notify_send()` + `notify_platforms()`, so sourcing it never clobbers a tool's own `log`/`warn`/`err`. **Silent-fails per platform** — a missing sender or failed send only warns and never changes the caller's exit code.
+
+```bash
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+notify_send "Backup completed"
+notify_send "**disk full**" --markdown
+```
+
+Platform selection: `~/.config/linux_post_install/notify.env` (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out; env var wins over the file). Adding a platform = drop a `bin/pos-communication-<platform>` sender + list it — no change to `lib/notify.sh`.
+
+---
+
 ## lib/entertainment-lib.sh — entertainment module
 
 **File:** `lib/entertainment-lib.sh` (installed to `/usr/local/bin/entertainment-lib.sh`)
-**Purpose:** shared logic for the `pos entertainment` tools — config (`entertainment.env`), `ENABLED` auto-trigger list parsing (`plugin, interval` pairs), plugin lookup by `# POS_PLUGIN:` marker, interval→schedule mapping, and scheduler reconciliation (systemd **user** timers when a user manager is reachable, otherwise a managed user **crontab** block).
+**Purpose:** shared logic for the `pos entertainment` tools — config (`entertainment.env`), `ENABLED` auto-trigger list parsing (`plugin, interval` pairs), plugin lookup by `# POS_PLUGIN:` marker, interval→schedule mapping, and scheduler reconciliation (systemd **user** timers — the only backend; requires a reachable user manager, `ensure_linger()` enables linger if needed).
 
 Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib/common.sh`). **Plugins must not source it** — their stdout is the sent message.
 

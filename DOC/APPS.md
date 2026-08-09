@@ -86,3 +86,4 @@ Installation methods used across the catalog:
 | AFFiNE | utilities | Knowledge base (AppImage) | GitHub release → `/opt/affine` + desktop entry |
 | btop | utilities | Resource monitor | `apt install btop` |
 | LocalSend | utilities | Local file sharing | flatpak (installs flatpak + flathub if missing) |
+| tsui | utilities | Tailscale config TUI (official install script from neuralink.com) | `curl \| bash` → `/usr/local/bin/tsui` |

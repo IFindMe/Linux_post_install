@@ -20,4 +20,9 @@ Thumbs.db
 compose/custom/
 compose/config.env
 
+# Secrets — never commit real keys/certs
+config/authorized_keys
+config/rclone.conf
+
+# Stray session capture (accidentally created in the repo root)
 session

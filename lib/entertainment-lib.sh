@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Shared library for the entertainment module (pos entertainment *).
 # Sourced by the bin/pos-entertainment-* tools AFTER lib/common.sh.
 # NOTE: plugins themselves must NOT source this — their stdout is the message.

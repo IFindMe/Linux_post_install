@@ -31,7 +31,7 @@ Each phase is independent and runs only if the corresponding script exists.
 |-----------|---------|-------------|
 | `bin/` | Daily-use CLI tools and wrappers | `/usr/local/bin/` |
 | `apps/<category>/` | Optional desktop app installers | run on demand |
-| `lib/` | Shared libraries: `common.sh` (helpers), `flags.sh` (feature flags), `entertainment-lib.sh` (entertainment scheduling) | sourced at build time |
+| `lib/` | Shared libraries: `common.sh` (helpers), `flags.sh` (feature flags), `notify.sh` (multi-platform alerting), `entertainment-lib.sh` (entertainment scheduling) | sourced at build time |
 | `config/` | Gitignored user config files | `~/.config/<app>/` (via postinstall) |
 | `entertainment/` | Public-API plugins for the entertainment module | `/usr/local/bin` (via install.sh Phase 2) |
 | `compose/` | ScaleTail templates (git submodule) | `/usr/local/share/linux_post_install/scale-tail` |
@@ -55,7 +55,7 @@ All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 **When adding a command, `bin/pos` itself has one thing to keep in sync:**
 
 - **The usage text** (`usage()` function) — the CATEGORIES block is **auto-derived** from the `pos-*` filenames in `bin/` (no manual edit, can't drift). The EXAMPLES block is the only hand-maintained part: add a line there only if you want the tool showcased in `pos --help`.
-- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `media-mp4`, `system-backup`, `usb-server`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`. Trade-off: it's all-or-nothing **per script** — adding a flag-style tool with *any* prompting subcommand (e.g. `usb-server --share`) means *every* subcommand of that script skips output logging (e.g. `usb server --ls` loses the `tee` log too).
+- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `system-firewall`, `media-mp4`, `system-backup`, `usb-server`, `communication-telegram-listener`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`. Trade-off: it's all-or-nothing **per script** — adding a flag-style tool with *any* prompting subcommand (e.g. `usb-server --share`) means *every* subcommand of that script skips output logging (e.g. `usb server --ls` loses the `tee` log too).
 
 ### Shared Library (`lib/common.sh`)
 

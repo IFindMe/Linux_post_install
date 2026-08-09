@@ -8,9 +8,9 @@ log "Running post-install..."
 # ── rclone config ──────────────────────────────────────────────
 # Place your rclone.conf in config/ (gitignored) and this will install it.
 if [ -f config/rclone.conf ]; then
-    mkdir -p "$HOME/.config/rclone"
-    cp config/rclone.conf "$HOME/.config/rclone/rclone.conf"
-    chmod 600 "$HOME/.config/rclone/rclone.conf"
+    run mkdir -p "$HOME/.config/rclone"
+    run cp config/rclone.conf "$HOME/.config/rclone/rclone.conf"
+    run chmod 600 "$HOME/.config/rclone/rclone.conf"
     log "Installed rclone.conf"
 else
     warn "config/rclone.conf not found, skipping"
@@ -21,12 +21,12 @@ fi
 # has not already created their own entertainment.env (no clobber).
 ENT_DIR="$HOME/.config/linux_post_install"
 if [ -f config/entertainment.env ]; then
-    mkdir -p "$ENT_DIR"
+    run mkdir -p "$ENT_DIR"
     if [ -f "$ENT_DIR/entertainment.env" ]; then
         log "entertainment.env already exists, keeping it"
     else
-        cp config/entertainment.env "$ENT_DIR/entertainment.env"
-        chmod 600 "$ENT_DIR/entertainment.env"
+        run cp config/entertainment.env "$ENT_DIR/entertainment.env"
+        run chmod 600 "$ENT_DIR/entertainment.env"
         log "Installed entertainment.env — set your location:"
         cat "$ENT_DIR/entertainment.env"
     fi
@@ -36,14 +36,14 @@ fi
 
 # ── system + notify config templates ───────────────────────────
 # Copied only if the user has not already created their own (no clobber).
-mkdir -p "$ENT_DIR"
+run mkdir -p "$ENT_DIR"
 for tpl in system.env notify.env; do
     if [ -f "config/$tpl" ]; then
         if [ -f "$ENT_DIR/$tpl" ]; then
             log "$tpl already exists, keeping it"
         else
-            cp "config/$tpl" "$ENT_DIR/$tpl"
-            chmod 600 "$ENT_DIR/$tpl"
+            run cp "config/$tpl" "$ENT_DIR/$tpl"
+            run chmod 600 "$ENT_DIR/$tpl"
             log "Installed $tpl — edit $ENT_DIR/$tpl"
         fi
     fi
@@ -56,7 +56,7 @@ BASHRC="$HOME/.bashrc"
 if grep -qsF "$PATH_LINE" "$BASHRC" 2>/dev/null; then
     log "PATH already configured"
 else
-    echo "$PATH_LINE" >> "$BASHRC"
+    run echo "$PATH_LINE" >> "$BASHRC"
     log "Added PATH to ~/.bashrc"
 fi
 
@@ -66,7 +66,7 @@ COMPLETION_LINE='source /usr/local/share/bash-completion/completions/pos.bash 2>
 if grep -qsF "pos.bash" "$BASHRC" 2>/dev/null; then
     log "pos completion already configured"
 else
-    echo "$COMPLETION_LINE" >> "$BASHRC"
+    run echo "$COMPLETION_LINE" >> "$BASHRC"
     log "Added pos completion to ~/.bashrc"
 fi
 
@@ -85,10 +85,10 @@ AUTH_FILE="$SSH_DIR/authorized_keys"
 KEY_FILE="config/authorized_keys"
 
 if [ -f "$KEY_FILE" ]; then
-    mkdir -p "$SSH_DIR"
-    chmod 700 "$SSH_DIR"
-    touch "$AUTH_FILE"
-    chmod 600 "$AUTH_FILE"
+    run mkdir -p "$SSH_DIR"
+    run chmod 700 "$SSH_DIR"
+    run touch "$AUTH_FILE"
+    run chmod 600 "$AUTH_FILE"
 
     added=0
     while IFS= read -r key; do
@@ -96,7 +96,7 @@ if [ -f "$KEY_FILE" ]; then
         if grep -qsF "$key" "$AUTH_FILE" 2>/dev/null; then
             log "SSH key already present"
         else
-            echo "$key" >> "$AUTH_FILE"
+            run echo "$key" >> "$AUTH_FILE"
             added=$((added + 1))
         fi
     done < "$KEY_FILE"

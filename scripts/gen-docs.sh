@@ -169,6 +169,8 @@ regen_block() {
             skip { next }
             { print }
         ' "$file" > "$tmp"
+        # mktemp creates 0600 files — mv would leave the doc/completion at 0600
+        chmod 644 "$tmp"
         mv "$tmp" "$file"
     fi
     rm -f "$newfile"

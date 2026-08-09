@@ -12,7 +12,8 @@ note() { echo "  ✗ $*"; }
 
 # ── 1. Syntax ───────────────────────────────────────────────────
 for f in bin/pos bin/pos-* lib/*.sh install.sh preinstall.sh postinstall.sh \
-         completions/pos.bash scripts/*.sh; do
+         completions/pos.bash scripts/*.sh apps/*/*.sh entertainment/*.sh \
+         features/*.sh templates/*.sh; do
     [ -f "$f" ] || continue
     bash -n "$f" 2>/dev/null || { note "syntax error in $f"; fail=1; }
 done

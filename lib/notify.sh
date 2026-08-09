@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # lib/notify.sh — optional MULTI-PLATFORM alerting helper. Self-contained by
 # design: defines ONLY notify_send() + notify_platforms() (plus internal
 # helpers) so it can be sourced by tools that define their own log/warn/err

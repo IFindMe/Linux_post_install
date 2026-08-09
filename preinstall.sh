@@ -2,7 +2,7 @@
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 
-DRY_RUN=0
+DRY_RUN="${DRY_RUN:-0}"
 
 usage() {
     cat <<EOF

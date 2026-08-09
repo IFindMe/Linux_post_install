@@ -248,7 +248,25 @@ ${line}"
     else
         notify_send "$msg"
     fi
-    echo "sent: POS Health — ${host} (${verdict})"
+    # notify_send is silent-fail by design — confirm delivery only when a
+    # platform sender actually exists, otherwise warn on stderr (still visible
+    # here since only stdout was redirected while --send ran).
+    delivered=0
+    IFS=',' read -r -a platforms <<< "$(notify_platforms)"
+    for p in "${platforms[@]}"; do
+        p="${p// /}"
+        [ -n "$p" ] || continue
+        if command -v "pos-communication-$p" &>/dev/null \
+            || [ -x "$(dirname "$0")/pos-communication-$p" ] \
+            || [ -x "$(dirname "$0")/../bin/pos-communication-$p" ]; then
+            delivered=1
+        fi
+    done
+    if [ "$delivered" -eq 1 ]; then
+        echo "sent: POS Health — ${host} (${verdict})"
+    else
+        warn "notify: no platform sender found (NOTIFY_PLATFORM=$(notify_platforms)) — digest not delivered"
+    fi
 fi
 
 [ "$FAILURES" -eq 0 ]

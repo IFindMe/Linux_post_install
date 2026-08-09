@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–168 |
-| ## 3. Installation Flow | 169–220 |
-| ## 4. The `pos` CLI System | 221–281 |
-| ## 5. Shared Library — `lib/common.sh` | 282–312 |
-| ## 6. Docker Compose / ScaleTail | 313–355 |
-| ## 7. Optional Apps (`apps/`) | 356–385 |
-| ## 8. Entertainment Module | 386–399 |
-| ## 9. Systemd Services | 400–410 |
-| ## 10. Configuration Files | 411–434 |
-| ## 11. Coding Conventions | 435–467 |
-| ## 12. Development Workflow | 468–519 |
-| ## 13. Key File Quick Reference | 520–565 |
-| ## 14. Common Tasks for Agents | 566–590 |
+| ## 2. Directory Structure | 44–179 |
+| ## 3. Installation Flow | 180–232 |
+| ## 4. The `pos` CLI System | 233–293 |
+| ## 5. Shared Library — `lib/common.sh` | 294–325 |
+| ## 6. Docker Compose / ScaleTail | 326–368 |
+| ## 7. Optional Apps (`apps/`) | 369–398 |
+| ## 8. Entertainment Module | 399–412 |
+| ## 9. Systemd Services | 413–425 |
+| ## 10. Configuration Files | 426–451 |
+| ## 11. Coding Conventions | 452–484 |
+| ## 12. Development Workflow | 485–536 |
+| ## 13. Key File Quick Reference | 537–583 |
+| ## 14. Common Tasks for Agents | 584–608 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -50,8 +50,9 @@ Linux_post_install/
 ├── postinstall.sh          # Phase 3: PATH, bash completion, systemd services
 │
 ├── lib/
-│   ├── common.sh           # Shared library (colors, logging, spinner, timer, run)
+│   ├── common.sh           # Shared library (colors, logging, spinner, timer, run, load_system_env)
 │   ├── flags.sh            # Feature flag store (flag_set/clear/is_set/value/list/status)
+│   ├── notify.sh           # Multi-platform alerting (notify_send) — sourced opt-in, silent-fails
 │   └── entertainment-lib.sh # Entertainment module lib (ENABLED list, scheduler sync)
 │
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
@@ -132,7 +133,8 @@ Linux_post_install/
 │   └── utilities/
 │       ├── affine.sh      # AFFiNE knowledge base (AppImage)
 │       ├── btop.sh        # btop resource monitor (apt)
-│       └── localsend.sh   # LocalSend (flatpak)
+│       ├── localsend.sh   # LocalSend (flatpak)
+│       └── tsui.sh        # Tailscale config TUI (official install script)
 │
 ├── completions/
 │   └── pos.bash            # Bash tab-completion for the pos CLI
@@ -146,7 +148,14 @@ Linux_post_install/
 │
 ├── systemd/
 │   ├── autostart.service   # Runs autostart.sh on boot
-│   └── ssh-agent.service   # System-wide SSH agent socket
+│   ├── ssh-agent.service   # System-wide SSH agent socket
+│   ├── pos-health.service  # Runs the health digest as the installing user (triggered by timer)
+│   └── pos-health.timer    # Daily 08:00 trigger for the health digest (enabled when Telegram is configured)
+│
+├── scripts/                # Dev tooling
+│   ├── gen-docs.sh         # Regenerates code-derived doc sections + completion flags
+│   ├── check-sync.sh       # `make check` gate (syntax, exec bits, doc/code sync, smoke)
+│   └── install-hooks.sh    # Installs the opt-in pre-commit hook (`make hook`)
 │
 ├── README.md               # User-facing intro + quick start (links into DOC/)
 │
@@ -157,6 +166,8 @@ Linux_post_install/
 │   ├── APPS.md             # Optional apps reference
 │   ├── SYSTEMD.md          # Systemd units + completion
 │   ├── DEV.md              # Developer guide
+│   ├── HOWTO.md            # Hands-on guides index (per-category tutorials)
+│   ├── howto/              # Per-category tutorials (network, docker, media, system, ssh, usb, communication, entertainment)
 │   ├── AGENT_Context_Project.md  # This file — AI agent context
 │   └── algorithm.md        # Algorithm diagrams
 │
@@ -176,7 +187,7 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--step
 │
 ├─ Phase 2: install.sh           (requires root)
 │   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
-│   └─ Copies lib/common.sh + lib/flags.sh + lib/entertainment-lib.sh → /usr/local/bin/ (chmod 644)
+│   └─ Copies lib/common.sh + lib/flags.sh + lib/notify.sh + lib/entertainment-lib.sh → /usr/local/bin/ (chmod 644)
 │   └─ Copies x64_bin/* → /usr/local/bin/ on x86_64 (arm64_bin/ on aarch64)
 │   └─ [if --feature] Copies features/* → /usr/local/bin/ (asks before overwriting),
 │                      then sets the matching feature flag
@@ -185,8 +196,9 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--step
 │   └─ Configures fail2ban (SSH jail: 5 retries, 1h ban)
 │   └─ PATH export in ~/.bashrc
 │   └─ Bash completion for pos CLI
-│   └─ Copies systemd/*.service → /etc/systemd/system/, enables them
-│      (autostart.service only when the `autostart` flag is set)
+│   └─ Copies systemd/*.service + systemd/*.timer → /etc/systemd/system/, enables them
+│      (autostart.service only when the `autostart` flag is set;
+│       pos-health.timer only when the user's Telegram config exists)
 │
 ├─ Phase 4: ScaleTail clone
 │   └─ Shallow-clones ScaleTail templates to /usr/local/share/linux_post_install/scale-tail
@@ -292,9 +304,10 @@ Sourced by most scripts. Provides:
 | `section "title"` | Cyan-bordered section header |
 | `step N T "msg"` | Numbered step header (e.g., `[1/4] Installing`) |
 | `run cmd` | Executes command, respects `$DRY_RUN` |
-| `spawn "msg" cmd` | Runs with animated braille spinner, elapsed time, OK/FAIL status |
+| `spawn "msg" cmd` | Runs with animated braille spinner, elapsed time, OK/FAIL status; respects `$DRY_RUN` |
 | `timer_start` / `timer_stop` | Elapsed time tracking |
 | `confirm "prompt" [default]` | y/N or Y/n prompt |
+| `load_system_env` | Loads `~/.config/linux_post_install/system.env` (env already exported wins) |
 
 **Auto-detects TTY** — disables colors when piped.
 
@@ -378,7 +391,7 @@ ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar patter
 
 ### Adding a New App
 
-1. Create `apps/<name>.sh` following the template in DOC/DEV.md
+1. Create `apps/<category>/<name>.sh` following the template in DOC/DEV.md
 2. It auto-appears in the interactive picker — no registration needed
 
 ---
@@ -403,8 +416,10 @@ Public-API "entertainment" plugins (weather, joke, gold) that can auto-send thei
 |---------|------|---------|
 | `ssh-agent.service` | `systemd/ssh-agent.service` | System-wide SSH agent, socket at `/run/ssh-agent/socket` |
 | `autostart.service` | `systemd/autostart.service` | Runs `autostart.sh` on boot |
+| `pos-health.service` | `systemd/pos-health.service` | Runs `pos system health --send --markdown` once (oneshot) as the installing user |
+| `pos-health.timer` | `systemd/pos-health.timer` | Daily 08:00 trigger for the digest (enabled only when `~/.config/linux_post_install/telegram.env` exists) |
 
-All `.service` files in `systemd/` are automatically copied to `/etc/systemd/system/` and enabled by `postinstall.sh`.
+All `.service` files in `systemd/` are automatically copied to `/etc/systemd/system/` and enabled by `postinstall.sh` (timers too, when present).
 
 ---
 
@@ -418,7 +433,9 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 ### Runtime Config
 
 - `~/.config/linux_post_install/compose.env` — Docker Compose global defaults
-- `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers or cron auto-detected); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
+- `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
+- `~/.config/linux_post_install/system.env` — shared "system" tool settings (loaded by `pos system health` / `pos system backup` via `load_system_env()` in `lib/common.sh`; env already exported wins over the file); template `config/system.env`
+- `~/.config/linux_post_install/notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out); read by `lib/notify.sh`; template `config/notify.env`
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -521,12 +538,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 192 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
-| `preinstall.sh` | 54 | System packages + hotspot deps + yt-dlp + fail2ban |
-| `postinstall.sh` | 115 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
-| `lib/common.sh` | 121 | Shared library |
+| `install.sh` | 206 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
+| `preinstall.sh` | 55 | System packages + hotspot deps + yt-dlp + fail2ban |
+| `postinstall.sh` | 152 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
+| `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
-| `lib/entertainment-lib.sh` | 380 | Entertainment module lib (ENABLED parsing, scheduler sync) |
+| `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
+| `lib/entertainment-lib.sh` | 350 | Entertainment module lib (ENABLED parsing, scheduler sync) |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -553,7 +571,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 125 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
-| `bin/pos-system-health` | 254 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
+| `bin/pos-system-health` | 272 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
