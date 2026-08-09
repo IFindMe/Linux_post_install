@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: entertainment config — Show or edit the entertainment config (ENABLED auto-trigger list, weather location)
+# POS_CONFIG: entertainment | entertainment.env | ENABLED=:Auto-trigger list (plugin, interval pairs) | *plugins
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"

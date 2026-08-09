@@ -2,6 +2,7 @@
 set -euo pipefail
 # POS: docker compose — Docker Compose service manager (ls/up/down/restart/logs/update/config)
 # POS_SUBCMDS: ls installed up down restart logs update config
+# POS_CONFIG: compose | compose.env | TS_AUTHKEY=secret:Tailscale auth key for the sidecar | TZ=:Service timezone (default Europe/Amsterdam) | DNS_SERVER=:Custom DNS server (default 9.9.9.9) | SERVICES_BASE=:Deployment root (default /srv) | TEST=:Test variable
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
 SCALE_DIR="/usr/local/share/linux_post_install/scale-tail/services"

@@ -173,6 +173,9 @@ EXAMPLES
   pos entertainment enable weather 5m     Auto-send weather to Telegram every 5 min
   pos entertainment status                Show enabled plugins + next run
 
+  pos config telegram                     Edit Telegram config interactively
+  pos config                              Pick a config scope to edit
+
   pos docker vbox create lab1              Create disposable Docker VM
   pos docker vbox create lab1 --dir .      Create VM using current directory
   pos docker vbox enter lab1               Shell into a Docker VM
@@ -231,7 +234,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

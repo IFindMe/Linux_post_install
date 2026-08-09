@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: config — Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos config [<scope>]
+
+Interactive editor for the tools' runtime config. Every tool exposes its
+configuration by declaring a "# POS_CONFIG:" header; pos config reads those
+at runtime — the UI knows nothing about the variables themselves.
+
+  pos config              Scope picker (on a TTY), otherwise the scope list
+  pos config <scope>      Edit that scope's variables
+  pos config --help       This help
+
+Scopes:
+$(cfg_scopes | sed 's/^/  /')
+
+How a tool registers a scope (one "# POS_CONFIG:" header per scope):
+
+  # POS_CONFIG: <scope> | <env-file> | <KEY>=<flags>:<description> | ... | *plugins
+
+  <env-file>  config file under ~/.config/linux_post_install/ (chmod 600)
+  <flags>     secret (masked display + hidden input) | digits | num | float
+  *plugins    also list the keys declared by installed plugins' # POS_KEYS:
+              headers (the entertainment scope's keys are dynamic)
+
+Editing rules: Enter keeps the current value, "-" clears it, q quits.
+Values can also be set non-interactively with each tool's 'config set KEY=VALUE'.
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+pick_scope() {
+    local scopes=() s i env
+    while IFS= read -r s; do
+        if [ -n "$s" ]; then
+            scopes+=("$s")
+        fi
+    done < <(cfg_scopes)
+    if [ ${#scopes[@]} -eq 0 ]; then
+        err "no config scopes found — no tool declares a '# POS_CONFIG:' header"
+    fi
+    echo
+    echo "pos config — pick a scope"
+    echo "--------------------------"
+    for ((i = 1; i <= ${#scopes[@]}; i++)); do
+        env="$(cfg_scope_envfile "${scopes[$((i - 1))]}" || true)"
+        printf '  %2d) %-16s %s\n' "$i" "${scopes[$((i - 1))]}" "${env:-}"
+    done
+    echo
+    local idx
+    read -rp "Scope number: " idx || { echo; exit 1; }
+    if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > ${#scopes[@]} )); then
+        err "invalid number '$idx'"
+    fi
+    cfg_ui "${scopes[$((idx - 1))]}"
+}
+
+if [ $# -eq 0 ]; then
+    if [ -t 0 ]; then
+        pick_scope
+    else
+        usage
+    fi
+else
+    scope="${1:-}"
+    case " $(cfg_scopes | tr '\n' ' ') " in
+        *" $scope "*) cfg_ui "$scope" ;;
+        *) err "unknown config scope '$scope' (try: $(cfg_scopes | tr '\n' ' '))" ;;
+    esac
+fi

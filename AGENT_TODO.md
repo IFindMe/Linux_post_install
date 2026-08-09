@@ -16,6 +16,8 @@ summary (newest last).
 
 ## Done
 
+- **2026-08-09** — `pos config <scope>` interactive config editor: reads the `# POS_CONFIG:` registry across tools into a single runtime config (`~/.config/linux_post_install/*.env`, one file per scope, chmod 600); secret masking with show/hide toggle, `digits:`/`num:`/`url:` validation, `-` to clear, blank keeps; `*plugins` marker expands plugin vars (entertainment) from `entertainment-lib.sh`; gen-docs now handles category-less tools (`pos-config`), fixed a `set -e`+`pipefail` bug that truncated the header registry.
+
 - **2026-08-09** — `pos-communication-telegram` → `pos-communication-telegram-sender`: one canonical `send` (dropped the legacy `--send` flag, which duplicated the `send` subcommand in completion). `pos communication telegram <TAB>` now completes to just `sender listener`. `lib/notify.sh` maps platform `telegram` → `telegram-sender` via `notify_sender_name()`; entertainment-send + health `--send` check updated. Removed phantom subcommands from howto/communication.md (webhook/logs/broadcast/file never existed).
 
 - **2026-08-09** — Structure/convention audit fix: `--dry-run` now truly dry (`spawn()` honors `DRY_RUN`, install.sh exports it to child phases, postinstall mutations run-wrapped); `gen-docs.sh` no longer chmods regenerated files to 0600; `make check` now syntax-checks apps/entertainment/features/templates; `.gitignore` protects `config/authorized_keys` + `config/rclone.conf`; honest `--send` confirmation; docs refreshed (notify.sh in lib lists, pos-health systemd units, tsui, scripts/, INTERACTIVE_CMDS).

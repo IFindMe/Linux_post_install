@@ -2,6 +2,8 @@
 set -euo pipefail
 # POS: system health — Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 # POS_FLAGS: --send --markdown
+# POS_CONFIG: system | system.env | BACKUP_SERVICE_ROOTS=:Roots scanned by backup --service and the health backup-age check (default: /srv $HOME/srv) | HEALTH_BACKUP_MAX_AGE_DAYS=num:Max backup age in days before health warns (default 2)
+# POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram)
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 

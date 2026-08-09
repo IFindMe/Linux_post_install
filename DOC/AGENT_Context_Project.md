@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–179 |
-| ## 3. Installation Flow | 180–232 |
-| ## 4. The `pos` CLI System | 233–293 |
-| ## 5. Shared Library — `lib/common.sh` | 294–325 |
-| ## 6. Docker Compose / ScaleTail | 326–368 |
-| ## 7. Optional Apps (`apps/`) | 369–398 |
-| ## 8. Entertainment Module | 399–412 |
-| ## 9. Systemd Services | 413–425 |
-| ## 10. Configuration Files | 426–451 |
-| ## 11. Coding Conventions | 452–484 |
-| ## 12. Development Workflow | 485–536 |
-| ## 13. Key File Quick Reference | 537–583 |
-| ## 14. Common Tasks for Agents | 584–608 |
+| ## 2. Directory Structure | 44–180 |
+| ## 3. Installation Flow | 181–233 |
+| ## 4. The `pos` CLI System | 234–295 |
+| ## 5. Shared Library — `lib/common.sh` | 296–327 |
+| ## 6. Docker Compose / ScaleTail | 328–370 |
+| ## 7. Optional Apps (`apps/`) | 371–400 |
+| ## 8. Entertainment Module | 401–414 |
+| ## 9. Systemd Services | 415–427 |
+| ## 10. Configuration Files | 428–453 |
+| ## 11. Coding Conventions | 454–486 |
+| ## 12. Development Workflow | 487–538 |
+| ## 13. Key File Quick Reference | 539–586 |
+| ## 14. Common Tasks for Agents | 587–611 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -60,6 +60,7 @@ Linux_post_install/
 <!-- GEN:START tree -->
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
+│   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps                       # Enhanced container overview (health, IPs, ports, uptime)
@@ -251,6 +252,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 <!-- GEN:START dispatch -->
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
+|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
@@ -550,14 +552,15 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 267 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 270 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-communication-telegram-listener` | 433 | Telegram bot listener: map /command → bash, run them on chat messages |
-| `bin/pos-communication-telegram-sender` | 269 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
-| `bin/pos-docker-compose` | 365 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
+| `bin/pos-communication-telegram-sender` | 270 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
+| `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
+| `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
-| `bin/pos-entertainment-config` | 98 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
+| `bin/pos-entertainment-config` | 99 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 93 | Run a public-API plugin and send its output via Telegram (default sender) |
@@ -571,11 +574,11 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 125 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
-| `bin/pos-system-health` | 273 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
+| `bin/pos-system-health` | 275 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 250 | Dynamic bash completion |
+| `completions/pos.bash` | 267 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

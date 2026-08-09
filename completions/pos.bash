@@ -74,7 +74,7 @@ _pos() {
 
     # ── Helpers ────────────────────────────────────────────────
     _pos_complete_categories() {
-        COMPREPLY=($(compgen -W "${!cat_cmds[*]}" -- "$cur"))
+        COMPREPLY=($(compgen -W "${!cat_cmds[*]} config" -- "$cur"))
     }
 
     _pos_complete_subcats() {
@@ -158,13 +158,30 @@ _pos() {
         COMPREPLY=($(compgen -W "${out[*]}" -- "$cur"))
     }
 
+    # Dynamic scope completion for `pos config <TAB>` — greps the
+    # "# POS_CONFIG:" headers in the tools dir (the config registry).
+    _pos_config_scopes() {
+        local scopes=() f line scope
+        for f in "$pos_dir"/pos-*; do
+            [ -x "$f" ] || continue
+            while IFS= read -r line; do
+                scope="$(sed 's/^# POS_CONFIG:[[:space:]]*//' <<<"$line" | cut -d'|' -f1 | tr -d ' ')"
+                [ -n "$scope" ] && scopes+=("$scope")
+            done < <(grep '^# POS_CONFIG:' "$f" 2>/dev/null)
+        done
+        COMPREPLY=($(compgen -W "$(printf '%s\n' "${scopes[@]}" | sort -u | tr '\n' ' ') --help" -- "$cur"))
+    }
+
     # ── Dispatch ───────────────────────────────────────────────
     case "${#words[@]}" in
         2)
             _pos_complete_categories
             ;;
         3)
-            _pos_complete_subcats
+            case "${words[1]}" in
+                config) _pos_config_scopes ;;
+                *) _pos_complete_subcats ;;
+            esac
             ;;
         4)
             case "${words[1]}-${words[2]}" in

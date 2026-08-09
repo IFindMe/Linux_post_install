@@ -19,12 +19,20 @@ ctx="$root/DOC/AGENT_Context_Project.md"
 comp="$root/completions/pos.bash"
 
 # ── Collect tools: "cat|sub|desc|flags|subcmds" ────────────────
+# Category-less tools (pos-<cat>, e.g. pos-config) get an empty cat.
+# tooldisp <cat> <sub> → display name (pos-config / pos-communication-telegram-sender).
+tooldisp() { printf 'pos-%s%s' "${1:+$1-}" "$2"; }
 tools=()
 for f in "$root"/bin/pos-*; do
     [ -x "$f" ] || continue
     name="${f##*/pos-}"
-    cat="${name%%-*}"
-    sub="${name#*-}"
+    if [[ "$name" == *-* ]]; then
+        cat="${name%%-*}"
+        sub="${name#*-}"
+    else
+        cat=""
+        sub="$name"
+    fi
     desc="$(sed -n '/^# POS: /{s/^# POS: //;p;q}' "$f")"
     [ -n "$desc" ] || { echo "gen-docs: no '# POS:' header in $f" >&2; exit 1; }
     desc="${desc#*— }"
@@ -39,12 +47,12 @@ gen_tree() {
     local width=0 cat sub desc flags name t
     for t in "${tools[@]}"; do
         IFS='|' read -r cat sub desc flags subcmds <<<"$t"
-        name="pos-$cat-$sub"
+        name="$(tooldisp "$cat" "$sub")"
         [ ${#name} -gt "$width" ] && width=${#name}
     done
     for t in "${tools[@]}"; do
         IFS='|' read -r cat sub desc flags subcmds <<<"$t"
-        name="pos-$cat-$sub"
+        name="$(tooldisp "$cat" "$sub")"
         printf '│   ├── %-*s# %s\n' "$((width + 1))" "$name" "$desc"
     done
 }
@@ -53,7 +61,7 @@ gen_dispatch() {
     local cat sub desc flags t
     for t in "${tools[@]}"; do
         IFS='|' read -r cat sub desc flags subcmds <<<"$t"
-        printf '| %s | %s | `pos-%s-%s` | %s |\n' "$cat" "$sub" "$cat" "$sub" "$desc"
+        printf '| %s | %s | `%s` | %s |\n' "$cat" "$sub" "$(tooldisp "$cat" "$sub")" "$desc"
     done
 }
 
@@ -75,7 +83,7 @@ gen_filetable() {
     printf '| `bin/pos` | %s | CLI dispatcher with smart arg matching + logging + category help |\n' "$(wc -l < "$root/bin/pos")"
     for t in "${tools[@]}"; do
         IFS='|' read -r cat sub desc flags subcmds <<<"$t"
-        name="bin/pos-$cat-$sub"
+        name="bin/$(tooldisp "$cat" "$sub")"
         printf '| `%s` | %s | %s |\n' "$name" "$(wc -l < "$root/$name")" "$desc"
     done
     printf '| `completions/pos.bash` | %s | Dynamic bash completion |\n' "$(wc -l < "$comp")"
@@ -87,7 +95,7 @@ gen_posflags() {
     for t in "${tools[@]}"; do
         IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         [ -n "$flags" ] || continue
-        printf '_pos_flags[%s-%s]="%s"\n' "$cat" "$sub" "$flags"
+        printf '_pos_flags[%s]="%s"\n' "$(tooldisp "$cat" "$sub" | sed 's/^pos-//')" "$flags"
     done
 }
 
@@ -99,16 +107,16 @@ gen_possubcmds() {
     for t in "${tools[@]}"; do
         IFS='|' read -r cat sub desc flags subcmds <<<"$t"
         subcmds="${subcmds:-}"
-        for f in "$root"/bin/pos-"$cat"-"$sub"-*; do
+        for f in "$root"/bin/"$(tooldisp "$cat" "$sub")"-*; do
             [ -x "$f" ] || continue
-            rest="${f##*/pos-$cat-$sub-}"
+            rest="${f##*/$(tooldisp "$cat" "$sub")-}"
             case " $subcmds " in
                 *" $rest "*) ;;
                 *) subcmds="${subcmds:+$subcmds }$rest" ;;
             esac
         done
         [ -n "$subcmds" ] || continue
-        printf '_pos_subcmds[%s-%s]="%s"\n' "$cat" "$sub" "$subcmds"
+        printf '_pos_subcmds[%s]="%s"\n' "$(tooldisp "$cat" "$sub" | sed 's/^pos-//')" "$subcmds"
     done
 }
 
