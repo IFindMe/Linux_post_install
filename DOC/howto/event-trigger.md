@@ -38,7 +38,7 @@ Examples:
 
 ```
 # event.env
-"CPU too hot" if sensors -u | grep -m1 temp1_input | awk '{print $2}' > 60c
+"CPU too hot" if sensors -u coretemp-isa-0000 | awk '/Package id 0:/{f=1} f && /temp1_input:/{print $2; exit}' > 60c
 "Disk nearly full" if df -P / | awk 'NR==2{print $5+0}' > 80%
 "Load high" if uptime | sed 's/.*load average: //; s/,.*//' >= 4
 ```
@@ -50,7 +50,11 @@ Behavior:
   `run` summary reports how many rules evaluated and how many were skipped.
 - `sensors` rules need `lm-sensors` installed (`preinstall.sh` installs it;
   verify with `sensors -u` before adding a rule — sensor names differ by
-  chip, check `sensors -u` output for the real `*_input` key).
+  chip, check `sensors -u` output for the real `*_input` key). **Gotcha:**
+  a bare `grep -m1 temp1_input` can match a *different* chip's `temp1_input`
+  first (e.g. `acpitz`'s case temp) instead of the CPU — pin the chip with
+  `sensors -u <chip>` (find it in `sensors -u`, e.g. `coretemp-isa-0000`)
+  as in the example above.
 - Alerts fire **once** when the condition turns true, and once more when it
   recovers — a hot CPU for two hours is one message, not twenty.
 - State is tracked per rule in `~/.local/share/linux_post_install/eventer/state/`
