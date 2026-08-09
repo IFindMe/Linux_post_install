@@ -94,6 +94,8 @@ run_rules() {
             fi
         elif [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) OK: $RULE_CMD = $VALUE_DISPLAY (no change)"
+        else
+            log "OK: $RULE_CMD = $VALUE_DISPLAY (no change)"
         fi
     done
     if [ "$skipped" -gt 0 ]; then
