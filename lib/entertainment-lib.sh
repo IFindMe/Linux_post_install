@@ -25,6 +25,8 @@ config_value() {
 
 write_config_key() {
     local key="$1" val="$2" tmp
+    val="${val//$'\r'/}"
+    val="${val%%$'\n'*}"
     mkdir -p "$CONFIG_DIR"
     tmp="$(mktemp)"
     grep -v "^${key}=" "$CONFIG_FILE" 2>/dev/null >"$tmp" || true

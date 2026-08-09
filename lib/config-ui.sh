@@ -171,6 +171,7 @@ cfg_value() {
     local file="$1" key="$2" v
     [ -f "$file" ] || return 0
     v="$(sed -n "s|^${key}=||p" "$file" | tail -1)"
+    v="${v//$'\r'/}"
     v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
     printf '%s' "$v"
 }
@@ -188,6 +189,11 @@ cfg_write() {
         mv "$tmp" "$file"
         chmod 600 "$file"
         return 0
+    fi
+    val="${val//$'\r'/}"
+    if [[ "$val" == *$'\n'* ]]; then
+        val="${val%%$'\n'*}"
+        warn "multi-line paste — using first line only"
     fi
     tmp="$(mktemp)"
     grep -v "^${key}=" "$file" 2>/dev/null >"$tmp" || true
@@ -230,6 +236,9 @@ cfg_validate() {
 
 # Read a value with echo off (secret flags). Falls back to plain read when
 # stdin is not a TTY (e.g. piped menu input).
+# The cursor-advancing newline after the hidden input MUST go to the terminal
+# (>&2), not stdout — cfg_read_secret is called via $(), so anything on stdout
+# is captured into the value; a stray leading newline corrupted ai.env.
 cfg_read_secret() {
     local val echo_off=0
     if [ -t 0 ]; then
@@ -238,7 +247,7 @@ cfg_read_secret() {
     read -r val || true
     if [ "$echo_off" -eq 1 ]; then
         stty echo 2>/dev/null || true
-        echo
+        echo >&2
     fi
     printf '%s' "$val"
 }
