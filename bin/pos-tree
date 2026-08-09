@@ -97,7 +97,9 @@ render() {
                 ;;
             tool)
                 printf '%s%s%-*s# %s\n' "$prefix" "$conn" "$((maxw+1))" "pos ${path//\// }" "$desc"
-                [ -n "${children[$path]:-}" ] && render "$path" "$nextpref" $((lvl+1))
+                if [ -n "${children[$path]:-}" ]; then
+                    render "$path" "$nextpref" $((lvl+1))
+                fi
                 ;;
             sub)
                 printf '%s%s%s\n' "$prefix" "$conn" "pos ${path//\// }"

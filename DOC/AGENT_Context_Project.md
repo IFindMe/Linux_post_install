@@ -589,7 +589,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
-| `bin/pos-tree` | 110 | Show the pos CLI command tree: categories, commands, and subcommands |
+| `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `completions/pos.bash` | 286 | Dynamic bash completion |
 <!-- GEN:END filetable -->
