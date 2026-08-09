@@ -90,7 +90,7 @@ cfg_scope_envfile() {
 # The optional example is "desc::example" — a literal "::" separates the
 # value-format hint from the description.
 _cfg_key_line() {
-    local field="$1" key flags desc rest example
+    local field="$1" key="" flags="" desc="" rest="" example=""
     key="${field%%=*}"
     if [[ "$field" == *"="* ]]; then
         rest="${field#*=}"
