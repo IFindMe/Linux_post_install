@@ -173,6 +173,11 @@ EXAMPLES
   pos entertainment enable weather 5m     Auto-send weather to Telegram every 5 min
   pos entertainment status                Show enabled plugins + next run
 
+  pos ai gemini ask "Explain DNS in one line"
+                                          Ask Google Gemini a one-shot question
+  pos ai gemini chat                      Interactive multi-turn chat
+  pos ai gemini models                    List available Gemini models
+
   pos config telegram                     Edit Telegram config interactively
   pos config                              Pick a config scope to edit
 
@@ -236,7 +241,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener config"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener ai-gemini config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

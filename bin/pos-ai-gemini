@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: ai gemini — Chat with Google Gemini (ask, chat, models)
+# POS_SUBCMDS: ask chat models
+# POS_FLAGS: --model
+# POS_CONFIG: ai | ai.env | AI_GEMINI_API_KEY=secret:API key from aistudio.google.com | AI_GEMINI_MODEL=:Model id (default gemini-2.5-flash)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+CONFIG_FILE="$HOME/.config/linux_post_install/ai.env"
+API="https://generativelanguage.googleapis.com/v1beta"
+DEFAULT_MODEL="gemini-2.5-flash"
+
+usage() {
+    cat <<EOF
+Usage: pos ai gemini <subcommand> [--model <id>]
+
+Chat with Google Gemini via the REST API (generativelanguage.googleapis.com).
+
+Subcommands:
+  ask "<prompt>"    One-shot answer; prints ONLY the answer text to stdout
+                    (pipe/script/Telegram-friendly). The prompt may also be
+                    piped in via stdin when no argument is given.
+  chat              Interactive multi-turn conversation.
+  models            List models that support generateContent.
+
+Options:
+  --model <id>      Override the model for this invocation.
+  -h|--help         This help.
+
+Config:  $CONFIG_FILE  (edit with 'pos config ai')
+  AI_GEMINI_API_KEY   API key from aistudio.google.com (required)
+  AI_GEMINI_MODEL     Model id (default $DEFAULT_MODEL)
+
+Examples:
+  pos ai gemini ask "Explain DNS in one line"
+  echo "summarize this log" | pos ai gemini ask
+  pos ai gemini chat
+  pos ai gemini models
+  pos ai gemini ask --model gemini-2.5-flash "hi"
+EOF
+    exit 0
+}
+
+# ── ai.env loader (same pattern as telegram.env) ────────────────
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+require_key() {
+    load_config
+    [ -n "${AI_GEMINI_API_KEY:-}" ] || err "No Gemini API key — run 'pos config ai'"
+}
+
+resolve_model() {
+    if [ -n "${MODEL_OVERRIDE:-}" ]; then
+        printf '%s' "$MODEL_OVERRIDE"
+    elif [ -n "${AI_GEMINI_MODEL:-}" ]; then
+        printf '%s' "$AI_GEMINI_MODEL"
+    else
+        printf '%s' "$DEFAULT_MODEL"
+    fi
+}
+
+# One generateContent call. $1 = model, $2 = contents JSON array.
+# stdout = the answer text on success; an error message on failure (exit 1).
+gemini_generate() {
+    local model="$1" contents="$2"
+    local resp code body errmsg
+    resp="$(curl -sS -m 60 -X POST "${API}/models/${model}:generateContent" \
+        -H "x-goog-api-key: ${AI_GEMINI_API_KEY}" \
+        -H "Content-Type: application/json" \
+        --write-out $'\n%{http_code}' \
+        --data "$contents")" || { echo "request failed (curl exit $?)" >&2; return 1; }
+    code="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+    if [ "$code" != "200" ]; then
+        errmsg="$(printf '%s' "$body" | jq -r '.error.message // empty' 2>/dev/null || true)"
+        echo "API error $code${errmsg:+: $errmsg}" >&2
+        return 1
+    fi
+    printf '%s' "$body" | jq -r '[.candidates[0].content.parts[]?.text] | join("")'
+}
+
+cmd_ask() {
+    local prompt="" contents out
+    if [ $# -gt 0 ]; then
+        prompt="$*"
+    elif [ ! -t 0 ]; then
+        prompt="$(cat)"
+    fi
+    [ -n "$prompt" ] || err "No prompt given — usage: pos ai gemini ask \"<prompt>\""
+    require_key
+    contents="$(jq -nc --arg t "$prompt" '{contents:[{role:"user",parts:[{text:$t}]}]}')"
+    if ! out="$(gemini_generate "$(resolve_model)" "$contents" 2>&1)"; then
+        err "$out"
+    fi
+    printf '%s\n' "$out"
+}
+
+cmd_chat() {
+    [ $# -eq 0 ] || err "Unexpected argument for chat: $*"
+    local model contents text answer
+    model="$(resolve_model)"
+    require_key
+    contents='{"contents":[]}'
+    trap 'echo; echo "bye"; exit 0' INT
+    echo "Gemini · ${model} — type a message; q=quit, /reset=clear history"
+    while true; do
+        printf '> '
+        IFS= read -r text || break
+        case "$text" in
+            "" ) continue ;;
+            q|Q|quit|exit) echo; echo "bye"; return 0 ;;
+            /reset) contents='{"contents":[]}'; echo "[history cleared]"; continue ;;
+        esac
+        contents="$(printf '%s' "$contents" | jq -c --arg t "$text" '.contents += [{role:"user",parts:[{text:$t}]}]')"
+        if ! answer="$(gemini_generate "$model" "$contents" 2>&1)"; then
+            warn "AI error: $answer"
+            continue
+        fi
+        contents="$(printf '%s' "$contents" | jq -c --arg t "$answer" '.contents += [{role:"model",parts:[{text:$t}]}]')"
+        printf '\n%s\n\n' "$answer"
+    done
+    echo
+    return 0
+}
+
+cmd_models() {
+    [ $# -eq 0 ] || err "Unexpected argument for models: $*"
+    local model resp code body m
+    model="$(resolve_model)"
+    require_key
+    resp="$(curl -sS -m 30 -G "${API}/models" \
+        -H "x-goog-api-key: ${AI_GEMINI_API_KEY}" \
+        --data-urlencode "pageSize=1000" \
+        --write-out $'\n%{http_code}')" || err "request failed (curl exit $?)"
+    code="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+    if [ "$code" != "200" ]; then
+        err "API error $code: $(printf '%s' "$body" | jq -r '.error.message // empty')"
+    fi
+    local list
+    list="$(printf '%s' "$body" | jq -r '.models[]? | select((.supportedGenerationMethods // []) | index("generateContent")) | .name' | sed 's#^models/##' | sort)"
+    echo "Gemini models (generateContent-capable):"
+    while IFS= read -r m; do
+        [ -n "$m" ] || continue
+        if [ "$m" = "$model" ]; then
+            printf '  %-32s <- default\n' "$m"
+        else
+            printf '  %-32s\n' "$m"
+        fi
+    done <<< "$list"
+    if ! grep -qxF "$model" <<< "$list"; then
+        warn "configured default '$model' is not in the list — set AI_GEMINI_MODEL"
+    fi
+}
+
+# ── Parse flags + subcommand ────────────────────────────────────
+MODEL_OVERRIDE=""
+cmd=""
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --model)
+            [ $# -ge 2 ] || err "--model needs a value"
+            MODEL_OVERRIDE="$2"; shift 2 ;;
+        -*) err "Unknown option '$1' (see --help)" ;;
+        *)
+            if [ -z "$cmd" ]; then
+                cmd="$1"
+            else
+                args+=("$1")
+            fi
+            shift ;;
+    esac
+done
+
+case "${cmd:-}" in
+    "")     usage ;;
+    ask)    cmd_ask "${args[@]}" ;;
+    chat)   cmd_chat "${args[@]}" ;;
+    models) cmd_models "${args[@]}" ;;
+    *)      err "Unknown ai gemini subcommand '$cmd' (see --help)" ;;
+esac

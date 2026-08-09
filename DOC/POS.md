@@ -5,6 +5,7 @@
 - [The dispatcher — `bin/pos`](#the-dispatcher--binpos)
 - [Logging behavior](#logging-behavior)
 - [Commands](#commands)
+  - [ai](#ai)
   - [network](#network)
   - [docker](#docker)
   - [media](#media)
@@ -51,6 +52,31 @@ Every non-interactive `pos` invocation logs to `~/.local/share/linux_post_instal
 ## Commands
 
 Category-less tools (`config`, `tree`) live outside any category and are documented in their own `###` sections below.
+
+### ai
+
+**File:** `bin/pos-ai-gemini`
+**Purpose:** chat with Google Gemini via the REST API (`generativelanguage.googleapis.com`). One tool, three subcommands: `ask` (one-shot, scriptable), `chat` (interactive multi-turn REPL), and `models` (list `generateContent`-capable ids).
+
+| Command | Behavior |
+|---------|----------|
+| `pos ai gemini ask "<prompt>"` | One-shot; POSTs `generateContent` and prints **only** the answer text to stdout (pipe/script/Telegram-friendly). The prompt may also be piped in via stdin when no argument is given |
+| `pos ai gemini chat` | Interactive REPL with multi-turn history (the `contents[]` array is appended per turn); `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
+| `pos ai gemini models` | Lists models that support `generateContent` and flags the configured default |
+| `pos ai gemini --model <id> …` | Overrides the model for one invocation |
+
+`pos ai gemini` with no subcommand prints usage (never blocks on stdin). `ask`/`chat` time out after 60s per request; on a non-2xx response the API's `error.message` is shown and the tool exits non-zero.
+
+**Configuration** (`~/.config/linux_post_install/ai.env`, edit with `pos config ai`):
+
+| Key | Required | Default | Purpose |
+|-----|----------|---------|---------|
+| `AI_GEMINI_API_KEY` | yes | — | API key from aistudio.google.com (secret — masked in `pos config ai`) |
+| `AI_GEMINI_MODEL` | no | `gemini-2.5-flash` | Model id used by `ask`/`chat`/`models` |
+
+Precedence: `--model` flag > `AI_GEMINI_MODEL` env > config file > `gemini-2.5-flash`. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES).
+
+**Telegram bridge:** the Telegram listener forwards non-command messages starting with `ai ` (case-insensitive) to `pos ai gemini ask` and replies with the model's answer — see [communication → listener](#communication).
 
 ### network
 
@@ -228,7 +254,7 @@ The bot token is a secret — it is stored only in `~/.config/linux_post_install
 | `pos communication telegram listener --sync-commands` | Push the mapped `/commands` to the bot's `/` menu (`setMyCommands`) — also run automatically after every map edit, on `--enable`, and at daemon start |
 | `pos communication telegram listener --run` | Run the polling loop in the foreground (what the service executes) |
 
-The map file is re-read for every message — edits apply without a restart. The listener only reacts to the owner chat (`TELEGRAM_CHAT_ID`); anyone else's message is ignored. `/help` lists mapped commands; an unmapped command replies "Unknown command". Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`), so `sudo` inside them needs a NOPASSWD rule. A map value prefixed with `@quiet ` runs the command but does NOT reply — for commands that already send their own notification (e.g. `/status=@quiet pos system health --send`), avoiding a double message. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
+The map file is re-read for every message — edits apply without a restart. The listener only reacts to the owner chat (`TELEGRAM_CHAT_ID`); anyone else's message is ignored. `/help` lists mapped commands; an unmapped command replies "Unknown command". Non-command text starting with `ai ` (case-insensitive, e.g. `ai what is Nvidia`) is forwarded to Gemini via `pos ai gemini ask` and the answer is replied verbatim; an AI failure replies the error plus a `pos config ai` hint. Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`), so `sudo` inside them needs a NOPASSWD rule. A map value prefixed with `@quiet ` runs the command but does NOT reply — for commands that already send their own notification (e.g. `/status=@quiet pos system health --send`), avoiding a double message. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
 
 Map entries may carry an optional **description** shown in the bot's `/` menu: `/cmd::short description=bash command` (the description falls back to the bash command, truncated to ~40 chars, when omitted). After every add/edit/remove the command list is pushed to the bot via `setMyCommands`, so the menu stays in sync; an empty map clears the menu. Telegram only registers lowercase `[a-z0-9_]` names (1–32 chars) — commands like `/Status` or `/my-cmd` are skipped from the menu with a warning but still resolve when typed.
 

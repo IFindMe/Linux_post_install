@@ -11,7 +11,7 @@ It is a **personal toolkit** — a bootstrap script, a unified `pos` CLI for eve
 **What you get:**
 
 - 25+ system packages installed automatically
-- The `pos` CLI: network, Docker (compose + vbox VMs), media, system, SSH, USB, communication (Telegram), and entertainment (public-API plugins → Telegram) tools
+- The `pos` CLI: AI (Gemini chat), network, Docker (compose + vbox VMs), media, system, SSH, USB, communication (Telegram), and entertainment (public-API plugins → Telegram) tools
 - Wi-Fi hotspot tools (`create_ap`, `wihotspot-gui`) via `pos network hotspot`
 - `pos tree` — browse the whole CLI: categories, commands, and subcommands
 - 15 optional desktop apps (VS Code, Brave, OBS, Tailscale, …) — pick what you want

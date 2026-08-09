@@ -3,6 +3,7 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
+_pos_flags[ai-gemini]="--model"
 _pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
 _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
 _pos_flags[entertainment-send]="--print --markdown"
@@ -13,12 +14,13 @@ _pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callba
 # GEN:END posflags
 # GEN:START possubcmds
 declare -A _pos_subcmds
+_pos_subcmds[ai-gemini]="ask chat models"
 _pos_subcmds[communication-telegram-sender]="send test"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
-declare -a _pos_config_scopes=(compose entertainment notify system telegram)
+declare -a _pos_config_scopes=(ai compose entertainment notify system telegram)
 # GEN:END posconfigscopes
 
 _pos() {

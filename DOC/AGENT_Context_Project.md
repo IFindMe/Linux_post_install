@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–181 |
-| ## 3. Installation Flow | 182–234 |
-| ## 4. The `pos` CLI System | 235–297 |
-| ## 5. Shared Library — `lib/common.sh` | 298–329 |
-| ## 6. Docker Compose / ScaleTail | 330–372 |
-| ## 7. Optional Apps (`apps/`) | 373–402 |
-| ## 8. Entertainment Module | 403–416 |
-| ## 9. Systemd Services | 417–429 |
-| ## 10. Configuration Files | 430–455 |
-| ## 11. Coding Conventions | 456–488 |
-| ## 12. Development Workflow | 489–541 |
-| ## 13. Key File Quick Reference | 542–590 |
-| ## 14. Common Tasks for Agents | 591–615 |
+| ## 2. Directory Structure | 44–183 |
+| ## 3. Installation Flow | 184–236 |
+| ## 4. The `pos` CLI System | 237–300 |
+| ## 5. Shared Library — `lib/common.sh` | 301–332 |
+| ## 6. Docker Compose / ScaleTail | 333–375 |
+| ## 7. Optional Apps (`apps/`) | 376–405 |
+| ## 8. Entertainment Module | 406–419 |
+| ## 9. Systemd Services | 420–432 |
+| ## 10. Configuration Files | 433–459 |
+| ## 11. Coding Conventions | 460–492 |
+| ## 12. Development Workflow | 493–545 |
+| ## 13. Key File Quick Reference | 546–595 |
+| ## 14. Common Tasks for Agents | 596–621 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -58,6 +58,7 @@ Linux_post_install/
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
+│   ├── pos-ai-gemini                       # Chat with Google Gemini (ask, chat, models)
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
@@ -143,7 +144,8 @@ Linux_post_install/
 │
 ├── config/
 │   ├── authorized_keys     # SSH public keys (gitignored)
-│   └── entertainment.env   # Weather location template (auto-installed by postinstall)
+│   ├── entertainment.env   # Weather location template (auto-installed by postinstall)
+│   └── ai.env              # Gemini API key + model template (auto-installed by postinstall)
 │
 ├── compose/
 │   └── scale-tail/         # Git submodule → ScaleTail templates (119+ services)
@@ -251,6 +253,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
+| ai | gemini | `pos-ai-gemini` | Chat with Google Gemini (ask, chat, models) |
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -440,6 +443,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 - `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
 - `~/.config/linux_post_install/system.env` — shared "system" tool settings (loaded by `pos system health` / `pos system backup` via `load_system_env()` in `lib/common.sh`; env already exported wins over the file); template `config/system.env`
 - `~/.config/linux_post_install/notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out); read by `lib/notify.sh`; template `config/notify.env`
+- `~/.config/linux_post_install/ai.env` — Google Gemini config (`AI_GEMINI_API_KEY` secret, `AI_GEMINI_MODEL` default `gemini-2.5-flash`); read by `pos ai gemini`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -555,8 +559,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 272 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram-listener` | 511 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos` | 277 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos-ai-gemini` | 197 | Chat with Google Gemini (ask, chat, models) |
+| `bin/pos-communication-telegram-listener` | 526 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 220 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
@@ -582,7 +587,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-tree` | 110 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 280 | Dynamic bash completion |
+| `completions/pos.bash` | 282 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -608,6 +613,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify Docker health check | Edit `bin/pos-docker-health` |
 | Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
 | Modify USB forwarding logic | Edit `bin/pos-usb-server` |
+| Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
 | Modify install phases/flags | Edit arg parsing in `install.sh` |

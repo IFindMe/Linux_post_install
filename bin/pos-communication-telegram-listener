@@ -436,6 +436,21 @@ handle_message() {
             reply "Mapped commands: $(map_cmds_list)" "$msg_id"
             return ;;
     esac
+    # AI bridge: non-command text starting with "ai " (case-insensitive) is
+    # forwarded to Gemini; the model's answer is replied verbatim. Future
+    # non-command intents (e.g. reminders) slot in as more case arms here.
+    if [[ "$text" != /* && "$text" =~ ^[Aa][Ii][[:space:]](.*)$ ]]; then
+        local prompt="${BASH_REMATCH[1]}" answer
+        [ -n "$prompt" ] || { reply "Usage: ai <prompt> — e.g. 'ai what is Nvidia'" "$msg_id"; return; }
+        log "ai: $prompt"
+        if answer="$(timeout 120 pos ai gemini ask "$prompt" 2>&1)"; then
+            reply "$answer" "$msg_id"
+        else
+            [ -n "$answer" ] || answer="timed out after 120s"
+            reply "AI error: $answer" "$msg_id"
+        fi
+        return
+    fi
     value="$(map_get "$text")"
     if [ -z "$value" ]; then
         reply "Unknown command: $text (send /help)" "$msg_id"

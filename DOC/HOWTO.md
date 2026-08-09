@@ -9,6 +9,7 @@ authoritative one-line reference (every command + flag), see
 
 | Category | What you can do | Guide |
 |----------|-----------------|-------|
+| `pos ai` | Chat with Google Gemini from CLI or Telegram | [ai](howto/ai.md) |
 | `pos network` | IP info, hotspot, scan, port check | [network](howto/network.md) |
 | `pos docker` | Compose services, container dashboards, disposable VMs | [docker](howto/docker.md) |
 | `pos media` | Download audio/video via yt-dlp | [media](howto/media.md) |
@@ -38,6 +39,7 @@ templates (without overwriting an existing file):
 | `system.env` | `pos system health`, `pos system backup` | `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS` |
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
 | `entertainment.env` | `pos entertainment *` | plugin keys (`WEATHER_LAT`…), `ENABLED` |
+| `ai.env` | `pos ai gemini` | `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL` |
 
 ```bash
 pos config telegram                     # set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID

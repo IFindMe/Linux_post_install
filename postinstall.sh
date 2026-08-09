@@ -37,7 +37,7 @@ fi
 # ── system + notify config templates ───────────────────────────
 # Copied only if the user has not already created their own (no clobber).
 run mkdir -p "$ENT_DIR"
-for tpl in system.env notify.env; do
+for tpl in system.env notify.env ai.env; do
     if [ -f "config/$tpl" ]; then
         if [ -f "$ENT_DIR/$tpl" ]; then
             log "$tpl already exists, keeping it"
