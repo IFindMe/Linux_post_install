@@ -301,6 +301,7 @@ eventer_disable() {
 eventer_status() {
     if [ -f "$USER_SYSTEMD_DIR/$EVENT_UNIT.timer" ] && systemctl --user show-environment >/dev/null 2>&1 \
         && systemctl --user is-enabled "$EVENT_UNIT.timer" >/dev/null 2>&1; then
+        eventer_read_rules
         local oncal next
         oncal="$(sed -n 's/^OnCalendar=//p' "$USER_SYSTEMD_DIR/$EVENT_UNIT.timer")"
         next="$(systemctl --user list-timers "$EVENT_UNIT.timer" --no-legend 2>/dev/null | awk '{print $1, $2}' | head -1)"
