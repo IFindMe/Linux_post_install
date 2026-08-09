@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: communication matrix-sender — Send messages to a Matrix room via the client-server API (send, test, login)
+# POS_SUBCMDS: send test login
+# POS_CONFIG: matrix | matrix.env | MATRIX_HOMESERVER=:Homeserver URL (https://matrix.example.org)::https://matrix.example.org | MATRIX_ACCESS_TOKEN=secret:Access token (from 'pos communication matrix sender login' or a Matrix client) | MATRIX_USER_ID=:Your Matrix user id (set by login)::@you:example.org | MATRIX_ROOM_ID=:Room id or alias::#pos:example.org
+
+CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_FILE="$CONFIG_DIR/matrix.env"
+
+usage() {
+    cat <<EOF
+Usage: pos communication matrix sender [command] [args]
+
+Send messages to a Matrix room via the client-server API (v3).
+
+Commands:
+  send <value> [options]   Send a text message to the configured room
+  test                     Send a test message using the current config
+  login --user <@id>       Get an access token (password prompt) and save it
+
+Options (send):
+  --markdown               Send with org.matrix.custom.html formatting
+                           (best-effort markdown → HTML conversion)
+  --room <id|alias>        Override the room for one send
+
+Config:    $CONFIG_FILE (MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN,
+           MATRIX_USER_ID, MATRIX_ROOM_ID) — edit it with 'pos config matrix'
+
+Precedence: CLI flags > environment > config file.
+
+Examples:
+  pos communication matrix sender send "Backup finished"
+  pos communication matrix sender send "**disk full**" --markdown
+  pos communication matrix sender send "hello" --room '#ops:example.org'
+  pos communication matrix sender login --user @you:example.org
+  pos communication matrix sender test
+EOF
+    exit 0
+}
+
+err() { echo "ERROR: $*" >&2; exit 1; }
+log() { echo "[+] $*"; }
+
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        v="${v//$'\r'/}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+save_config() {
+    mkdir -p "$CONFIG_DIR"
+    local key="$1" val="$2" tmp
+    tmp="$(mktemp)"
+    grep -v "^${key}=" "$CONFIG_FILE" 2>/dev/null >"$tmp" || true
+    printf '%s="%s"\n' "$key" "$val" >>"$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+}
+
+urlencode() {
+    local s="$1"
+    s="${s//#/%23}"
+    s="${s//\"/%22}"
+    s="${s// /%20}"
+    printf '%s' "$s"
+}
+
+# Best-effort markdown → HTML for org.matrix.custom.html. Handles code
+# fences, inline code, bold/italic/strike, links, headers, and lists. The
+# conversion is deliberately simple — it must never fail the send.
+md_to_html() {
+    local t="$1"
+    t="$(printf '%s' "$t" | sed -E \
+        -e 's/&/\&amp;/g' \
+        -e 's/</\&lt;/g' \
+        -e 's/>/\&gt;/g' \
+        -e 's/```([^`]*)```/\n<pre><code>\1<\/code><\/pre>\n/g' \
+        -e 's/`([^`]*)`/<code>\1<\/code>/g' \
+        -e 's/\*\*([^*]*)\*\*/<strong>\1<\/strong>/g' \
+        -e 's/__([^_]*)__/<strong>\1<\/strong>/g' \
+        -e 's/\*([^*]*)\*/<em>\1<\/em>/g' \
+        -e 's/_([^_]*)_/<em>\1<\/em>/g' \
+        -e 's/~~([^~]*)~~/<del>\1<\/del>/g' \
+        -e 's/\[([^]]*)\]\(([^)]*)\)/<a href="\2">\1<\/a>/g' \
+        -e 's/^[[:space:]]*#{1,6}[[:space:]]+/<h3>/' \
+        -e 's/^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]+/<li>/' \
+        -e 's/$/<br\/>/')"
+    printf '%s' "$t"
+}
+
+api_base() {
+    local base="${MATRIX_HOMESERVER:-}"
+    [ -n "$base" ] || err "No homeserver — run 'pos config matrix' (MATRIX_HOMESERVER)"
+    printf '%s' "${base%/}"
+}
+
+send_room_message() {
+    local room="$1" text="$2" markdown="$3"
+    [ -n "${MATRIX_ACCESS_TOKEN:-}" ] || err "No access token — run 'pos communication matrix sender login'"
+    [ -n "$room" ] || err "No room — run 'pos config matrix' (MATRIX_ROOM_ID) or pass --room"
+    local base txn body fmt
+    base="$(api_base)"
+    txn="$(date +%s%N)"
+    room="$(urlencode "$room")"
+    if [ "$markdown" -eq 1 ]; then
+        fmt="$(md_to_html "$text")"
+        body="$(jq -n --arg body "$text" --arg html "$fmt" \
+            '{msgtype:"m.text", body:$body, format:"org.matrix.custom.html", formatted_body:$html}')"
+    else
+        body="$(jq -n --arg body "$text" '{msgtype:"m.text", body:$body}')"
+    fi
+    curl -fsS -m 60 -X PUT \
+        -H "Authorization: Bearer ${MATRIX_ACCESS_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "$body" \
+        "${base}/_matrix/client/v3/rooms/${room}/send/m.room.message/${txn}" >/dev/null
+}
+
+cmd_send() {
+    local value="" markdown=0 room="${MATRIX_ROOM_ID:-}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --markdown) markdown=1; shift ;;
+            --room)
+                [ $# -ge 2 ] || err "--room needs a value"
+                room="$2"; shift 2 ;;
+            -h|--help) usage ;;
+            --) shift; [ $# -ge 1 ] || err "No value given for send"; value="$1"; shift ;;
+            -*) err "Unknown option '$1'" ;;
+            *) [ -z "$value" ] || err "Unexpected extra argument '$1'"; value="$1"; shift ;;
+        esac
+    done
+    [ -n "$value" ] || err "No value given for send"
+    load_config
+    [ -n "${room:-}" ] || room="${MATRIX_ROOM_ID:-}"
+    send_room_message "$room" "$value" "$markdown"
+    log "m.text sent to room ${room}"
+}
+
+cmd_login() {
+    local user="" password
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --user)
+                [ $# -ge 2 ] || err "--user needs a value"
+                user="$2"; shift 2 ;;
+            -h|--help) usage ;;
+            -*) err "Unknown option '$1'" ;;
+            *) err "Unexpected argument '$1' (use --user @you:server)" ;;
+        esac
+    done
+    [ -n "$user" ] || err "--user is required (e.g. --user @you:example.org)"
+    load_config
+    local base
+    base="$(api_base)"
+    read -rsp "Password for ${user}: " password </dev/tty || true
+    echo >&2
+    [ -n "$password" ] || err "empty password"
+    local resp token uid
+    resp="$(curl -fsS -m 60 -X POST \
+        -H "Content-Type: application/json" \
+        --data "$(jq -n --arg user "$user" --arg pw "$password" \
+            '{type:"m.login.password", identifier:{type:"m.id.user", user:$user}, password:$pw, initial_device_display_name:"pos"}')" \
+        "${base}/_matrix/client/v3/login")" || err "login failed (wrong credentials? homeserver reachable?)"
+    token="$(printf '%s' "$resp" | jq -r '.access_token // empty')"
+    uid="$(printf '%s' "$resp" | jq -r '.user_id // empty')"
+    [ -n "$token" ] || err "login succeeded but no access_token in response"
+    [ -n "$uid" ] || uid="$user"
+    save_config MATRIX_ACCESS_TOKEN "$token"
+    save_config MATRIX_USER_ID "$uid"
+    log "logged in as $uid — token saved to $CONFIG_FILE"
+}
+
+cmd_test() {
+    load_config
+    send_room_message "${MATRIX_ROOM_ID:-}" "Test message from pos $(date '+%Y-%m-%d %H:%M:%S')" 0
+    log "test message sent to room ${MATRIX_ROOM_ID:-}"
+}
+
+cmd="${1:-}"
+
+case "$cmd" in
+    -h|--help) usage ;;
+    send)
+        shift
+        cmd_send "$@"
+        ;;
+    test)
+        shift
+        cmd_test "$@"
+        ;;
+    login)
+        shift
+        cmd_login "$@"
+        ;;
+    "")
+        usage
+        ;;
+    *)
+        echo "ERROR: Unknown matrix command '$cmd'"
+        echo "Run 'pos communication matrix-sender --help' for usage."
+        exit 1
+        ;;
+esac

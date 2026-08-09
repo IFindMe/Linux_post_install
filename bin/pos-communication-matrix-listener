@@ -1,0 +1,565 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: communication matrix-listener — Matrix listener: map /command → bash, run them on room messages
+# POS_FLAGS: --enable --disable --status --run
+
+CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_FILE="$CONFIG_DIR/matrix.env"
+MAP_FILE="$CONFIG_DIR/matrix_commands.env"
+SERVICE="pos-matrix-listener.service"
+USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+# System prompt for the "ai " bridge: replies are posted straight into the
+# room, so ask for concise, emoji-friendly Matrix-style answers.
+AI_SYSTEM="You are a friendly assistant chatting in a Matrix room. Keep replies concise, use emojis and light formatting to make them lively, and never claim to send messages yourself."
+
+err()  { echo "ERROR: $*" >&2; exit 1; }
+log()  { echo "[+] $*"; }
+warn() { echo "[!] $*" >&2; }
+
+usage() {
+    cat <<EOF
+Usage: pos communication matrix listener [command]
+
+Matrix listener: map /command → bash commands and run them from room messages.
+
+Commands:
+  (none)       Interactive editor for the /command → bash map
+  --enable     Install + start the systemd user service (autostarts on login)
+  --disable    Stop + disable + remove the service
+  --status     Show service state and the command map
+  --run        Run the polling loop in the foreground (used by the service)
+
+Config:  $CONFIG_FILE  (MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN,
+                        MATRIX_USER_ID — edit with 'pos config matrix')
+Map:     $MAP_FILE — '/cmd=bash command' per line (optional
+         '/cmd::short description=bash command')
+
+Prefix a map value with '@quiet ' to run the command without replying —
+for commands that already send their own notification, so you don't get it
+twice (e.g. '/backup=@quiet pos system backup --send').
+
+To reply with a command's stdout (e.g. the health dashboard), just map it
+without '@quiet' and the listener forwards the output:
+  '/status=pos system health'
+
+The listener only reacts to messages from your own Matrix user
+(MATRIX_USER_ID). If MATRIX_ROOM_ID is set it only watches that room,
+otherwise it watches every room you've joined. Commands run as your user,
+so 'sudo' inside them needs a NOPASSWD rule. The interactive editor runs
+'bash -n' to syntax-check commands before saving.
+
+Commands are matched with a leading '/' or '!' — '/status' and '!status'
+both resolve. There is no equivalent of Telegram's bot "/" menu on Matrix,
+so command discovery is via /help.
+
+Examples:
+  pos communication matrix listener
+  pos communication matrix listener --enable
+  pos communication matrix listener --status
+EOF
+    exit 0
+}
+
+# ── matrix.env (same pattern as pos-communication-matrix-sender) ──
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+api_base() {
+    local base="${MATRIX_HOMESERVER:-}"
+    [ -n "$base" ] || err "No homeserver — run 'pos config matrix' (MATRIX_HOMESERVER)"
+    printf '%s' "${base%/}"
+}
+
+urlencode() {
+    local s="$1"
+    s="${s//#/%23}"
+    s="${s//\"/%22}"
+    s="${s// /%20}"
+    printf '%s' "$s"
+}
+
+# ── command map (MAP_FILE) ──────────────────────────────────────
+# Lines: /cmd=bash command, or /cmd::description=bash command. Keys keep the
+# leading slash; read via awk so values may contain '='. Entries are emitted
+# with a \x1f (unit separator) delimiter so bash commands may contain pipes.
+# The map is re-read per message — edits apply without restarting the listener.
+
+map_entries() {
+    [ -f "$MAP_FILE" ] || return 0
+    grep -E '^/[A-Za-z0-9_.-]+(::.*)?=' "$MAP_FILE" | while IFS= read -r line; do
+        local left="${line%%=*}" cmd desc
+        if [[ "$left" == *::* ]]; then
+            cmd="${left%%::*}"
+            desc="${left#*::}"
+        else
+            cmd="$left"
+            desc=""
+        fi
+        printf '%s\x1f%s\x1f%s\n' "$cmd" "$desc" "${line#*=}"
+    done
+}
+
+map_has() {
+    [ -f "$MAP_FILE" ] || return 1
+    awk -F= -v k="$1" '$1==k || index($1, k "::")==1 {found=1} END{exit !found}' "$MAP_FILE"
+}
+
+map_get() {
+    [ -f "$MAP_FILE" ] || return 0
+    awk -F= -v k="$1" '$1==k || index($1, k "::")==1 {sub(/^[^=]*=/,""); print}' "$MAP_FILE"
+}
+
+map_set() {
+    local cmd="$1" value="$2" desc="${3:-}"
+    local key="$cmd"
+    mkdir -p "$CONFIG_DIR"
+    touch "$MAP_FILE"
+    chmod 600 "$MAP_FILE"
+    local tmp
+    tmp="$(mktemp)"
+    [ -n "$desc" ] && key="${cmd}::${desc}"
+    awk -v k="$cmd" 'index($0, k "=") != 1 && index($0, k "::") != 1 { print }' "$MAP_FILE" > "$tmp"
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
+    mv "$tmp" "$MAP_FILE"
+    chmod 600 "$MAP_FILE"
+}
+
+map_del() {
+    [ -f "$MAP_FILE" ] || return 0
+    local cmd="$1" tmp
+    tmp="$(mktemp)"
+
+    awk -v k="$cmd" 'index($0, k "=") != 1 && index($0, k "::") != 1 { print }' "$MAP_FILE" > "$tmp"
+    mv "$tmp" "$MAP_FILE"
+    chmod 600 "$MAP_FILE"
+}
+
+MAP_CMDS=(); MAP_VALS=(); MAP_DESCS=(); MAP_N=0
+load_map() {
+    MAP_CMDS=(); MAP_VALS=(); MAP_DESCS=(); MAP_N=0
+    [ -f "$MAP_FILE" ] || return 0
+    local i=0 cmd desc value
+    while IFS=$'\x1f' read -r cmd desc value; do
+        [ -n "$cmd" ] || continue
+        i=$((i + 1))
+        MAP_CMDS[$i]="$cmd"; MAP_DESCS[$i]="$desc"; MAP_VALS[$i]="$value"
+    done <<< "$(map_entries)"
+    MAP_N="$i"
+}
+
+map_cmds_list() {
+    load_map
+    local out="" i
+    for ((i=1; i<=MAP_N; i++)); do
+        [ -n "$out" ] && out+=", "
+        out+="${MAP_CMDS[$i]}"
+    done
+    printf '%s' "${out:-none}"
+}
+
+check_syntax() {
+    bash -n -c "$(strip_quiet "$1")" 2>&1
+}
+
+# ── interactive editor ──────────────────────────────────────────
+ui_pick() {
+    load_map
+    if [ "$MAP_N" -eq 0 ]; then
+        warn "no commands mapped yet — add one first"
+        return 1
+    fi
+    echo >&2
+    local i
+    for ((i=1; i<=MAP_N; i++)); do
+        printf '  %2d) %-16s -> %s%s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}" >&2
+    done
+    local idx
+    read -rp "Entry number: " idx
+    if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 || idx > MAP_N )); then
+        warn "invalid number '$idx'"
+        return 1
+    fi
+    echo "$idx"
+}
+
+QUIET_PREFIX="@quiet"
+
+strip_quiet() {
+    local value="$1"
+    if [ "${value#"$QUIET_PREFIX "}" != "$value" ]; then
+        printf '%s' "${value#"$QUIET_PREFIX "}"
+    else
+        printf '%s' "$value"
+    fi
+}
+
+ui_run_command() {
+    local value="$1" output rc
+    value="$(strip_quiet "$value")"
+    echo
+    echo "--- running: $value"
+    if output="$(timeout 60 bash -c "$value" 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    printf '%s\n' "$output" | head -c 3800
+    [ -z "$output" ] || echo
+    echo "--- exit $rc"
+}
+
+ui_add() {
+    local cmd value desc out
+    read -rp "/command name (e.g. /status): " cmd
+    [ -n "$cmd" ] || { warn "empty command name"; return; }
+    case "$cmd" in
+        /[A-Za-z0-9_.-]*) ;;
+        *) warn "command must start with '/' and use [A-Za-z0-9_.-]: $cmd"; return ;;
+    esac
+    read -rp "bash command: " value
+    [ -n "$value" ] || { warn "empty bash command"; return; }
+    read -rp "description (optional, shown by /help): " desc
+    if out="$(check_syntax "$value")"; then
+        map_set "$cmd" "$value" "$desc"
+        log "saved $cmd -> $value"
+    else
+        warn "syntax error — not saved:"
+        printf '%s\n' "$out" | sed 's/^/    /'
+        return
+    fi
+    local yn
+    read -rp "Test-run it now? [y/N] " yn
+    case "$yn" in
+        y|Y) ui_run_command "$value" ;;
+    esac
+}
+
+ui_edit() {
+    local idx cmd value desc out
+    idx="$(ui_pick)" || return
+    cmd="${MAP_CMDS[$idx]}"
+    echo "Editing: $cmd -> ${MAP_VALS[$idx]}"
+    read -rp "bash command: " value
+    [ -n "$value" ] || { warn "empty bash command"; return; }
+    read -rp "description (current: ${MAP_DESCS[$idx]:-none}): " desc
+    if out="$(check_syntax "$value")"; then
+        map_set "$cmd" "$value" "$desc"
+        log "updated $cmd -> $value"
+    else
+        warn "syntax error — not saved:"
+        printf '%s\n' "$out" | sed 's/^/    /'
+    fi
+}
+
+ui_remove() {
+    local idx cmd yn
+    idx="$(ui_pick)" || return
+    cmd="${MAP_CMDS[$idx]}"
+    read -rp "Remove '$cmd'? [y/N] " yn
+    case "$yn" in
+        y|Y) map_del "$cmd"; log "removed $cmd" ;;
+        *) warn "canceled" ;;
+    esac
+}
+
+ui_test() {
+    local idx
+    idx="$(ui_pick)" || return
+    ui_run_command "${MAP_VALS[$idx]}"
+}
+
+ui() {
+    local choice
+    while true; do
+        echo
+        echo "Matrix listener — /command -> bash map"
+        echo "---------------------------------------"
+        load_map
+        if [ "$MAP_N" -eq 0 ]; then
+            echo "  (no commands mapped yet)"
+        else
+            local i
+            for ((i=1; i<=MAP_N; i++)); do
+                printf '  %2d) %-16s -> %s%s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
+            done
+        fi
+        echo
+        read -rp "Menu: [a]dd  [e]dit  [r]emove  [t]est  [q]uit > " choice
+        case "$choice" in
+            a|A|add) ui_add ;;
+            e|E|edit) ui_edit ;;
+            r|R|remove) ui_remove ;;
+            t|T|test) ui_test ;;
+            q|Q|quit|exit) echo; log "bye"; return 0 ;;
+            *) warn "unknown choice '$choice'" ;;
+        esac
+    done
+}
+
+# ── systemd user service ────────────────────────────────────────
+enable_service() {
+    command -v systemctl &>/dev/null || err "systemctl not found — cannot create the listener service"
+    mkdir -p "$USER_SYSTEMD_DIR"
+
+    local runner
+    if [ -x /usr/local/bin/pos-communication-matrix-listener ]; then
+        runner=/usr/local/bin/pos-communication-matrix-listener
+    else
+        runner="$(cd "$(dirname "$0")/.." && pwd)/bin/pos-communication-matrix-listener"
+        warn "using repo path $runner — re-run 'install.sh' so the service survives a deleted repo"
+    fi
+
+    cat >"$USER_SYSTEMD_DIR/$SERVICE" <<EOF
+[Unit]
+Description=pos Matrix listener (/command to bash)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$runner --run
+Restart=always
+RestartSec=5
+# Do NOT pin Environment=HOME here — the systemd user manager already sets the
+# correct HOME for the user; pinning a stale enable-time value made the Telegram
+# daemon read ~/.config/... from the wrong home.
+
+[Install]
+WantedBy=default.target
+EOF
+    chmod 644 "$USER_SYSTEMD_DIR/$SERVICE"
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$SERVICE"
+    log "listener service enabled: $SERVICE"
+    warn "commands run as $(id -un) — 'sudo' inside them needs a NOPASSWD rule"
+    if command -v loginctl >/dev/null 2>&1; then
+        if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
+            warn "enable linger so the listener survives logout: sudo loginctl enable-linger $(id -un)"
+        fi
+    fi
+}
+
+disable_service() {
+    if [ ! -f "$USER_SYSTEMD_DIR/$SERVICE" ]; then
+        warn "no listener service installed ($SERVICE)"
+        exit 0
+    fi
+    systemctl --user disable --now "$SERVICE" 2>/dev/null || true
+    rm -f "$USER_SYSTEMD_DIR/$SERVICE"
+    systemctl --user daemon-reload
+    log "listener service disabled"
+}
+
+status() {
+    if systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; then
+        echo "listener:  running"
+    else
+        echo "listener:  not running"
+    fi
+    if systemctl --user is-enabled "$SERVICE" >/dev/null 2>&1; then
+        echo "autostart: enabled (starts on login)"
+    else
+        echo "autostart: disabled"
+    fi
+    echo "config:    $CONFIG_FILE"
+    echo "map file:  $MAP_FILE"
+    load_map
+    echo "commands:  $MAP_N mapped"
+    local i
+    for ((i=1; i<=MAP_N; i++)); do
+        printf '  %-16s -> %s%s\n' "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
+    done
+}
+
+# ── polling daemon ──────────────────────────────────────────────
+# Build a compact sync filter: only timeline m.room.message events, drop
+# presence/account_data/device noise. Reduces bandwidth on busy rooms.
+SYNC_FILTER='{"presence":{"not_types":["*"]},"account_data":{"not_types":["*"]},"device":{"not_types":["*"]},"room":{"timeline":{"limit":20,"types":["m.room.message"]}}}'
+
+reply_room() {
+    local room="$1" text="$2" event_id="${3:-}" rc="${4:-}"
+    text="${text:0:3800}"
+    [ -n "${MATRIX_ACCESS_TOKEN:-}" ] || { warn "reply failed — no access token"; return; }
+    local base txn body
+    base="$(api_base)"
+    txn="$(date +%s%N)"
+    room="$(urlencode "$room")"
+    if [ -n "$event_id" ]; then
+        body="$(jq -n --arg body "$text" --arg eid "$event_id" \
+            '{msgtype:"m.text", body:$body, "m.relates_to":{"m.in_reply_to":{"event_id":$eid}}}')"
+    else
+        body="$(jq -n --arg body "$text" '{msgtype:"m.text", body:$body}')"
+    fi
+    curl -fsS -m 60 -X PUT \
+        -H "Authorization: Bearer ${MATRIX_ACCESS_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "$body" \
+        "${base}/_matrix/client/v3/rooms/${room}/send/m.room.message/${txn}" >/dev/null 2>&1 \
+        || warn "reply failed (rc ${rc:-?})"
+}
+
+# Strip common markdown so AI output reads cleanly in a plain-text
+# Matrix message (no format is sent).
+strip_markdown() {
+    local t="$1"
+    t="$(printf '%s' "$t" | sed -E \
+        -e 's/!\[[^]]*\]\([^)]*\)//g' \
+        -e 's/\[([^]]*)\]\([^)]*\)/\1/g' \
+        -e 's/\*\*([^*]*)\*\*/\1/g' \
+        -e 's/\*([^*]*)\*/\1/g' \
+        -e 's/__([^_]*)__/\1/g' \
+        -e 's/`([^`]*)`/\1/g' \
+        -e 's/^[[:space:]]*#{1,6}[[:space:]]+//' \
+        -e 's/^[[:space:]]*>[[:space:]]?//' \
+        -e 's/^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]+/• /')"
+    t="$(printf '%s' "$t" | sed -E '/^[[:space:]]*([-*_][[:space:]]*){3,}[[:space:]]*$/d')"
+    printf '%s' "$t"
+}
+
+# Match map commands whether typed with '/' or '!' — keys in the map keep
+# the leading '/'. Returns the map value for /cmd or !cmd.
+map_lookup() {
+    local text="$1" key
+    if [[ "$text" == !* ]]; then
+        key="/${text#!}"
+    else
+        key="$text"
+    fi
+    map_get "$key"
+}
+
+handle_message() {
+    local room="$1" text="$2" event_id="$3" sender="$4"
+    local value output rc quiet=0 key
+    case "$text" in
+        /help|!help|/start|!start)
+            reply_room "$room" "Mapped commands: $(map_cmds_list)" "$event_id"
+            return ;;
+    esac
+    # AI bridge: non-command text starting with "ai " (case-insensitive) is
+    # forwarded to Gemini; the model's answer is replied verbatim. Each room
+    # gets its own persistent memory session ("matrix-<room>"); the exact
+    # prompt "ai /reset" clears it.
+    if [[ "$text" != /* && "$text" != !* && "$text" =~ ^[Aa][Ii][[:space:]](.*)$ ]]; then
+        local prompt="${BASH_REMATCH[1]}" answer session
+        [ -n "$prompt" ] || { reply_room "$room" "Usage: ai <prompt> — e.g. 'ai what is Nvidia'" "$event_id"; return; }
+        session="matrix-${room}"
+        if [[ "$prompt" =~ ^/?reset[[:space:]]*$ ]]; then
+            if pos ai gemini sessions reset "$session" >/dev/null 2>&1; then
+                reply_room "$room" "Memory cleared." "$event_id"
+            else
+                reply_room "$room" "AI error: could not clear memory" "$event_id"
+            fi
+            return
+        fi
+        log "ai: $prompt"
+        if answer="$(timeout 120 pos ai gemini ask --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
+            reply_room "$room" "$(strip_markdown "$answer")" "$event_id"
+        else
+            [ -n "$answer" ] || answer="timed out after 120s"
+            reply_room "$room" "AI error: $answer" "$event_id"
+        fi
+        return
+    fi
+    if [[ "$text" != /* && "$text" != !* ]]; then
+        return
+    fi
+    value="$(map_lookup "$text")"
+    if [ -z "$value" ]; then
+        reply_room "$room" "Unknown command: $text (send /help)" "$event_id"
+        return
+    fi
+    if [ "${value#"$QUIET_PREFIX "}" != "$value" ]; then
+        quiet=1
+        value="${value#"$QUIET_PREFIX "}"
+    fi
+    log "exec: $text"
+    if output="$(timeout 60 bash -c "$value" 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    [ "$quiet" -eq 1 ] && return
+    if [ -z "$output" ]; then
+        output="OK"
+    fi
+    if [ "$rc" -ne 0 ]; then
+        reply_room "$room" "$(printf 'exit %s\n%s' "$rc" "$output")" "$event_id" "$rc"
+    else
+        reply_room "$room" "$output" "$event_id"
+    fi
+}
+
+run_daemon() {
+    command -v jq &>/dev/null || err "jq not found (install jq — in preinstall PACKAGES)"
+    load_config
+    [ -n "${MATRIX_HOMESERVER:-}" ] || err "No homeserver — run 'pos config matrix'"
+    [ -n "${MATRIX_ACCESS_TOKEN:-}" ] || err "No access token — run 'pos communication matrix sender login'"
+    local owner="${MATRIX_USER_ID:-}"
+    local room_only="${MATRIX_ROOM_ID:-}"
+    if [ -z "$owner" ]; then
+        local who
+        who="$(curl -fsS -m 30 -H "Authorization: Bearer ${MATRIX_ACCESS_TOKEN}" \
+            "$(api_base)/_matrix/client/v3/account/whoami" 2>/dev/null)" || { warn "cannot resolve own user id — set MATRIX_USER_ID"; owner=""; }
+        owner="$(printf '%s' "$who" | jq -r '.user_id // empty')"
+        [ -n "$owner" ] || err "cannot resolve own user id — run 'pos config matrix' and set MATRIX_USER_ID"
+        log "owner resolved: $owner"
+    fi
+
+    local since="" filter_enc resp nb
+    filter_enc="$(printf '%s' "$SYNC_FILTER" | jq -sRr @uri)"
+    log "listener running (owner ${owner}${room_only:+ — room ${room_only}}) — Ctrl+C to stop"
+    while true; do
+        local args=("$(api_base)/_matrix/client/v3/sync?timeout=30000&filter=${filter_enc}")
+        [ -n "$since" ] && args[0]+="&since=${since}"
+        resp="$(curl -fsS -m 45 -H "Authorization: Bearer ${MATRIX_ACCESS_TOKEN}" "${args[0]}" 2>/dev/null)" || { sleep 5; continue; }
+        nb="$(printf '%s' "$resp" | jq -r '.next_batch // empty')"
+        [ -n "$nb" ] || { sleep 5; continue; }
+        since="$nb"
+
+        local room ecount i roomid ev sender text eid
+        for room in $(printf '%s' "$resp" | jq -r '.rooms.join // {} | to_entries[] | .key' 2>/dev/null); do
+            if [ -n "$room_only" ] && [ "$room" != "$room_only" ]; then
+                continue
+            fi
+            ecount="$(printf '%s' "$resp" | jq -r --arg r "$room" ".rooms.join[\"$room\"].timeline.events // [] | length")"
+            for ((i=0; i<ecount; i++)); do
+                ev="$(printf '%s' "$resp" | jq -c --arg r "$room" --argjson i "$i" ".rooms.join[\"$room\"].timeline.events[\$i]")"
+                [ -n "$ev" ] || continue
+                [ "$(printf '%s' "$ev" | jq -r '.type // empty')" = "m.room.message" ] || continue
+                [ "$(printf '%s' "$ev" | jq -r '.content.msgtype // empty')" = "m.text" ] || continue
+                sender="$(printf '%s' "$ev" | jq -r '.sender // empty')"
+                [ -n "$sender" ] || continue
+                [ "$sender" = "$owner" ] || continue
+                text="$(printf '%s' "$ev" | jq -r '.content.body // empty')"
+                [ -n "$text" ] || continue
+                eid="$(printf '%s' "$ev" | jq -r '.event_id // empty')"
+                handle_message "$room" "$text" "$eid" "$sender"
+            done
+        done
+    done
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+    --enable)  enable_service ;;
+    --disable) disable_service ;;
+    --status)  status ;;
+    --run)     run_daemon ;;
+    "")        ui ;;
+    *)         err "Unknown option '$1' (see --help)" ;;
+esac

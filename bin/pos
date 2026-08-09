@@ -168,6 +168,12 @@ EXAMPLES
   pos communication telegram listener --enable
                                           Install the Telegram bot listener
 
+  pos communication matrix sender send "Backup done"
+                                          Send a Matrix room message
+  pos communication matrix sender login --user @me:example.org
+                                          Fetch a Matrix access token
+  pos communication matrix listener       Edit the /command → bash map
+
   pos entertainment send weather          Fetch Open-Meteo weather → Telegram
   pos entertainment send joke --print     Preview a joke locally (no send)
   pos entertainment enable weather 5m     Auto-send weather to Telegram every 5 min
@@ -244,7 +250,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener ai-gemini system-event-trigger config"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener communication-matrix-listener ai-gemini system-event-trigger config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

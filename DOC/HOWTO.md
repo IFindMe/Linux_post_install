@@ -17,7 +17,7 @@ authoritative one-line reference (every command + flag), see
 | `pos system event-trigger` | Threshold-rule monitors that alert on crossing | [event-trigger](howto/event-trigger.md) |
 | `pos ssh` | Load keys into the agent | [ssh](howto/ssh.md) |
 | `pos usb` | Share USB devices over the network | [usb](howto/usb.md) |
-| `pos communication` | Send Telegram messages/files/alerts | [communication](howto/communication.md) |
+| `pos communication` | Send Telegram/Matrix messages & alerts, /command listeners | [communication](howto/communication.md) |
 | `pos entertainment` | Scheduled auto-messages from public APIs | [entertainment](howto/entertainment.md) |
 
 Every tool is `bin/pos-<category>-<command>`; run `pos <category> --help` to
@@ -36,6 +36,7 @@ templates (without overwriting an existing file):
 | File | Used by | Keys |
 |------|---------|------|
 | `telegram.env` | `pos communication telegram sender` / `listener`, everything that alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| `matrix.env` | `pos communication matrix sender` / `listener` | `MATRIX_HOMESERVER`, `MATRIX_ACCESS_TOKEN`, `MATRIX_USER_ID`, `MATRIX_ROOM_ID` |
 | `notify.env` | `lib/notify.sh` (all alerting) | `NOTIFY_PLATFORM` (e.g. `telegram,matrix`) |
 | `system.env` | `pos system health`, `pos system backup` | `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS` |
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
@@ -44,6 +45,8 @@ templates (without overwriting an existing file):
 
 ```bash
 pos config telegram                     # set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+pos config matrix                       # set MATRIX_HOMESERVER / MATRIX_ROOM_ID, then:
+pos communication matrix sender login --user @you:example.org   # fetch an access token
 pos entertainment config set WEATHER_LAT=36.51 WEATHER_LON=40.75
 ```
 
@@ -58,8 +61,10 @@ platform is configured it warns and never breaks the calling tool.
 NOTIFY_PLATFORM=telegram        # comma-separated to send to all
 ```
 
-Adding a platform later (e.g. Matrix/Synapse) = create `bin/pos-communication-<p>`
-implementing `send <value> [--markdown]` and list it. See
+Ship with `telegram` and `matrix` — add both to `NOTIFY_PLATFORM` to fan out
+alerts (Matrix needs `pos config matrix` + a `login`-fetched token first).
+Adding another platform = create `bin/pos-communication-<p>` implementing
+`send <value> [--markdown]` and list it. See
 [DOC/DEV.md → Alerting](DEV.md) for the contract.
 
 ### Scheduling

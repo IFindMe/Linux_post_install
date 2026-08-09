@@ -76,7 +76,7 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 Precedence: `--model` flag > `AI_GEMINI_MODEL` env > config file > `gemini-2.5-flash`. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES).
 
-**Telegram bridge:** the Telegram listener forwards non-command messages starting with `ai ` (case-insensitive) to `pos ai gemini ask` and replies with the model's answer — see [communication → listener](#communication).
+**Messaging bridges:** the Telegram and Matrix listeners forward non-command messages starting with `ai ` (case-insensitive) to `pos ai gemini ask` and reply with the model's answer — see [communication → listener](#communication). The Telegram bridge uses one session per chat (`telegram-<chat id>`), the Matrix bridge one per room (`matrix-<room>`).
 
 ### network
 
@@ -226,6 +226,8 @@ Subcommands that need input prompt interactively when args are omitted.
 |---------|------|---------|---------------|
 | `pos communication telegram sender send "text"` | `bin/pos-communication-telegram-sender` | Send a message, link, or media file (auto-detects the type) to a Telegram chat via the Bot API | Token + chat ID from `~/.config/linux_post_install/telegram.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, chmod 600). Precedence: `--token`/`--chat-id` flags > env > config file |
 | `pos communication telegram listener` | `bin/pos-communication-telegram-listener` | Telegram bot listener: map `/command` → bash commands and run them from chat; interactive editor for the map | Same `telegram.env` (the bot is the owner, `TELEGRAM_CHAT_ID`). Map lives in `~/.config/linux_post_install/telegram_commands.env` (`/cmd=bash command` lines, chmod 600) |
+| `pos communication matrix sender send "text"` | `bin/pos-communication-matrix-sender` | Send a text message (plain or `--markdown`) to a Matrix room via the client-server API; also `login` (password → access token) and `test` | Homeserver + room from `~/.config/linux_post_install/matrix.env` (`MATRIX_HOMESERVER`, `MATRIX_ACCESS_TOKEN`, `MATRIX_USER_ID`, `MATRIX_ROOM_ID`, chmod 600, secrets masked by `pos config matrix`). Precedence: `--room` flag > env > config file |
+| `pos communication matrix listener` | `bin/pos-communication-matrix-listener` | Matrix listener: map `/command` → bash commands and run them from room messages; interactive editor for the map | Same `matrix.env` (reacts to `MATRIX_USER_ID`'s own messages; watches `MATRIX_ROOM_ID` or all joined rooms). Map lives in `~/.config/linux_post_install/matrix_commands.env` (`/cmd=bash command` lines, chmod 600) |
 
 `pos communication telegram sender` in detail:
 
@@ -258,6 +260,30 @@ The bot token is a secret — it is stored only in `~/.config/linux_post_install
 The map file is re-read for every message — edits apply without a restart. The listener only reacts to the owner chat (`TELEGRAM_CHAT_ID`); anyone else's message is ignored. `/help` lists mapped commands; an unmapped command replies "Unknown command". Non-command text starting with `ai ` (case-insensitive, e.g. `ai what is Nvidia`) is forwarded to Gemini via `pos ai gemini ask` and the answer is replied verbatim; an AI failure replies the error plus a `pos config ai` hint. Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`), so `sudo` inside them needs a NOPASSWD rule. A map value prefixed with `@quiet ` runs the command but does NOT reply — for commands that already send their own notification (e.g. `/status=@quiet pos system health --send`), avoiding a double message. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
 
 Map entries may carry an optional **description** shown in the bot's `/` menu: `/cmd::short description=bash command` (the description falls back to the bash command, truncated to ~40 chars, when omitted). After every add/edit/remove the command list is pushed to the bot via `setMyCommands`, so the menu stays in sync; an empty map clears the menu. Telegram only registers lowercase `[a-z0-9_]` names (1–32 chars) — commands like `/Status` or `/my-cmd` are skipped from the menu with a warning but still resolve when typed.
+
+`pos communication matrix sender` in detail:
+
+| Command | Behavior |
+|---------|----------|
+| `pos communication matrix sender send "text"` | PUTs an `m.room.message` (`m.text`) to the homeserver's client-server API v3 (60s timeout); prints `[+] m.text sent to room <room>` or fails with a nonzero exit. Room id/alias is URL-encoded automatically; a unique transaction id (`<timestamp>ns`) is generated per message |
+| `pos communication matrix sender send "text" --markdown` | Sends with `format: org.matrix.custom.html` — a best-effort markdown → HTML conversion (`**bold**`, `__bold__`, `*em*`, `_em_`, `` `code` ``, ``` ```fences``` ``, `~~strike~~`, `[link](url)`, headers, list items). Deliberately simple; it never fails the send |
+| `pos communication matrix sender send "text" --room <id\|alias>` | One-shot override of the room for this send only (e.g. `--room '#ops:example.org'`) |
+| `pos communication matrix sender login --user <@id>` | Prompts (masked) for the account password, POSTs `m.login.password` to `/login`, and saves the returned `access_token` + `user_id` to `matrix.env` |
+| `pos communication matrix sender test` | Sends a canned test message (`Test message from pos <timestamp>`) using the current config |
+
+The access token is a secret — it is stored only in `~/.config/linux_post_install/matrix.env` and never in the repo. `pos config matrix` edits `MATRIX_HOMESERVER`, `MATRIX_ACCESS_TOKEN` (masked), `MATRIX_USER_ID`, `MATRIX_ROOM_ID`. Requires network access to your homeserver. The sender implements the `lib/notify.sh` sender contract, so `matrix` can be added to `NOTIFY_PLATFORM` for multi-platform alerting.
+
+`pos communication matrix listener` in detail:
+
+| Command | Behavior |
+|---------|----------|
+| `pos communication matrix listener` | Interactive editor for the `/command` → bash map (`a`dd / `e`dit / `r`emove / `t`est / `q`uit); test-runs run `bash -n` first and may execute the command live |
+| `pos communication matrix listener --status` | Shows service state (running/autostart), config + map file paths, and the mapped commands |
+| `pos communication matrix listener --enable` | Installs + starts a systemd **user** service (`pos-matrix-listener.service`); the daemon long-polls `/sync` and runs mapped commands |
+| `pos communication matrix listener --disable` | Stops, disables, and removes the service |
+| `pos communication matrix listener --run` | Run the polling loop in the foreground (what the service executes) |
+
+The daemon long-polls `/sync` (30s timeout, per-sync `since` token, compact filter that drops presence/account_data/device noise and only requests `m.room.message` timeline events). It reacts only to messages **from `MATRIX_USER_ID`** (your own account — resolved via `/account/whoami` if unset); a `MATRIX_ROOM_ID` restricts it to one room, otherwise every joined room is watched. `/` and `!` prefixes both resolve (`!status` = `/status`). `/help` lists mapped commands; an unmapped command replies "Unknown command". Non-command text starting with `ai ` (case-insensitive, e.g. `ai what is Nvidia`) is forwarded to Gemini via `pos ai gemini ask` with a per-room session (`matrix-<room>`; `ai /reset` clears it) and the answer is replied verbatim with markdown stripped. Replies are sent as `m.text` threaded with `m.in_reply_to` on your message. Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`; non-zero exit is prefixed with `exit <rc>`), so `sudo` inside them needs a NOPASSWD rule. A map value prefixed with `@quiet ` runs the command but does NOT reply — for commands that already send their own notification (e.g. `/status=@quiet pos system health --send`). Map lines may carry a `/cmd::description=…` description. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
 
 ### entertainment
 

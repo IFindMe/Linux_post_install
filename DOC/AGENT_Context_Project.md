@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–184 |
-| ## 3. Installation Flow | 185–237 |
-| ## 4. The `pos` CLI System | 238–302 |
-| ## 5. Shared Library — `lib/common.sh` | 303–334 |
-| ## 6. Docker Compose / ScaleTail | 335–377 |
-| ## 7. Optional Apps (`apps/`) | 378–407 |
-| ## 8. Entertainment Module | 408–421 |
-| ## 9. Systemd Services | 422–434 |
-| ## 10. Configuration Files | 435–461 |
-| ## 11. Coding Conventions | 462–494 |
-| ## 12. Development Workflow | 495–547 |
-| ## 13. Key File Quick Reference | 548–599 |
-| ## 14. Common Tasks for Agents | 600–625 |
+| ## 2. Directory Structure | 44–186 |
+| ## 3. Installation Flow | 187–239 |
+| ## 4. The `pos` CLI System | 240–306 |
+| ## 5. Shared Library — `lib/common.sh` | 307–338 |
+| ## 6. Docker Compose / ScaleTail | 339–381 |
+| ## 7. Optional Apps (`apps/`) | 382–411 |
+| ## 8. Entertainment Module | 412–425 |
+| ## 9. Systemd Services | 426–438 |
+| ## 10. Configuration Files | 439–465 |
+| ## 11. Coding Conventions | 466–498 |
+| ## 12. Development Workflow | 499–551 |
+| ## 13. Key File Quick Reference | 552–605 |
+| ## 14. Common Tasks for Agents | 606–631 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -59,6 +59,8 @@ Linux_post_install/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
 │   ├── pos-ai-gemini                       # Chat with Google Gemini (ask, chat, models, sessions)
+│   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
+│   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
@@ -255,6 +257,8 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
 | ai | gemini | `pos-ai-gemini` | Chat with Google Gemini (ask, chat, models, sessions) |
+| communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |
+| communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -327,7 +331,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`pos`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
+`pos`, `pos-communication-matrix-listener`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -562,8 +566,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 280 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 286 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
+| `bin/pos-communication-matrix-listener` | 565 | Matrix listener: map /command → bash, run them on room messages |
+| `bin/pos-communication-matrix-sender` | 214 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-telegram-listener` | 563 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -591,7 +597,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `completions/pos.bash` | 286 | Dynamic bash completion |
+| `completions/pos.bash` | 288 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

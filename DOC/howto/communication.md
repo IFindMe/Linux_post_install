@@ -1,16 +1,18 @@
 # How-To: `pos communication`
 
-Telegram messaging and alerts. Tools: `telegram-sender`, `telegram-listener`,
-`matrix`.
+Messaging and alerts over Telegram and Matrix. Tools: `telegram-sender`,
+`telegram-listener`, `matrix-sender`, `matrix-listener`.
 
 | Tool | What it does |
 |------|--------------|
 | `pos communication telegram sender` | Send messages/files/links/stickers, test, config (token + chat id) |
 | `pos communication telegram listener` | Bot listener: map `/command` → bash and run it from chat (systemd user daemon) |
-| `pos communication matrix` | Matrix/Synapse sender (extensible; not yet implemented) |
+| `pos communication matrix sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
+| `pos communication matrix listener` | Matrix listener: map `/command` → bash and run it from room messages (systemd user daemon) |
 
 `telegram-sender` is the workhorse: it backs the whole **notify system** —
 health digests, backup alerts, firewall changes — and can be used directly.
+`matrix-sender` plugs into the same system as a second platform.
 
 ---
 
@@ -121,20 +123,107 @@ NOTIFY_PLATFORM=telegram        # default; comma-separated to fan out to all
 ```
 
 - `notify_send "msg"` → delivers to every platform in `NOTIFY_PLATFORM`
-  (current senders: `telegram`).
+  (current senders: `telegram`, `matrix`).
 - **Silent-fail:** no platform configured → one WARN line, exit 0, never
   breaks the calling tool.
-- New platform (e.g. Matrix): implement `bin/pos-communication-<p> send
+- New platform: implement `bin/pos-communication-<p> send
   <value> [--markdown]`, then list it in `NOTIFY_PLATFORM`. Details:
   [DOC/DEV.md → Alerting](../DEV.md).
 
 ---
 
-## `pos communication matrix`
+## `pos communication matrix sender`
 
-Sender contract exists (`send <value> [--markdown]`) and the dispatcher routes
-to it, but no implementation ships yet. When present, add `matrix` to
-`NOTIFY_PLATFORM` and configure it via `pos communication matrix config set …`.
+Send plain-text (or markdown-formatted) messages to a Matrix room via the
+homeserver's client-server API (v3). No bot is needed — it uses a regular
+account's access token.
+
+### One-time setup
+
+```bash
+pos config matrix
+# set MATRIX_HOMESERVER (https://matrix.example.org) and MATRIX_ROOM_ID
+# (room id or alias like #ops:example.org), then grab a token:
+pos communication matrix sender login --user @you:example.org
+# password is prompted (masked) — access token + user id are saved
+pos communication matrix sender test
+# config lives in ~/.config/linux_post_install/matrix.env (chmod 600)
+```
+
+`login` calls the homeserver's password endpoint and stores the resulting
+access token in `matrix.env` (masked by `pos config matrix`). Tokens from any
+Matrix client (Element, `synctl`…) work too — set `MATRIX_ACCESS_TOKEN`
+directly. Requires network access to your homeserver.
+
+### Send
+
+```bash
+pos communication matrix sender send "Backup finished"          # plain text
+pos communication matrix sender send --markdown "**bold** ok"   # org.matrix.custom.html
+pos communication matrix sender send "hi" --room '#ops:example.org'  # one-shot override
+pos communication matrix sender test                            # canned test message
+```
+
+`--markdown` sends with `org.matrix.custom.html` (best-effort markdown →
+HTML: `**bold**`, `` `code` ``, links, headers, lists). Room ids and aliases
+are URL-encoded automatically.
+
+**Troubleshooting:**
+- "No access token" → run `pos communication matrix sender login` first.
+- Login fails → is the homeserver URL right (`pos config matrix`) and is the
+  account password correct? Homeservers may require the full
+  `@user:example.org` id.
+- Nothing arrives → the room id/alias must exist and the account must be a
+  member. Public aliases like `#pos:example.org` work when the account has
+  joined.
+
+---
+
+## `pos communication matrix listener`
+
+Turns any room you're in into a remote control for your server: message your
+own account a `/command` and the mapped bash runs.
+
+```bash
+pos communication matrix listener             # edit the /command → bash map
+pos communication matrix listener --status    # service state + mapped commands
+pos communication matrix listener --enable    # install the systemd user daemon
+pos communication matrix listener --disable   # remove it
+```
+
+- **Map file:** `~/.config/linux_post_install/matrix_commands.env` (chmod 600),
+  one `/cmd=bash command` per line — re-read on every message, so edits apply
+  instantly. Example:
+  ```
+  /status=@quiet pos system health --send
+  /temp=sensors | grep -i 'Tctl\|package id 0'
+  /update=cd /path/to/repo && git pull
+  ```
+- **Self-messaging:** the listener reacts to messages **from your own user id**
+  (`MATRIX_USER_ID`) — in practice that means a second device (or another
+  account) sending the commands. If `MATRIX_ROOM_ID` is set it only watches
+  that room, otherwise every room you've joined. `/` and `!` both work
+  (`!status` = `/status`). `/help` lists mapped commands; unknown → "Unknown
+  command".
+- **Runs as you:** mapped commands execute as your user with a 60s timeout,
+  stdout + stderr are replied to the room as a thread reply to your message
+  (truncated ~3800 chars; empty → `OK`). `sudo` inside a command needs a
+  NOPASSWD rule.
+- **`@quiet` prefix:** a map value starting with `@quiet ` runs the command but
+  does NOT reply — for commands that already send their own notification.
+- **`ai …` bridge:** non-command messages starting with `ai ` are answered by
+  `pos ai gemini` (per-room memory session; `ai /reset` clears it) — replying
+  with the model's answer, markdown stripped.
+- **Daemon lifecycle:** the service is a systemd **user** unit; it stops at
+  logout unless you enable linger: `sudo loginctl enable-linger $(whoami)`.
+  `--enable` prints this warning if linger is off.
+
+**Troubleshooting:**
+- Doesn't answer → check the service with
+  `systemctl --user status pos-matrix-listener.service`; the daemon logs to
+  `~/.local/share/linux_post_install/logs/pos.log`.
+- "Unknown command" → send `/help` for the mapped list.
+- Needs `jq` (in preinstall PACKAGES).
 
 ---
 
