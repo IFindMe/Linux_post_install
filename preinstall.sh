@@ -34,13 +34,28 @@ PACKAGES=(
     hostapd dnsmasq iptables iw
     ca-certificates gnupg lsb-release
     lm-sensors smartmontools nvme-cli hdparm
-    sysstat iotop atop cpufrequtils vnstat
+    sysstat iotop atop vnstat
     python3 python3-pip rclone
     libqrencode4 libgtk-3-0
 )
 
 spawn "apt update" sudo apt update
 spawn "Installing packages" sudo apt install -y "${PACKAGES[@]}"
+# ── cpufreq tools ─────────────────────────────────────────────
+# cpufrequtils (Ubuntu) was removed in Debian trixie+; linux-cpupower
+# (Debian) is absent in older Ubuntu — they are mutually exclusive, so
+# try each in turn and tolerate a miss (both = warn only, never fail).
+for pkg in cpufrequtils linux-cpupower; do
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) would install $pkg (cpufreq tools)"
+        break
+    fi
+    if sudo apt-get install -y "$pkg" >/dev/null 2>&1; then
+        log "Installed $pkg (cpufreq tools)"
+        break
+    fi
+    warn "no cpufreq package candidate ($pkg) — skipping, trying next"
+done
 #spawn "add user to sudo list" usermod -aG sudo $USER
 spawn "Installing yt-dlp" sudo curl -L \
     https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
