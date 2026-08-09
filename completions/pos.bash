@@ -17,6 +17,9 @@ _pos_subcmds[communication-telegram-sender]="send test config"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
 # GEN:END possubcmds
+# GEN:START posconfigscopes
+declare -a _pos_config_scopes=(compose entertainment notify system telegram)
+# GEN:END posconfigscopes
 
 _pos() {
     local cur prev words cword
@@ -158,18 +161,27 @@ _pos() {
         COMPREPLY=($(compgen -W "${out[*]}" -- "$cur"))
     }
 
-    # Dynamic scope completion for `pos config <TAB>` — greps the
-    # "# POS_CONFIG:" headers in the tools dir (the config registry).
+    # Config scope completion for `pos config <TAB>` — cached at gen time from
+    # the "# POS_CONFIG:" registry (scanning all tools per TAB is too heavy).
+    # Falls back to a live scan only if the cache is missing.
     _pos_config_scopes() {
-        local scopes=() f line scope
-        for f in "$pos_dir"/pos-*; do
-            [ -x "$f" ] || continue
-            while IFS= read -r line; do
-                scope="$(sed 's/^# POS_CONFIG:[[:space:]]*//' <<<"$line" | cut -d'|' -f1 | tr -d ' ')"
-                [ -n "$scope" ] && scopes+=("$scope")
-            done < <(grep '^# POS_CONFIG:' "$f" 2>/dev/null)
-        done
-        COMPREPLY=($(compgen -W "$(printf '%s\n' "${scopes[@]}" | sort -u | tr '\n' ' ') --help" -- "$cur"))
+        local scopes=()
+        if declare -p _pos_config_scopes &>/dev/null; then
+            scopes=("${_pos_config_scopes[@]}")
+        else
+            local f line scope
+            for f in "$pos_dir"/pos-*; do
+                [ -x "$f" ] || continue
+                while IFS= read -r line; do
+                    line="${line#*POS_CONFIG:}"
+                    scope="${line%%|*}"
+                    scope="${scope// }"
+                    [ -n "$scope" ] && scopes+=("$scope")
+                done < <(grep '^# POS_CONFIG:' "$f" 2>/dev/null || true)
+            done
+            mapfile -t scopes < <(printf '%s\n' "${scopes[@]}" | sort -u)
+        fi
+        COMPREPLY=($(compgen -W "${scopes[*]} --help" -- "$cur"))
     }
 
     # ── Dispatch ───────────────────────────────────────────────

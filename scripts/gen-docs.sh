@@ -120,6 +120,23 @@ gen_possubcmds() {
     done
 }
 
+# Config scopes: the "# POS_CONFIG:" registry (first field = scope), cached so
+# `pos config <TAB>` doesn't re-scan every tool per completion.
+gen_posconfigscopes() {
+    local f line scope scopes=()
+    for f in "$root"/bin/pos-*; do
+        [ -x "$f" ] || continue
+        while IFS= read -r line; do
+            line="${line#*POS_CONFIG:}"
+            scope="${line%%|*}"
+            scope="${scope// }"
+            [ -n "$scope" ] && scopes+=("$scope")
+        done < <(grep '^# POS_CONFIG:' "$f" 2>/dev/null || true)
+    done
+    mapfile -t scopes < <(printf '%s\n' "${scopes[@]}" | sort -u)
+    echo "declare -a _pos_config_scopes=(${scopes[*]:-})"
+}
+
 # Section index of AGENT_Context itself: maps each "## " heading to its
 # line range. Excludes the "Document Map" heading (this block).
 gen_docmap() {
@@ -189,6 +206,7 @@ regen_block "$ctx" dispatch
 regen_block "$ctx" selfcontained
 regen_block "$comp" posflags
 regen_block "$comp" possubcmds
+regen_block "$comp" posconfigscopes
 regen_block "$ctx" filetable
 
 # docmap is self-referential: its own block size shifts the section line
