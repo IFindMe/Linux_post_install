@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: communication telegram-listener — Telegram bot listener: map /command → bash, run them on chat messages
-# POS_FLAGS: --enable --disable --status --run
+# POS_FLAGS: --enable --disable --status --sync-commands --run
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
@@ -12,7 +12,7 @@ USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
 log()  { echo "[+] $*"; }
-warn() { echo "[!] $*"; }
+warn() { echo "[!] $*" >&2; }
 
 usage() {
     cat <<EOF
@@ -25,10 +25,13 @@ Commands:
   --enable     Install + start the systemd user service (autostarts on login)
   --disable    Stop + disable + remove the service
   --status     Show service state and the command map
+  --sync-commands
+               Push the mapped /commands to the bot's "/" menu (setMyCommands)
   --run        Run the polling loop in the foreground (used by the service)
 
 Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-Map:     $MAP_FILE — one '/cmd=bash command' per line
+Map:     $MAP_FILE — '/cmd=bash command' per line (optional
+         '/cmd::short description=bash command' shown in the bot menu)
 
 Prefix a map value with '@quiet ' to run the command without replying —
 for commands that already send their own notification, so you don't get it
@@ -41,6 +44,11 @@ without '@quiet' and the listener forwards the output:
 The listener only reacts to the owner chat (TELEGRAM_CHAT_ID). Commands run
 as your user, so 'sudo' inside them needs a NOPASSWD rule. The interactive
 editor runs 'bash -n' to syntax-check commands before saving.
+
+The command list is pushed to the bot's "/" menu (setMyCommands) after every
+map edit, on --enable, and at daemon start; force it anytime with
+--sync-commands. Telegram only accepts lowercase [a-z0-9_] names — any other
+command is skipped from the menu but still resolves when typed.
 
 Examples:
   pos communication telegram listener
@@ -67,35 +75,46 @@ load_config() {
 }
 
 # ── command map (MAP_FILE) ──────────────────────────────────────
-# Lines: /cmd=bash command. Keys keep the leading slash; read via awk so
-# values may contain '='. The map is re-read per message — edits apply
-# without restarting the listener.
+# Lines: /cmd=bash command, or /cmd::description=bash command. Keys keep the
+# leading slash; read via awk so values may contain '='. The map is re-read
+# per message — edits apply without restarting the listener.
 
 map_entries() {
     [ -f "$MAP_FILE" ] || return 0
-    grep -E '^/[A-Za-z0-9_.-]+=' "$MAP_FILE" | while IFS= read -r line; do
-        printf '%s|%s\n' "${line%%=*}" "${line#*=}"
+    grep -E '^/[A-Za-z0-9_.-]+(::.*)?=' "$MAP_FILE" | while IFS= read -r line; do
+        local left="${line%%=*}" cmd desc
+        if [[ "$left" == *::* ]]; then
+            cmd="${left%%::*}"
+            desc="${left#*::}"
+        else
+            cmd="$left"
+            desc=""
+        fi
+        printf '%s|%s|%s\n' "$cmd" "$desc" "${line#*=}"
     done
 }
 
 map_has() {
-    [ -f "$MAP_FILE" ] && awk -F= -v k="$1" '$1==k{exit 0} END{exit 1}' "$MAP_FILE"
+    [ -f "$MAP_FILE" ] || return 1
+    awk -F= -v k="$1" '$1==k || index($1, k "::")==1 {found=1} END{exit !found}' "$MAP_FILE"
 }
 
 map_get() {
     [ -f "$MAP_FILE" ] || return 0
-    awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print}' "$MAP_FILE"
+    awk -F= -v k="$1" '$1==k || index($1, k "::")==1 {sub(/^[^=]*=/,""); print}' "$MAP_FILE"
 }
 
 map_set() {
-    local cmd="$1" value="$2"
+    local cmd="$1" value="$2" desc="${3:-}"
+    local key="$cmd"
     mkdir -p "$CONFIG_DIR"
     touch "$MAP_FILE"
     chmod 600 "$MAP_FILE"
     local tmp
     tmp="$(mktemp)"
-    awk -v k="$cmd" 'index($0, k "=") != 1 { print }' "$MAP_FILE" > "$tmp"
-    printf '%s=%s\n' "$cmd" "$value" >> "$tmp"
+    [ -n "$desc" ] && key="${cmd}::${desc}"
+    awk -v k="$cmd" 'index($0, k "=") != 1 && index($0, k "::") != 1 { print }' "$MAP_FILE" > "$tmp"
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
     mv "$tmp" "$MAP_FILE"
     chmod 600 "$MAP_FILE"
 }
@@ -104,20 +123,20 @@ map_del() {
     [ -f "$MAP_FILE" ] || return 0
     local cmd="$1" tmp
     tmp="$(mktemp)"
-    awk -v k="$cmd" 'index($0, k "=") != 1 { print }' "$MAP_FILE" > "$tmp"
+    awk -v k="$cmd" 'index($0, k "=") != 1 && index($0, k "::") != 1 { print }' "$MAP_FILE" > "$tmp"
     mv "$tmp" "$MAP_FILE"
     chmod 600 "$MAP_FILE"
 }
 
-MAP_CMDS=(); MAP_VALS=(); MAP_N=0
+MAP_CMDS=(); MAP_VALS=(); MAP_DESCS=(); MAP_N=0
 load_map() {
-    MAP_CMDS=(); MAP_VALS=(); MAP_N=0
+    MAP_CMDS=(); MAP_VALS=(); MAP_DESCS=(); MAP_N=0
     [ -f "$MAP_FILE" ] || return 0
-    local i=0 line cmd value
-    while IFS='|' read -r cmd value; do
+    local i=0 line cmd desc value
+    while IFS='|' read -r cmd desc value; do
         [ -n "$cmd" ] || continue
         i=$((i + 1))
-        MAP_CMDS[$i]="$cmd"; MAP_VALS[$i]="$value"
+        MAP_CMDS[$i]="$cmd"; MAP_DESCS[$i]="$desc"; MAP_VALS[$i]="$value"
     done <<< "$(map_entries)"
     MAP_N="$i"
 }
@@ -130,6 +149,51 @@ map_cmds_list() {
         out+="${MAP_CMDS[$i]}"
     done
     printf '%s' "${out:-none}"
+}
+
+# ── Bot command menu sync (setMyCommands) ──────────────────────
+# Push the mapped /commands to the bot's "/" menu so they show in the
+# Telegram UI, not just resolve when typed. Runs after map edits, on
+# --enable, and at daemon start; force it with --sync-commands.
+
+description_for() {
+    local value="$1" desc="${2:-}"
+    if [ -n "$desc" ]; then
+        printf '%s' "$desc"
+        return
+    fi
+    value="$(strip_quiet "$value")"
+    printf '%s' "${value:0:40}"
+}
+
+build_commands_json() {
+    load_map
+    local i name desc
+    for ((i=1; i<=MAP_N; i++)); do
+        name="${MAP_CMDS[$i]#/}"
+        if ! [[ "$name" =~ ^[a-z][a-z0-9_]{0,31}$ ]]; then
+            warn "skip '$name' from bot menu — Telegram commands are lowercase [a-z0-9_], 1-32 chars"
+            continue
+        fi
+        desc="$(description_for "${MAP_VALS[$i]}" "${MAP_DESCS[$i]}")"
+        printf '%s\t%s\n' "$name" "$desc"
+    done | jq -Rr 'split("\t") | {command: .[0], description: .[1]}' | jq -sc '.'
+}
+
+sync_bot_commands() {
+    load_config
+    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || { warn "no bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...' first"; return 1; }
+    command -v jq &>/dev/null || { warn "jq not found — cannot sync bot commands"; return 1; }
+    local json n
+    json="$(build_commands_json)"
+    n="$(printf '%s' "$json" | jq 'length')"
+    if curl -fsS -m 30 -X POST "${API}/bot${TELEGRAM_BOT_TOKEN}/setMyCommands" \
+            --data-urlencode "commands=${json}" >/dev/null 2>&1; then
+        log "bot command menu updated ($n commands)"
+        return 0
+    fi
+    warn "setMyCommands failed"
+    return 1
 }
 
 check_syntax() {
@@ -146,7 +210,7 @@ ui_pick() {
     echo
     local i
     for ((i=1; i<=MAP_N; i++)); do
-        printf '  %2d) %-16s -> %s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}"
+        printf '  %2d) %-16s -> %s%s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
     done
     local idx
     read -rp "Entry number: " idx
@@ -188,7 +252,7 @@ ui_run_command() {
 }
 
 ui_add() {
-    local cmd value out
+    local cmd value desc out
     read -rp "/command name (e.g. /status): " cmd
     [ -n "$cmd" ] || { warn "empty command name"; return; }
     case "$cmd" in
@@ -197,8 +261,10 @@ ui_add() {
     esac
     read -rp "bash command: " value
     [ -n "$value" ] || { warn "empty bash command"; return; }
+    read -rp "description (optional, shown in the bot menu): " desc
     if out="$(check_syntax "$value")"; then
-        map_set "$cmd" "$value"
+        map_set "$cmd" "$value" "$desc"
+        sync_bot_commands || true
         log "saved $cmd -> $value"
     else
         warn "syntax error — not saved:"
@@ -213,14 +279,16 @@ ui_add() {
 }
 
 ui_edit() {
-    local idx cmd value out
+    local idx cmd value desc out
     idx="$(ui_pick)" || return
     cmd="${MAP_CMDS[$idx]}"
     echo "Editing: $cmd -> ${MAP_VALS[$idx]}"
     read -rp "bash command: " value
     [ -n "$value" ] || { warn "empty bash command"; return; }
+    read -rp "description (current: ${MAP_DESCS[$idx]:-none}): " desc
     if out="$(check_syntax "$value")"; then
-        map_set "$cmd" "$value"
+        map_set "$cmd" "$value" "$desc"
+        sync_bot_commands || true
         log "updated $cmd -> $value"
     else
         warn "syntax error — not saved:"
@@ -234,7 +302,7 @@ ui_remove() {
     cmd="${MAP_CMDS[$idx]}"
     read -rp "Remove '$cmd'? [y/N] " yn
     case "$yn" in
-        y|Y) map_del "$cmd"; log "removed $cmd" ;;
+        y|Y) map_del "$cmd"; sync_bot_commands || true; log "removed $cmd" ;;
         *) warn "canceled" ;;
     esac
 }
@@ -257,7 +325,7 @@ ui() {
         else
             local i
             for ((i=1; i<=MAP_N; i++)); do
-                printf '  %2d) %-16s -> %s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}"
+                printf '  %2d) %-16s -> %s%s\n' "$i" "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
             done
         fi
         echo
@@ -307,6 +375,7 @@ EOF
     systemctl --user daemon-reload
     systemctl --user enable --now "$SERVICE"
     log "listener service enabled: $SERVICE"
+    sync_bot_commands || true
     warn "commands run as $(id -un) — 'sudo' inside them needs a NOPASSWD rule"
     if command -v loginctl >/dev/null 2>&1; then
         if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
@@ -343,7 +412,7 @@ status() {
     echo "commands:  $MAP_N mapped"
     local i
     for ((i=1; i<=MAP_N; i++)); do
-        printf '  %-16s -> %s\n' "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}"
+        printf '  %-16s -> %s%s\n' "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
     done
 }
 
@@ -395,6 +464,7 @@ run_daemon() {
     load_config
     [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
     [ -n "${TELEGRAM_CHAT_ID:-}" ] || err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
+    sync_bot_commands || true
 
     local offset=0
     log "listener running (owner chat ${TELEGRAM_CHAT_ID}) — Ctrl+C to stop"
@@ -431,6 +501,7 @@ case "${1:-}" in
     --enable)  enable_service ;;
     --disable) disable_service ;;
     --status)  status ;;
+    --sync-commands) sync_bot_commands ;;
     --run)     run_daemon ;;
     "")        ui ;;
     *)         err "Unknown option '$1' (see --help)" ;;

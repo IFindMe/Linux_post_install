@@ -553,7 +553,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 270 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram-listener` | 437 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 508 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 270 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |

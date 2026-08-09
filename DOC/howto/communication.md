@@ -79,6 +79,14 @@ pos communication telegram listener --disable   # remove it
   /temp=sensors | grep -i 'Tctl\|package id 0'
   /update=cd /path/to/repo && git pull
   ```
+- **Bot command menu:** the mapped commands are pushed to the bot's `/` menu
+  (`setMyCommands`) after every map edit, on `--enable`, and at daemon start
+  (force it anytime with `--sync-commands`). Add a short description with the
+  `/cmd::description=bash command` syntax — e.g.
+  `/backup::Encrypted nightly backup=@quiet pos system backup --send` — or it
+  falls back to the bash command. Telegram only registers lowercase `[a-z0-9_]`
+  names (1–32 chars); `/Status` or `/my-cmd` are skipped from the menu but still
+  work when typed. An empty map clears the menu.
 - **Owner-only:** the bot only reacts to `TELEGRAM_CHAT_ID` (your own chat);
   others are ignored. `/help` lists mapped commands; unknown → "Unknown command".
 - **Runs as you:** mapped commands execute as your user with a 60s timeout,

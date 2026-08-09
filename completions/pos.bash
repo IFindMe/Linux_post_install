@@ -3,7 +3,7 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
-_pos_flags[communication-telegram-listener]="--enable --disable --status --run"
+_pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
 _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
 _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[network-hotspot]="--foreground"

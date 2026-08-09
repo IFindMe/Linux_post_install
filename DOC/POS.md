@@ -224,9 +224,12 @@ The bot token is a secret — it is stored only in `~/.config/linux_post_install
 | `pos communication telegram listener --status` | Shows service state (running/autostart), config + map file paths, and the mapped commands |
 | `pos communication telegram listener --enable` | Installs + starts a systemd **user** service (`pos-telegram-listener.service`); the daemon polls `getUpdates` and runs mapped commands |
 | `pos communication telegram listener --disable` | Stops, disables, and removes the service |
+| `pos communication telegram listener --sync-commands` | Push the mapped `/commands` to the bot's `/` menu (`setMyCommands`) — also run automatically after every map edit, on `--enable`, and at daemon start |
 | `pos communication telegram listener --run` | Run the polling loop in the foreground (what the service executes) |
 
 The map file is re-read for every message — edits apply without a restart. The listener only reacts to the owner chat (`TELEGRAM_CHAT_ID`); anyone else's message is ignored. `/help` lists mapped commands; an unmapped command replies "Unknown command". Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`), so `sudo` inside them needs a NOPASSWD rule. A map value prefixed with `@quiet ` runs the command but does NOT reply — for commands that already send their own notification (e.g. `/status=@quiet pos system health --send`), avoiding a double message. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
+
+Map entries may carry an optional **description** shown in the bot's `/` menu: `/cmd::short description=bash command` (the description falls back to the bash command, truncated to ~40 chars, when omitted). After every add/edit/remove the command list is pushed to the bot via `setMyCommands`, so the menu stays in sync; an empty map clears the menu. Telegram only registers lowercase `[a-z0-9_]` names (1–32 chars) — commands like `/Status` or `/my-cmd` are skipped from the menu with a warning but still resolve when typed.
 
 ### entertainment
 
