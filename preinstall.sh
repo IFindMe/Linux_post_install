@@ -33,7 +33,8 @@ PACKAGES=(
     nfs-common nfs-kernel-server
     hostapd dnsmasq iptables iw
     ca-certificates gnupg lsb-release
-    lm-sensors
+    lm-sensors smartmontools nvme-cli hdparm
+    sysstat iotop atop cpufrequtils vnstat
     python3 python3-pip rclone
     libqrencode4 libgtk-3-0
 )
