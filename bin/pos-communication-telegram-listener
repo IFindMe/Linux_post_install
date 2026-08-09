@@ -366,7 +366,9 @@ Type=simple
 ExecStart=$runner --run
 Restart=always
 RestartSec=5
-Environment=HOME=$HOME
+# Do NOT pin Environment=HOME here — the systemd user manager already sets the
+# correct HOME for the user; pinning a stale enable-time value made the daemon
+# read ~/.config/... from the wrong home (menu shows commands, daemon says unknown).
 
 [Install]
 WantedBy=default.target
