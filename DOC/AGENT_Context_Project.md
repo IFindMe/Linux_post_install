@@ -59,7 +59,7 @@ Linux_post_install/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
-│   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
+│   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
@@ -251,7 +251,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
-| communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
+| communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
@@ -553,8 +553,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 270 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-communication-telegram-listener` | 508 | Telegram bot listener: map /command → bash, run them on chat messages |
-| `bin/pos-communication-telegram-sender` | 270 | Send Telegram messages/files/links/stickers via Bot API (send, test, config set) |
+| `bin/pos-communication-telegram-listener` | 509 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-sender` | 220 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |

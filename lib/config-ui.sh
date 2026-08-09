@@ -176,7 +176,8 @@ cfg_value() {
 }
 
 # Write KEY="value" (append or replace) with mkdir -p + chmod 600; a value of
-# "-" removes the key's line. Same semantics as write_config_key().
+# "-" removes the key's line. Same semantics as write_config_key(). Replaces
+# via grep-v + append (not sed), so values may contain &, |, \ etc. safely.
 cfg_write() {
     local file="$1" key="$2" val="$3" tmp
     mkdir -p "$(dirname "$file")"
@@ -188,11 +189,10 @@ cfg_write() {
         chmod 600 "$file"
         return 0
     fi
-    if [ -f "$file" ] && grep -q "^${key}=" "$file" 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=\"${val}\"|" "$file"
-    else
-        echo "${key}=\"${val}\"" >>"$file"
-    fi
+    tmp="$(mktemp)"
+    grep -v "^${key}=" "$file" 2>/dev/null >"$tmp" || true
+    printf '%s="%s"\n' "$key" "$val" >>"$tmp"
+    mv "$tmp" "$file"
     chmod 600 "$file"
 }
 
@@ -217,7 +217,7 @@ cfg_display() {
 cfg_validate() {
     local flags="$1" val="$2"
     case ",$flags," in
-        *,digits,*) [[ "$val" =~ ^[0-9]+$ ]] || { echo "must be digits only"; return 1; } ;;
+        *,digits,*) [[ "$val" =~ ^-?[0-9]+$ ]] || { echo "must be digits only (a leading '-' is allowed for group/supergroup ids)"; return 1; } ;;
     esac
     case ",$flags," in
         *,num,*) [[ "$val" =~ ^-?[0-9]+$ ]] || { echo "must be an integer"; return 1; } ;;

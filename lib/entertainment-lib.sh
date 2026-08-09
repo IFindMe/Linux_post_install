@@ -24,13 +24,12 @@ config_value() {
 }
 
 write_config_key() {
-    local key="$1" val="$2"
+    local key="$1" val="$2" tmp
     mkdir -p "$CONFIG_DIR"
-    if [ -f "$CONFIG_FILE" ] && grep -q "^${key}=" "$CONFIG_FILE" 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=\"${val}\"|" "$CONFIG_FILE"
-    else
-        echo "${key}=\"${val}\"" >>"$CONFIG_FILE"
-    fi
+    tmp="$(mktemp)"
+    grep -v "^${key}=" "$CONFIG_FILE" 2>/dev/null >"$tmp" || true
+    printf '%s="%s"\n' "$key" "$val" >>"$tmp"
+    mv "$tmp" "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
 }
 
@@ -336,7 +335,7 @@ sync_systemd() {
         fi
     done
 
-    local f p
+    local f p removed=0
     for f in "$USER_SYSTEMD_DIR"/${TIMER_PREFIX}-*.timer; do
         [ -f "$f" ] || continue
         p="${f##*/}"; p="${p#${TIMER_PREFIX}-}"; p="${p%.timer}"
@@ -344,7 +343,9 @@ sync_systemd() {
             systemctl --user disable --now "$(unit_name "$p").timer" >/dev/null 2>&1 || true
             rm -f "$USER_SYSTEMD_DIR/$(unit_name "$p").timer" "$USER_SYSTEMD_DIR/$(unit_name "$p").service"
             log "removed timer for '$p'"
+            removed=1
         fi
     done
+    [ "$removed" -eq 1 ] && systemctl --user daemon-reload >/dev/null 2>&1 || true
 }
 

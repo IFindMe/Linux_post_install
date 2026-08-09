@@ -19,14 +19,15 @@ health digests, backup alerts, firewall changes — and can be used directly.
 ### One-time setup
 
 ```bash
-pos communication telegram sender config set TELEGRAM_BOT_TOKEN=123456:ABC...
-pos communication telegram sender config set TELEGRAM_CHAT_ID=987654321
-pos communication telegram sender config
+pos config telegram
+# edit TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (masked input), then test:
+pos communication telegram sender test
 # config lives in ~/.config/linux_post_install/telegram.env (chmod 600)
 ```
 
 The bot token comes from @BotFather, the chat ID from @userinfobot (or by
-starting a chat and reading it). `sender config` shows the configured chat id.
+starting a chat and reading it). `pos config telegram` shows the current values
+(token masked).
 
 ### Send
 
@@ -47,7 +48,7 @@ pos communication telegram sender send /path/to/report.pdf       # auto-detects 
 - **On-call file drop:** `pos communication telegram sender send ~/log/nginx-error.log`
 
 **Troubleshooting:**
-- "Not configured (no token or chat id)" → run `sender config set` for both values.
+- "Not configured (no token or chat id)" → run `pos config telegram` and set both values.
 - Send succeeds but nothing arrives → the chat must have started the bot
   (press `Start` / send `/start` once).
 - **Markdown silently empty** → Telegram uses its own MarkdownV2; unmatched

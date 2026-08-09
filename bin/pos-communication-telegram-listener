@@ -29,7 +29,7 @@ Commands:
                Push the mapped /commands to the bot's "/" menu (setMyCommands)
   --run        Run the polling loop in the foreground (used by the service)
 
-Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — edit with 'pos config telegram')
 Map:     $MAP_FILE — '/cmd=bash command' per line (optional
          '/cmd::short description=bash command' shown in the bot menu)
 
@@ -76,8 +76,9 @@ load_config() {
 
 # ── command map (MAP_FILE) ──────────────────────────────────────
 # Lines: /cmd=bash command, or /cmd::description=bash command. Keys keep the
-# leading slash; read via awk so values may contain '='. The map is re-read
-# per message — edits apply without restarting the listener.
+# leading slash; read via awk so values may contain '='. Entries are emitted
+# with a \x1f (unit separator) delimiter so bash commands may contain pipes.
+# The map is re-read per message — edits apply without restarting the listener.
 
 map_entries() {
     [ -f "$MAP_FILE" ] || return 0
@@ -90,7 +91,7 @@ map_entries() {
             cmd="$left"
             desc=""
         fi
-        printf '%s|%s|%s\n' "$cmd" "$desc" "${line#*=}"
+        printf '%s\x1f%s\x1f%s\n' "$cmd" "$desc" "${line#*=}"
     done
 }
 
@@ -132,8 +133,8 @@ MAP_CMDS=(); MAP_VALS=(); MAP_DESCS=(); MAP_N=0
 load_map() {
     MAP_CMDS=(); MAP_VALS=(); MAP_DESCS=(); MAP_N=0
     [ -f "$MAP_FILE" ] || return 0
-    local i=0 line cmd desc value
-    while IFS='|' read -r cmd desc value; do
+    local i=0 cmd desc value
+    while IFS=$'\x1f' read -r cmd desc value; do
         [ -n "$cmd" ] || continue
         i=$((i + 1))
         MAP_CMDS[$i]="$cmd"; MAP_DESCS[$i]="$desc"; MAP_VALS[$i]="$value"
@@ -182,7 +183,7 @@ build_commands_json() {
 
 sync_bot_commands() {
     load_config
-    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || { warn "no bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...' first"; return 1; }
+    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || { warn "no bot token — run 'pos config telegram' first"; return 1; }
     command -v jq &>/dev/null || { warn "jq not found — cannot sync bot commands"; return 1; }
     local json n
     json="$(build_commands_json)"
@@ -462,8 +463,8 @@ handle_message() {
 run_daemon() {
     command -v jq &>/dev/null || err "jq not found (install jq — in preinstall PACKAGES)"
     load_config
-    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
-    [ -n "${TELEGRAM_CHAT_ID:-}" ] || err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
+    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "No bot token — run 'pos config telegram'"
+    [ -n "${TELEGRAM_CHAT_ID:-}" ] || err "No chat id — run 'pos config telegram'"
     sync_bot_commands || true
 
     local offset=0

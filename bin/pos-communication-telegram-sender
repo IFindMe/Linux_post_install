@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: communication telegram-sender — Send Telegram messages/files/links/stickers via Bot API (send, test, config set)
+# POS: communication telegram-sender — Send Telegram messages/files/links/stickers via Bot API (send, test)
 # POS_FLAGS: --type --caption --parse-mode --no-preview --token --chat-id --markdown
-# POS_SUBCMDS: send test config
+# POS_SUBCMDS: send test
 # POS_CONFIG: telegram | telegram.env | TELEGRAM_BOT_TOKEN=secret:Bot token from @BotFather | TELEGRAM_CHAT_ID=digits:Numeric chat id from @userinfobot
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
@@ -18,8 +18,6 @@ Send Telegram messages via the Bot API.
 Commands:
   send <value> [options]   Send a message, link, or media (auto-detects the type)
   test                     Send a test message using the current config
-  config                   Show current config (token masked)
-  config set KEY=VALUE     Set TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID
 
 Types (auto-detected when --type is omitted):
   message    Plain text (default)
@@ -41,8 +39,8 @@ Options:
   --token <t>         Override token for one send
   --chat-id <id>      Override chat id for one send
 
-Config file: $CONFIG_FILE
-Keys: TELEGRAM_BOT_TOKEN | TELEGRAM_CHAT_ID
+Config:    $CONFIG_FILE (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+           edit it with 'pos config telegram'
 
 Precedence: CLI flags > environment > config file.
 
@@ -75,20 +73,10 @@ load_config() {
     done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
 }
 
-mask_token() {
-    local t="$1"
-    [ -z "$t" ] && { echo "(not set)"; return; }
-    if [ "${#t}" -le 12 ]; then
-        echo "${t:0:4}... (${#t} chars)"
-    else
-        echo "${t:0:6}...${t: -4} (${#t} chars)"
-    fi
-}
-
 send_request() {
     local endpoint="$1"; shift
-    [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && err "No bot token — run 'pos communication telegram config set TELEGRAM_BOT_TOKEN=...'"
-    [ -z "${TELEGRAM_CHAT_ID:-}" ] && err "No chat id — run 'pos communication telegram config set TELEGRAM_CHAT_ID=...'"
+    [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && err "No bot token — run 'pos config telegram'"
+    [ -z "${TELEGRAM_CHAT_ID:-}" ] && err "No chat id — run 'pos config telegram'"
     curl -fsS -m 60 -X POST "$API/bot${TELEGRAM_BOT_TOKEN}/${endpoint}" "$@" >/dev/null
 }
 
@@ -211,37 +199,6 @@ cmd_send() {
     echo "[+] $type${auto:+ (auto-detected)} sent to chat ${TELEGRAM_CHAT_ID}"
 }
 
-cmd_config() {
-    load_config
-    echo "Config: $CONFIG_FILE"
-    echo "  TELEGRAM_BOT_TOKEN = $(mask_token "${TELEGRAM_BOT_TOKEN:-}")"
-    echo "  TELEGRAM_CHAT_ID   = ${TELEGRAM_CHAT_ID:-}"
-}
-
-cmd_config_set() {
-    local kv="$1"
-    local key="${kv%%=*}"
-    local val="${kv#*=}"
-    case "$key" in
-        TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID) ;;
-        *) err "Unknown key '$key' (allowed: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)" ;;
-    esac
-    [ -z "$val" ] && err "No value given (expected $key=...)"
-
-    mkdir -p "$CONFIG_DIR"
-    if [ -f "$CONFIG_FILE" ]; then
-        if grep -q "^${key}=" "$CONFIG_FILE"; then
-            sed -i "s|^${key}=.*|${key}=${val}|" "$CONFIG_FILE"
-        else
-            echo "${key}=${val}" >>"$CONFIG_FILE"
-        fi
-    else
-        echo "${key}=${val}" >"$CONFIG_FILE"
-    fi
-    chmod 600 "$CONFIG_FILE"
-    echo "[+] $key saved to $CONFIG_FILE"
-}
-
 cmd="${1:-}"
 
 case "$cmd" in
@@ -254,13 +211,6 @@ case "$cmd" in
         load_config
         send_message "Test message from pos $(date '+%Y-%m-%d %H:%M:%S')"
         echo "[+] test message sent to chat ${TELEGRAM_CHAT_ID}"
-        ;;
-    config)
-        shift
-        case "${1:-}" in
-            set) shift; [ $# -eq 1 ] || usage; cmd_config_set "$1" ;;
-            *) cmd_config ;;
-        esac
         ;;
     *)
         echo "ERROR: Unknown telegram command '$cmd'"

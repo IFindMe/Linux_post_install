@@ -33,15 +33,14 @@ templates (without overwriting an existing file):
 
 | File | Used by | Keys |
 |------|---------|------|
-| `telegram.env` | `pos communication telegram`, everything that alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| `telegram.env` | `pos communication telegram sender` / `listener`, everything that alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | `notify.env` | `lib/notify.sh` (all alerting) | `NOTIFY_PLATFORM` (e.g. `telegram,matrix`) |
 | `system.env` | `pos system health`, `pos system backup` | `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS` |
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
 | `entertainment.env` | `pos entertainment *` | plugin keys (`WEATHER_LAT`…), `ENABLED` |
 
 ```bash
-pos communication telegram sender config set TELEGRAM_BOT_TOKEN=123:ABC
-pos communication telegram sender config set TELEGRAM_CHAT_ID=98765
+pos config telegram                     # set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
 pos entertainment config set WEATHER_LAT=36.51 WEATHER_LON=40.75
 ```
 

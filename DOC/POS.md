@@ -208,13 +208,10 @@ Subcommands that need input prompt interactively when args are omitted.
 | `pos communication telegram sender send "text" --parse-mode <mode>` | Send with Telegram formatting; `<mode>` is `plain` (default), `markdown`, or `html` (passed as `parse_mode` to the API — also applies to captions). Markdown/HTML use raw Telegram syntax — unescaped characters may be rejected by the API (400) |
 | `pos communication telegram sender send … --token <t> --chat-id <id>` | One-shot override of token/chat ID |
 | `pos communication telegram sender test` | Sends a canned test message using the current config |
-| `pos communication telegram sender config` | Shows current config (bot token masked) |
-| `pos communication telegram sender config set TELEGRAM_BOT_TOKEN=...` | Saves a bot token (600 perms) |
-| `pos communication telegram sender config set TELEGRAM_CHAT_ID=...` | Saves the target chat ID |
 
 `send` option validation: `--caption` is only valid with media types (file/photo/video/audio/voice/animation), `--no-preview` only with `--type message`/`link`, and `--type` only accepts `message|file|link|sticker|photo|video|audio|voice|animation`. An explicit `--type` always overrides auto-detection.
 
-The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Requires network access to `api.telegram.org`.
+The bot token is a secret — it is stored only in `~/.config/linux_post_install/telegram.env` and never in the repo. Edit `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` interactively with `pos config telegram` (masked input + display). Requires network access to `api.telegram.org`.
 
 `pos communication telegram listener` in detail:
 
@@ -241,7 +238,7 @@ Map entries may carry an optional **description** shown in the bot's `/` menu: `
 | `pos entertainment send` | List available plugins + usage |
 | `pos entertainment send <plugin> [--print] [--markdown] [args…]` | Run the plugin, send its output to Telegram (silent) |
 | `pos entertainment send <plugin> --print` | Print the output locally; do not send |
-| `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram`) |
+| `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram sender`) |
 | `pos entertainment config` | Show the config file (`~/.config/linux_post_install/entertainment.env`) |
 | `pos entertainment config set KEY=VALUE…` | Set keys (any UPPER_SNAKE key; warns if no installed plugin uses it) and re-sync the schedule |
 | `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + schedule it as a systemd user timer |
