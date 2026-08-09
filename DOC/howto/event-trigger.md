@@ -43,6 +43,11 @@ Examples:
 "Load high" if uptime | sed 's/.*load average: //; s/,.*//' >= 4
 ```
 
+A ready-made starter set (CPU, memory, disk space/health, NVMe, network,
+processes) lives in `config/event-rules.template` — copy it to
+`~/.config/linux_post_install/event.env` or add the lines you want via
+`pos system event-trigger config`.
+
 Behavior:
 
 - The check runs on every pass. Non-numeric/empty output, or an unparseable
