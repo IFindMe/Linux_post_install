@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Entertainment plugin: gold spot price (XAU/USD) via goldprice.dev (no API key).
+# Headline price is USD per gram; the ounce quote is shown as reference.
 # POS_PLUGIN: gold
 # Contract: stdout is the message sent by 'pos entertainment send gold'.
 
@@ -29,15 +30,20 @@ if ! json="$(curl -fsS --max-time 20 \
     err "Failed to fetch gold price from goldprice.dev"
 fi
 
-symbol="$(jq -r '.symbols[0].symbol' <<<"$json")"
 price="$(jq -r '.symbols[0].price' <<<"$json")"
 bid="$(jq -r '.symbols[0].bid' <<<"$json")"
 ask="$(jq -r '.symbols[0].ask' <<<"$json")"
-unit="$(jq -r '.symbols[0].unit' <<<"$json")"
 when="$(jq -r '.symbols[0].computed_at' <<<"$json")"
-when="${when/T/ }"; when="${when%Z}"
+when="${when:0:19}"
+when="${when/T/ }"
 
 [ -n "$price" ] || err "No price received"
 
-printf 'Gold spot (%s/USD): %s USD/%s\nBid %s · Ask %s\nas of %s UTC\n' \
-    "$symbol" "$price" "$unit" "$bid" "$ask" "$when"
+# XAU spot is quoted per troy ounce (31.1034768 g) — convert to USD/gram.
+per_g="$(awk -v p="$price" -v o="31.1034768" 'BEGIN{printf "%.2f", p/o}')"
+
+printf '🪙  Gold (XAU/USD)\n'
+printf '💰  1 gram  $%s\n' "$per_g"
+printf '⚖️  1 oz    $%s\n' "$price"
+printf '📉  Bid $%s  ·  📈 Ask $%s\n' "$bid" "$ask"
+printf '🕐  %s UTC\n' "$when"
