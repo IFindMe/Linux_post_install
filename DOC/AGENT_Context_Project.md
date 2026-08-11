@@ -75,7 +75,7 @@ Linux_post_install/
 │   ├── pos-entertainment-status            # Show enabled plugins and scheduler state
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
-│   ├── pos-network-checkport               # Check TCP port connectivity
+│   ├── pos-network-checkport               # Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
 │   ├── pos-network-ip                      # Show interfaces, routes, public IP + location
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
@@ -273,7 +273,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
-| network | checkport | `pos-network-checkport` | Check TCP port connectivity |
+| network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
@@ -569,7 +569,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 286 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 565 | Matrix listener: map /command → bash, run them on room messages |
-| `bin/pos-communication-matrix-sender` | 214 | Send messages to a Matrix room via the client-server API (send, test, login) |
+| `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-telegram-listener` | 563 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -584,7 +584,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-status` | 49 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
-| `bin/pos-network-checkport` | 45 | Check TCP port connectivity |
+| `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
@@ -597,7 +597,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 288 | Dynamic bash completion |
+| `completions/pos.bash` | 289 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

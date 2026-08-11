@@ -1,45 +1,496 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: network checkport — Check TCP port connectivity
+# POS: network checkport — Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
+# POS_FLAGS: --tcp --udp --ping --no-banner --versions --timeout
 
 usage() {
-    cat <<EOF
-Usage: pos network checkport <ip:port>
+    cat <<'EOF'
+Usage: pos network checkport <target> [target...] [options]
 
-Check if a TCP port is open on a remote host.
+Check port reachability with service/version metadata, inline per port.
+Remote checks use nmap when available (recommended: real TCP/UDP scan +
+version detection), otherwise fall back to bash /dev/tcp + nc.
+
+Targets:
+  <ip|host>:<port>[/tcp|/udp]   remote port (TCP default; UDP via /udp or --udp)
+  tcp://<ip|host>:<port>        explicit scheme (udp:// too)
+  <ip|host> <port> [port...]    host + port list (proto from --tcp/--udp)
+  [::1]:443                     IPv6
+  <port>[/tcp|/udp]             bare port = LOCAL check: which interfaces serve it
+
+Options:
+  -t, --tcp          TCP (default)
+  -u, --udp          UDP
+      --ping         also ping the remote host first
+      --no-banner    skip version detection / banner grab (faster)
+      --versions     full nmap -sV version detection on open ports (slower)
+      --timeout <s>  per-check timeout in seconds (default 2; nmap host
+                     timeout scales with it; use sudo for accurate UDP)
+
+Exit status: 0 if every TCP check was open (remote) or the port is served on
+at least one interface (local); 1 otherwise.
 
 Examples:
-  pos network checkport 192.168.1.1:80
-  pos network checkport 10.0.0.5:443
+  pos network checkport 192.168.1.1:22
+  pos network checkport 10.0.0.5 22 80 443
+  pos network checkport 10.0.0.5:53/udp
+  pos network checkport 80 443        # local interfaces serving them
+  pos network checkport 22 --udp      # local UDP bindings
 EOF
     exit 0
 }
 
-case "${1:-}" in
-    -h|--help|"") usage ;;
-esac
+err() { echo "ERROR: $*" >&2; exit 1; }
 
-target="$1"
+# --- port metadata (fallback when nmap reports no service) --------------------
+meta_name=""; meta_desc=""
+port_meta() {
+    local port="$1" proto="$2" line=""
+    meta_name="unknown"; meta_desc=""
+    case "$port/$proto" in
+        20/tcp) meta_name="ftp-data"; meta_desc="FTP data transfer" ;;
+        21/tcp) meta_name="ftp"; meta_desc="FTP control" ;;
+        22/tcp) meta_name="ssh"; meta_desc="SSH remote shell" ;;
+        23/tcp) meta_name="telnet"; meta_desc="Telnet (unencrypted!)" ;;
+        25/tcp) meta_name="smtp"; meta_desc="SMTP mail" ;;
+        53/tcp|53/udp) meta_name="dns"; meta_desc="DNS" ;;
+        67/udp|68/udp) meta_name="dhcp"; meta_desc="DHCP" ;;
+        69/udp) meta_name="tftp"; meta_desc="TFTP (no auth!)" ;;
+        80/tcp) meta_name="http"; meta_desc="HTTP web" ;;
+        88/tcp|88/udp) meta_name="kerberos"; meta_desc="Kerberos" ;;
+        110/tcp) meta_name="pop3"; meta_desc="POP3 mail" ;;
+        111/tcp|111/udp) meta_name="rpcbind"; meta_desc="RPC portmapper" ;;
+        123/udp) meta_name="ntp"; meta_desc="NTP time" ;;
+        135/tcp) meta_name="msrpc"; meta_desc="MS-RPC endpoint mapper" ;;
+        137/udp) meta_name="netbios-ns"; meta_desc="NetBIOS name service" ;;
+        138/udp) meta_name="netbios-dgm"; meta_desc="NetBIOS datagram" ;;
+        139/tcp) meta_name="netbios-ssn"; meta_desc="NetBIOS session" ;;
+        143/tcp) meta_name="imap"; meta_desc="IMAP mail" ;;
+        161/udp) meta_name="snmp"; meta_desc="SNMP" ;;
+        179/tcp) meta_name="bgp"; meta_desc="BGP" ;;
+        194/tcp) meta_name="irc"; meta_desc="IRC" ;;
+        389/tcp) meta_name="ldap"; meta_desc="LDAP directory" ;;
+        443/tcp) meta_name="https"; meta_desc="HTTPS web" ;;
+        445/tcp) meta_name="smb"; meta_desc="SMB/CIFS file sharing" ;;
+        465/tcp) meta_name="smtps"; meta_desc="SMTPS (implicit TLS)" ;;
+        514/udp) meta_name="syslog"; meta_desc="Syslog" ;;
+        548/tcp) meta_name="afp"; meta_desc="Apple Filing Protocol" ;;
+        587/tcp) meta_name="submission"; meta_desc="SMTP submission" ;;
+        631/tcp) meta_name="ipp"; meta_desc="IPP printing" ;;
+        636/tcp) meta_name="ldaps"; meta_desc="LDAPS (TLS)" ;;
+        873/tcp) meta_name="rsync"; meta_desc="rsync daemon" ;;
+        993/tcp) meta_name="imaps"; meta_desc="IMAPS (TLS)" ;;
+        995/tcp) meta_name="pop3s"; meta_desc="POP3S (TLS)" ;;
+        1080/tcp) meta_name="socks"; meta_desc="SOCKS proxy" ;;
+        1433/tcp) meta_name="mssql"; meta_desc="MS SQL Server" ;;
+        1521/tcp) meta_name="oracle"; meta_desc="Oracle database" ;;
+        1701/udp) meta_name="l2tp"; meta_desc="L2TP VPN" ;;
+        1723/tcp) meta_name="pptp"; meta_desc="PPTP VPN" ;;
+        1812/udp|1813/udp) meta_name="radius"; meta_desc="RADIUS auth" ;;
+        2049/tcp|2049/udp) meta_name="nfs"; meta_desc="NFS" ;;
+        2181/tcp) meta_name="zookeeper"; meta_desc="Apache ZooKeeper" ;;
+        2375/tcp) meta_name="docker"; meta_desc="Docker API (UNENCRYPTED!)" ;;
+        2376/tcp) meta_name="docker-tls"; meta_desc="Docker API (TLS)" ;;
+        3000/tcp) meta_name="grafana"; meta_desc="Grafana / dev server" ;;
+        3128/tcp) meta_name="squid"; meta_desc="Squid HTTP proxy" ;;
+        3268/tcp|3269/tcp) meta_name="ldap-gc"; meta_desc="AD Global Catalog" ;;
+        3306/tcp) meta_name="mysql"; meta_desc="MySQL/MariaDB" ;;
+        3389/tcp) meta_name="rdp"; meta_desc="RDP remote desktop" ;;
+        4369/tcp) meta_name="epmd"; meta_desc="Erlang port mapper" ;;
+        5000/tcp) meta_name="upnp"; meta_desc="UPnP / registry" ;;
+        5432/tcp) meta_name="postgres"; meta_desc="PostgreSQL" ;;
+        5672/tcp) meta_name="amqp"; meta_desc="AMQP messaging" ;;
+        5900/tcp) meta_name="vnc"; meta_desc="VNC remote desktop" ;;
+        5985/tcp) meta_name="winrm"; meta_desc="WinRM (PowerShell remoting)" ;;
+        6000/tcp) meta_name="x11"; meta_desc="X11 display" ;;
+        6379/tcp) meta_name="redis"; meta_desc="Redis" ;;
+        6443/tcp) meta_name="k8s-api"; meta_desc="Kubernetes API" ;;
+        8006/tcp) meta_name="proxmox"; meta_desc="Proxmox web UI" ;;
+        8080/tcp) meta_name="http-alt"; meta_desc="HTTP alternate" ;;
+        8443/tcp) meta_name="https-alt"; meta_desc="HTTPS alternate" ;;
+        8888/tcp) meta_name="http-alt2"; meta_desc="HTTP alternate" ;;
+        9090/tcp) meta_name="prometheus"; meta_desc="Prometheus metrics" ;;
+        9092/tcp) meta_name="kafka"; meta_desc="Apache Kafka" ;;
+        9100/tcp) meta_name="printer"; meta_desc="network printer (raw)" ;;
+        9200/tcp) meta_name="elasticsearch"; meta_desc="Elasticsearch" ;;
+        9418/tcp) meta_name="git"; meta_desc="git daemon" ;;
+        9997/tcp) meta_name="splunk"; meta_desc="Splunk" ;;
+        11211/tcp) meta_name="memcached"; meta_desc="Memcached" ;;
+        15672/tcp) meta_name="rabbitmq-mgmt"; meta_desc="RabbitMQ management" ;;
+        25565/tcp) meta_name="minecraft"; meta_desc="Minecraft server" ;;
+        27017/tcp) meta_name="mongodb"; meta_desc="MongoDB" ;;
+        32400/tcp) meta_name="plex"; meta_desc="Plex media server" ;;
+    esac
+    if [ "$meta_name" = "unknown" ]; then
+        line="$(awk -v p="$port/$proto" 'BEGIN{IGNORECASE=1} $1 !~ /^#/ && $2 == p {print $1, $3; exit}' /etc/services 2>/dev/null || true)"
+        if [ -n "$line" ]; then set -- $line; meta_name="$1"; meta_desc="${2:-}"; fi
+    fi
+}
 
-if [[ "$target" != *:* ]]; then
-    echo "ERROR: Expected <ip:port> format, got '$target'"
-    echo "Usage: pos network checkport <ip:port>"
-    exit 1
-fi
+# --- fallback engine (no nmap): bash /dev/tcp + nc ---------------------------
+check_tcp() {
+    local ip="$1" port="$2" tmo="$3" rc=""
+    timeout "$tmo" bash -c "exec 3<>/dev/tcp/$ip/$port" 2>/dev/null
+    rc=$?
+    if [ "$rc" -eq 0 ]; then printf 'open'
+    elif [ "$rc" -eq 124 ]; then printf 'timeout'
+    else printf 'closed'; fi
+}
 
-ip="${target%:*}"
-port="${target#*:}"
+udp_payload() {
+    case "$1" in
+        53)  printf '\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x07example\\x03com\\x00\\x00\\x01\\x00\\x01' ;;
+        123) printf '\\x1b'; printf '\\x00%.0s' {1..47} ;;
+        *)   printf 'x' ;;
+    esac
+}
 
-if [[ -z "$ip" || -z "$port" ]]; then
-    echo "ERROR: Invalid target '$target'"
-    exit 1
-fi
+check_udp() {
+    local ip="$1" port="$2" tmo="$3" out="" rc=""
+    if command -v nc >/dev/null 2>&1; then
+        out="$(printf '%b' "$(udp_payload "$port")" | timeout "$tmo" nc -u -w"$tmo" "$ip" "$port" 2>&1)"
+        rc=$?
+        if [ -n "$out" ]; then printf 'open'
+        elif printf '%s' "$out" | grep -qiE 'refus|unreachable'; then printf 'closed'
+        else printf 'no-reply'; fi
+    else
+        timeout "$tmo" bash -c "exec 3<>/dev/udp/$ip/$port; printf 'x' >&3" 2>/dev/null
+        printf 'no-reply'
+    fi
+}
 
-echo "Checking $ip:$port ..."
-echo
+probe() {
+    local ip="$1" port="$2" tmo="$3"
+    case "$port" in
+        80|8000|8080|8081|8888|3000|5000|9090|3128|10000)
+            timeout "$tmo" bash -c "exec 3<>/dev/tcp/$ip/$port; printf 'HEAD / HTTP/1.0\r\n\r\n' >&3; head -c 300 <&3" 2>/dev/null ;;
+        *)
+            timeout "$tmo" bash -c "exec 3<>/dev/tcp/$ip/$port; head -c 200 <&3" 2>/dev/null ;;
+    esac
+}
 
-if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$ip/$port" 2>/dev/null; then
-    echo "OPEN ✔ $ip:$port"
+format_banner() {
+    local first="" server=""
+    first="$(printf '%s' "$1" | head -n1 | tr -cd '[:print:] ' | tr -s ' ' | head -c 100)"
+    server="$(printf '%s' "$1" | grep -i '^server:' | head -n1 | tr -cd '[:print:] ' | tr -s ' ' | head -c 60)"
+    if [ -n "$server" ]; then printf '%s | %s' "$first" "$server"; else printf '%s' "$first"; fi
+}
+
+# --- local mode: which interfaces serve a port --------------------------------
+find_listener() {
+    local lines="$1" ip="$2" port="$3" line="" la="" exact="" cand="" cands=()
+    cands=("$ip:$port" "0.0.0.0:$port" "*:$port" "[::]:$port")
+    [[ "$ip" == *:* ]] && cands+=("[$ip]:$port")
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        la="$(awk '{print $4}' <<< "$line")"
+        for cand in "${cands[@]}"; do
+            if [ "$la" = "$cand" ]; then
+                if [ "$la" = "$ip:$port" ] || [ "$la" = "[$ip]:$port" ]; then printf '%s' "$line"; return 0; fi
+                [ -z "$exact" ] && exact="$line"
+            fi
+        done
+    done <<< "$lines"
+    printf '%s' "$exact"
+}
+
+listener_proc() {
+    sed -n 's/.*users:(("\([^"]*\)",pid=\([0-9]*\).*/\1 (pid \2)/p' <<< "$1"
+}
+
+local_addrs() {
+    { ip -o -4 addr show; ip -o -6 addr show; } 2>/dev/null |
+        awk '{d=$2; sub(/:$/,"",d); a=$4; sub(/\/.*/,"",a); if (a !~ /^fe80:/) print d" "a}'
+}
+
+local_check() {
+    local port="$1" proto="$2" addrs="" slines="" dev="" ip="" la="" state="" proc="" label=""
+    local banner_txt="" banner_done=0
+    port_meta "$port" "$proto"
+    printf '\n  %s/%s — %s%s\n' "$port" "$proto" "$meta_name" "${meta_desc:+ ($meta_desc)}"
+    addrs="$(local_addrs)"
+    [ -n "$addrs" ] || err "could not enumerate local interfaces (ip command?)"
+    if [ "$proto" = "tcp" ]; then
+        slines="$(ss -tlnpH "sport = :$port" 2>/dev/null || true)"
+    else
+        slines="$(ss -ulnp "sport = :$port" 2>/dev/null || true)"
+    fi
+    while read -r dev ip; do
+        la="$(find_listener "$slines" "$ip" "$port")"
+        if [ "$proto" = "tcp" ]; then
+            state="$(check_tcp "$ip" "$port" "$tmo")"
+        else
+            [ -n "$la" ] && state="bound" || state="not-bound"
+        fi
+        [ -n "$la" ] && proc="$(listener_proc "$la")" || proc=""
+        if [ "$state" = "open" ] && [ "$banner" -eq 1 ] && [ "$banner_done" -eq 0 ]; then
+            banner_txt="$(format_banner "$(probe "$ip" "$port" "$tmo")")"; banner_done=1
+        fi
+        case "$state" in
+            open) label="OPEN" ;;
+            bound) label="bound" ;;
+            closed) label="CLOSED" ;;
+            timeout) label="no reply (filtered?)" ;;
+            no-reply) label="no reply" ;;
+            not-bound) label="not bound" ;;
+        esac
+        printf '    %-10s %-26s %-14s %s\n' "$dev" "$ip:$port" "$label" "$proc"
+    done <<< "$addrs"
+    if [ -z "$slines" ]; then
+        printf '    (no listener for this port on any interface)\n'
+        rc=1
+    else
+        [ -n "$banner_txt" ] && printf '  banner: %s\n' "$banner_txt"
+    fi
+    printf '  %s/%s: %d interface(s) checked\n' "$port" "$proto" "$(wc -l <<< "$addrs")"
+}
+
+# --- remote mode --------------------------------------------------------------
+ping_host() {
+    local h="$1"
+    if ping -c 1 -W 1 "$h" >/dev/null 2>&1; then
+        printf '  host %-26s up (ICMP reply)\n' "$h"
+    else
+        printf '  host %-26s no ICMP reply (may still serve ports)\n' "$h"
+    fi
+}
+
+state_label() {
+    case "$1" in
+        open) printf 'OPEN' ;;
+        closed) printf 'CLOSED' ;;
+        filtered) printf 'FILTERED' ;;
+        "open|filtered") printf 'open|filtered' ;;
+        timeout) printf 'no reply (filtered?)' ;;
+        no-reply) printf 'no reply (open|filtered)' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+# nmap engine: pass 1 = fast states + service names; pass 2 (--versions) =
+# full version detection on open ports only; fast banner probe fills gaps.
+# UDP needs root for nmap (raw ICMP) — unprivileged UDP falls back to nc.
+nmap_check() {
+    local host="$1"; shift
+    local pairs=("$@") port="" proto="" nmapports="" out="" vout="" vmap=""
+    local tports=() uports=() openports="" line="" state="" service="" version=""
+    local styp=() disp="" pp="" vline="" isv6=0 root=0 hasudp=0
+    [[ "$host" == *:* ]] && isv6=1
+    [ "$(id -u)" -eq 0 ] && root=1
+    for pair in "${pairs[@]}"; do
+        port="${pair%%:*}"; proto="${pair##*:}"
+        if [ "$proto" = "tcp" ]; then tports+=("$port"); else uports+=("$port"); fi
+    done
+    # unprivileged UDP → nc fallback per port (nmap -sU needs root)
+    if [ "$root" -eq 0 ] && [ ${#uports[@]} -gt 0 ]; then
+        for pair in "${pairs[@]}"; do
+            port="${pair%%:*}"; proto="${pair##*:}"
+            [ "$proto" = "udp" ] && fallback_check "$host" "$port" "udp"
+        done
+    fi
+    # ports that nmap will scan (tcp always; udp only when root)
+    for pair in "${pairs[@]}"; do
+        port="${pair%%:*}"; proto="${pair##*:}"
+        if [ "$proto" = "udp" ] && [ "$root" -eq 0 ]; then continue; fi
+        [ -n "$nmapports" ] && nmapports="$nmapports,"
+        nmapports="$nmapports$port"
+        [ "$proto" = "udp" ] && hasudp=1
+    done
+    [ -n "$nmapports" ] || return 0
+    styp=(-sT); [ "$hasudp" -eq 1 ] && styp+=(-sU)
+    [ ${#tports[@]} -eq 0 ] && styp=(-sU)
+    [ "$isv6" -eq 1 ] && styp+=(-6)
+    printf '  %s (via nmap)\n' "$host"
+    # pass 1: fast states + service names
+    out="$(timeout "$((tmo*4+15))" nmap -Pn -T4 --max-retries 1 -p "$nmapports" "${styp[@]}" --host-timeout "$((tmo*4))s" "$host" 2>/dev/null)" || true
+    # pass 2 (opt-in): version detection on open ports only
+    if [ "$versions" -eq 1 ]; then
+        openports=""
+        for pair in "${pairs[@]}"; do
+            port="${pair%%:*}"; proto="${pair##*:}"
+            if [ "$proto" = "udp" ] && [ "$root" -eq 0 ]; then continue; fi
+            pp="$port/$proto"
+            state="$(printf '%s\n' "$out" | awk -v p="$pp" '$1==p {print $2; exit}')"
+            if [ "$state" = "open" ]; then
+                [ -n "$openports" ] && openports="$openports,"
+                openports="$openports$port"
+            fi
+        done
+        if [ -n "$openports" ]; then
+            # version probing is slow on unresponsive services; give it room
+            vout="$(timeout "$((tmo*10+100))" nmap -Pn -T4 --max-retries 1 -p "$openports" "${styp[@]}" -sV --version-light --host-timeout "$((tmo*10+90))s" "$host" 2>/dev/null)" || true
+            while IFS= read -r vline; do
+                [ -n "$vline" ] || continue
+                vmap="$vmap$(awk '{print $1"|"$0}' <<< "$vline")"$'\n'
+            done <<< "$(printf '%s\n' "$vout" | grep -E '^[0-9]+/(tcp|udp)')"
+        fi
+    fi
+    # display
+    for pair in "${pairs[@]}"; do
+        port="${pair%%:*}"; proto="${pair##*:}"
+        if [ "$proto" = "udp" ] && [ "$root" -eq 0 ]; then continue; fi
+        pp="$port/$proto"
+        line="$(printf '%s\n' "$out" | awk -v p="$pp" '$1==p {print; exit}')"
+        if [ -n "$line" ]; then
+            state="$(awk '{print $2}' <<< "$line")"
+            service="$(awk '{print $3}' <<< "$line")"
+        else
+            state="no output"; service=""
+        fi
+        version=""
+        if [ -n "$vmap" ]; then
+            # strip "port/proto state service" (arbitrary padding) via variable sub
+            version="$(printf '%s' "$vmap" | awk -F'|' -v p="$pp" '$1==p {v=$2; sub(/^[^ ]+ +[^ ]+ +[^ ]+( +|$)/,"",v); print v; exit}')"
+        fi
+        if [ "$service" = "unknown" ] || [ -z "$service" ]; then
+            port_meta "$port" "$proto"
+            service="$meta_name"; [ -n "$meta_desc" ] && service="$service ($meta_desc)"
+        fi
+        if [ -z "$version" ] && [ "$proto" = "tcp" ] && [ "$state" = "open" ] && [ "$banner" -eq 1 ]; then
+            version="$(format_banner "$(probe "$host" "$port" "$tmo")")"
+            [ -n "$version" ] || version="(no banner)"
+        fi
+        case "$state" in
+            open) total_open=$((total_open+1)) ;;
+            closed) rc=1; total_closed=$((total_closed+1)) ;;
+            filtered|"open|filtered") rc=1 ;;
+            *) rc=1 ;;
+        esac
+        disp="$(state_label "$state")"
+        if [ -n "$version" ]; then
+            printf '  %-30s %-14s %s  %s\n' "${host}:${port}/${proto}" "$disp" "$service" "$version"
+        else
+            printf '  %-30s %-14s %s\n' "${host}:${port}/${proto}" "$disp" "$service"
+        fi
+    done
+}
+
+# fallback engine (no nmap): per-port bash/nc checks
+fallback_check() {
+    local host="$1" port="$2" proto="$3" state="" banner_txt="" disp=""
+    port_meta "$port" "$proto"
+    if [ "$proto" = "tcp" ]; then
+        state="$(check_tcp "$host" "$port" "$tmo")"
+        if [ "$banner" -eq 1 ] && [ "$state" = "open" ]; then
+            banner_txt="$(format_banner "$(probe "$host" "$port" "$tmo")")"
+            [ -n "$banner_txt" ] || banner_txt="(no banner)"
+        fi
+    else
+        state="$(check_udp "$host" "$port" "$tmo")"
+        case "$port" in
+            53) banner_txt="probe: dns query" ;;
+            123) banner_txt="probe: ntp request" ;;
+            *) banner_txt="" ;;
+        esac
+    fi
+    case "$state" in
+        open) total_open=$((total_open+1)) ;;
+        closed) rc=1; total_closed=$((total_closed+1)) ;;
+        timeout|no-reply) rc=1 ;;
+    esac
+    disp="$(state_label "$state")"
+    local metadisp="$meta_name"; [ -n "$meta_desc" ] && metadisp="$metadisp ($meta_desc)"
+    if [ "$proto" = "tcp" ] || [ -n "$banner_txt" ]; then
+        printf '  %-30s %-14s %s  %s\n' "${host}:${port}/${proto}" "$disp" "$metadisp" "${banner_txt:-}"
+    else
+        printf '  %-30s %-14s %s\n' "${host}:${port}/${proto}" "$disp" "$metadisp"
+    fi
+}
+
+# group targets by host, then run one engine pass per host
+remote_group() {
+    local reqs=("$@") req="" host="" rest="" port="" proto="" seen_hosts="" h="" pairs=()
+    # unique hosts, preserving order
+    for req in "${reqs[@]}"; do
+        host="${req%%|*}"
+        case " $seen_hosts " in *" $host "*) ;; *) seen_hosts="$seen_hosts $host" ;; esac
+    done
+    for h in $seen_hosts; do
+        pairs=()
+        for req in "${reqs[@]}"; do
+            host="${req%%|*}"; rest="${req#*|}"
+            port="${rest%%|*}"; proto="${rest##*|}"
+            if [ "$host" = "$h" ]; then
+                pairs+=("${port}:${proto}")
+            fi
+        done
+        if command -v nmap >/dev/null 2>&1; then
+            nmap_check "$h" "${pairs[@]}"
+        else
+            for port in "${pairs[@]}"; do
+                fallback_check "$h" "${port%%:*}" "${port##*:}"
+            done
+        fi
+    done
+}
+
+# --- main ---------------------------------------------------------------------
+mode="tcp"; do_ping=0; banner=1; tmo=2; versions=0
+targets=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--tcp) mode="tcp"; shift ;;
+        -u|--udp) mode="udp"; shift ;;
+        --ping) do_ping=1; shift ;;
+        --no-banner) banner=0; shift ;;
+        --versions) versions=1; shift ;;
+        --timeout) [ $# -ge 2 ] || err "--timeout needs a value"; tmo="$2"; shift 2 ;;
+        -h|--help) usage ;;
+        -*) err "unknown option '$1'" ;;
+        *) targets+=("$1"); shift ;;
+    esac
+done
+[ ${#targets[@]} -gt 0 ] || usage
+[[ "$tmo" =~ ^[0-9]+$ ]] && [ "$tmo" -ge 1 ] || err "--timeout must be a number >= 1"
+
+rc=0; total_open=0; total_closed=0
+
+if [[ "${targets[0]}" =~ ^[0-9]+(/[a-z]+)?$ ]]; then
+    # bare port → local interface check
+    for t in "${targets[@]}"; do
+        port="$t"; proto="$mode"
+        if [[ "$t" != ^[0-9]+$ && "$t" == */* ]]; then port="${t%%/*}"; proto="${t##*/}"; fi
+        [[ "$port" =~ ^[0-9]{1,5}$ ]] || err "bad port '$t'"
+        [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || err "port out of range '$t'"
+        [ "$proto" = "tcp" ] || [ "$proto" = "udp" ] || err "bad protocol '$t'"
+        local_check "$port" "$proto"
+    done
 else
-    echo "CLOSED ✖ $ip:$port"
+    reqs=()
+    if [[ "${targets[0]}" != *:* ]]; then
+        # host + port list
+        host="${targets[0]}"
+        [ ${#targets[@]} -gt 1 ] || err "host form needs at least one port: $host <port> [port...]"
+        [ "$do_ping" -eq 1 ] && ping_host "$host"
+        for p in "${targets[@]:1}"; do
+            proto="$mode"
+            case "$p" in */*) proto="${p##*/}"; p="${p%%/*}" ;; esac
+            [[ "$p" =~ ^[0-9]{1,5}$ ]] || err "bad port '$p'"
+            [ "$p" -ge 1 ] && [ "$p" -le 65535 ] || err "port out of range '$p'"
+            reqs+=("$host|$p|$proto")
+        done
+    else
+        # full targets
+        for t in "${targets[@]}"; do
+            proto="$mode"
+            case "$t" in
+                tcp://*) proto="tcp"; t="${t#tcp://}" ;;
+                udp://*) proto="udp"; t="${t#udp://}" ;;
+            esac
+            port="${t##*:}"; host="${t%:*}"
+            host="${host#[[]}"; host="${host%]}"
+            case "$port" in */*) proto="${port#*/}"; port="${port%/*}" ;; esac
+            [ "$proto" = "tcp" ] || [ "$proto" = "udp" ] || err "bad protocol in '$t' (use /tcp or /udp)"
+            [[ "$port" =~ ^[0-9]{1,5}$ ]] || err "bad port in '$t'"
+            [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || err "port out of range '$t'"
+            [ -n "$host" ] && [[ "$host" != *" "* ]] || err "bad host in '$t'"
+            reqs+=("$host|$port|$proto")
+        done
+        if [ "$do_ping" -eq 1 ]; then
+            for req in "${reqs[@]}"; do ping_host "${req%%|*}"; done
+        fi
+    fi
+    remote_group "${reqs[@]}"
 fi
+
+exit $rc
