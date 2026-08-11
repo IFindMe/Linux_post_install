@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: system nfs-client — Mount NFS shares (ephemeral or persistent systemd mount units)
+# POS: share nfs-client — Mount NFS shares (ephemeral or persistent systemd mount units)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
@@ -10,7 +10,7 @@ command -v systemd-escape &>/dev/null || err "systemd-escape not found"
 
 usage() {
     cat <<EOF
-Usage: pos system nfs-client <command> [args]
+Usage: pos share nfs-client <command> [args]
 
 Mount and manage NFS shares from remote servers (nfs-common).
 
@@ -23,10 +23,10 @@ Commands:
   unpersist <local-dir>                 Stop, disable and remove the mount unit
 
 Examples:
-  pos system nfs-client mount 100.100.100.1:/srv/media /mnt/nfs/media
-  pos system nfs-client persist 100.100.100.1:/srv/media /mnt/nfs/media
-  pos system nfs-client list
-  pos system nfs-client unmount /mnt/nfs/media
+  pos share nfs-client mount 100.100.100.1:/srv/media /mnt/nfs/media
+  pos share nfs-client persist 100.100.100.1:/srv/media /mnt/nfs/media
+  pos share nfs-client list
+  pos share nfs-client unmount /mnt/nfs/media
 EOF
     exit 0
 }
@@ -60,7 +60,7 @@ case "$cmd" in
     mount)
         what="${2:-}"
         where="${3:-}"
-        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos system nfs-client mount <server:export> <local-dir>"
+        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share nfs-client mount <server:export> <local-dir>"
         validate_share "$what"
         validate_dir "$where"
 
@@ -71,7 +71,7 @@ case "$cmd" in
 
     unmount)
         where="${2:-}"
-        [ -n "$where" ] || err "Usage: pos system nfs-client unmount <local-dir>"
+        [ -n "$where" ] || err "Usage: pos share nfs-client unmount <local-dir>"
         validate_dir "$where"
 
         sudo umount "$where"
@@ -89,7 +89,7 @@ case "$cmd" in
     persist)
         what="${2:-}"
         where="${3:-}"
-        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos system nfs-client persist <server:export> <local-dir>"
+        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share nfs-client persist <server:export> <local-dir>"
         validate_share "$what"
         validate_dir "$where"
 
@@ -117,7 +117,7 @@ UNIT
 
     unpersist)
         where="${2:-}"
-        [ -n "$where" ] || err "Usage: pos system nfs-client unpersist <local-dir>"
+        [ -n "$where" ] || err "Usage: pos share nfs-client unpersist <local-dir>"
         validate_dir "$where"
 
         unit="$(systemd-escape --path --suffix=mount "$where")"

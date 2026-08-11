@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: system nfs-server — Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+# POS: share nfs-server — Manage the NFS kernel server (status, share/unshare exports, enable/disable)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
@@ -9,7 +9,7 @@ command -v exportfs &>/dev/null || err "exportfs not found (install nfs-kernel-s
 
 usage() {
     cat <<EOF
-Usage: pos system nfs-server <command> [args]
+Usage: pos share nfs-server <command> [args]
 
 Manage the NFS kernel server (nfs-kernel-server, /etc/exports).
 
@@ -24,15 +24,15 @@ Commands:
   disable             Stop nfs-server and disable it on boot
 
 Clients are /etc/exports entries — restrict them to your trusted network:
-  pos system nfs-server share /mnt/hdd '100.64.0.0/10(rw,sync,no_subtree_check)'   # Tailscale CGNAT
-  pos system nfs-server share /mnt/hdd '10.10.0.0/24(rw,sync,no_subtree_check)'     # WireGuard
-  pos system nfs-server share /mnt/backups '192.168.1.0/24(ro,sync,no_subtree_check)'
+  pos share nfs-server share /mnt/hdd '100.64.0.0/10(rw,sync,no_subtree_check)'   # Tailscale CGNAT
+  pos share nfs-server share /mnt/hdd '10.10.0.0/24(rw,sync,no_subtree_check)'     # WireGuard
+  pos share nfs-server share /mnt/backups '192.168.1.0/24(ro,sync,no_subtree_check)'
 
 Examples:
-  pos system nfs-server status
-  pos system nfs-server share /mnt/hdd
-  pos system nfs-server list
-  pos system nfs-server unshare /mnt/hdd
+  pos share nfs-server status
+  pos share nfs-server share /mnt/hdd
+  pos share nfs-server list
+  pos share nfs-server unshare /mnt/hdd
 EOF
     exit 0
 }
@@ -61,7 +61,7 @@ case "$cmd" in
         if systemctl is-active --quiet nfs-server 2>/dev/null; then
             ok "nfs-server: running"
         else
-            warn "nfs-server: not running (enable with 'pos system nfs-server enable')"
+            warn "nfs-server: not running (enable with 'pos share nfs-server enable')"
         fi
         echo
         section "Exports"
@@ -71,12 +71,12 @@ case "$cmd" in
     share)
         path="${2:-}"
         client="${3:-*(rw,sync,no_subtree_check)}"
-        [ -n "$path" ] || err "Usage: pos system nfs-server share <path> [client]"
+        [ -n "$path" ] || err "Usage: pos share nfs-server share <path> [client]"
         require_root_dir "$path"
         if [ "$client" = "*(rw,sync,no_subtree_check)" ]; then
             warn "Generic export '$client' — ANY client can mount $path. Restrict it, e.g.:"
-            echo "  pos system nfs-server share $path '100.64.0.0/10(rw,sync,no_subtree_check)'"
-            echo "  pos system nfs-server share $path '10.10.0.0/24(rw,sync,no_subtree_check)'"
+            echo "  pos share nfs-server share $path '100.64.0.0/10(rw,sync,no_subtree_check)'"
+            echo "  pos share nfs-server share $path '10.10.0.0/24(rw,sync,no_subtree_check)'"
             echo
         fi
 
@@ -93,7 +93,7 @@ case "$cmd" in
 
     unshare)
         path="${2:-}"
-        [ -n "$path" ] || err "Usage: pos system nfs-server unshare <path>"
+        [ -n "$path" ] || err "Usage: pos share nfs-server unshare <path>"
         require_root_dir "$path"
 
         if ! awk -v p="$path" '$1 == p {found=1} END {exit !found}' "$EXPORTS_FILE"; then

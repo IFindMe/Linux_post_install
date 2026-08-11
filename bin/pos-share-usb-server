@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: usb server — USB Redirector server control (--ls, --share; prompts when args omitted)
+# POS: share usb-server — USB Redirector server control (--ls, --share; prompts when args omitted)
 # POS_FLAGS: --ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
 usage() {
     cat <<EOF
-Usage: pos usb server [flag] [args]
+Usage: pos share usb server [flag] [args]
 
 Control the USB Redirector server (usbsrv) — share local USB devices
 over the network and manage connected clients.
@@ -30,11 +30,11 @@ Flags:
   -h, --help                    Show this help
 
 Examples:
-  pos usb server --ls
-  pos usb server --share
-  pos usb server --share 0-1 3
-  pos usb server --auto-share on
-  pos usb server --port 32032
+  pos share usb server --ls
+  pos share usb server --share
+  pos share usb server --share 0-1 3
+  pos share usb server --auto-share on
+  pos share usb server --port 32032
 EOF
     exit 0
 }

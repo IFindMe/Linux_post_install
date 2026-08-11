@@ -4,7 +4,7 @@ Everything in this folder is reference material for the `Linux_post_install` pro
 
 | Document | What it covers |
 |----------|----------------|
-| [HOWTO.md](HOWTO.md) | Hands-on guides per category (ai, network, docker, media, system, ssh, usb, communication, entertainment): flags, recipes, config, troubleshooting |
+| [HOWTO.md](HOWTO.md) | Hands-on guides per category (ai, network, docker, media, system, ssh, share, communication, entertainment): flags, recipes, config, troubleshooting |
 | [SCRIPTS.md](SCRIPTS.md) | Core installer scripts: `install.sh`, `preinstall.sh`, `postinstall.sh`, `lib/common.sh`, `lib/flags.sh`, `lib/entertainment-lib.sh`, `features/autostart.sh` — purpose, how each works, configuration |
 | [POS.md](POS.md) | The `pos` CLI: dispatcher, every `pos-*` command, Docker Compose / ScaleTail config, legacy wrappers, flag CLIs |
 | [APPS.md](APPS.md) | Optional apps: `apps/install.sh` picker, installer conventions, full app catalog |

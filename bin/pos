@@ -154,13 +154,13 @@ EXAMPLES
   pos system firewall                     Interactive UFW manager
   pos system backup /srv/project          Encrypted (AES-256) folder snapshot
   pos system backup --service             Pick a folder from /srv or ~/srv
-  pos system nfs-server share /mnt/hdd    Share a folder via NFS
-  pos system nfs-client persist 10.0.0.5:/srv/data /mnt/nfs/data
+  pos share nfs server share /mnt/hdd      Share a folder via NFS
+  pos share nfs client persist 10.0.0.5:/srv/data /mnt/nfs/data
                                           Persistent NFS mount (systemd)
 
   pos ssh load-keys                       Load all SSH keys into agent
 
-  pos usb server --ls                     List USB devices + connected clients
+  pos share usb server --ls               List USB devices + connected clients
 
   pos communication telegram sender send "Backup done"
                                           Send a Telegram message
@@ -250,7 +250,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup usb-server communication-telegram-listener communication-matrix-listener ai-gemini system-event-trigger config"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup share-usb-server communication-telegram-listener communication-matrix-listener ai-gemini system-event-trigger config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

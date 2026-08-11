@@ -11,10 +11,10 @@ _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[media-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
 _pos_flags[media-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
 _pos_flags[network-hotspot]="--foreground"
+_pos_flags[share-usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
 _pos_flags[system-backup]="--service"
 _pos_flags[system-event-trigger]="--dry-run"
 _pos_flags[tree]="--depth"
-_pos_flags[usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
 # GEN:END posflags
 # GEN:START possubcmds
 declare -A _pos_subcmds

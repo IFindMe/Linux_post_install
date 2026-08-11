@@ -22,7 +22,7 @@
 | ## 11. Coding Conventions | 466–498 |
 | ## 12. Development Workflow | 499–551 |
 | ## 13. Key File Quick Reference | 552–605 |
-| ## 14. Common Tasks for Agents | 606–631 |
+| ## 14. Common Tasks for Agents | 606–632 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -79,15 +79,15 @@ Linux_post_install/
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
 │   ├── pos-network-ip                      # Show interfaces, routes, public IP + location
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
+│   ├── pos-share-nfs-client                # Mount NFS shares (ephemeral or persistent systemd mount units)
+│   ├── pos-share-nfs-server                # Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+│   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
 │   ├── pos-system-event-trigger            # State-based rule monitors; alerts via notify when a check crosses a threshold
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
-│   ├── pos-system-nfs-client               # Mount NFS shares (ephemeral or persistent systemd mount units)
-│   ├── pos-system-nfs-server               # Manage the NFS kernel server (status, share/unshare exports, enable/disable)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
-│   ├── pos-usb-server                      # USB Redirector server control (--ls, --share; prompts when args omitted)
 <!-- GEN:END tree -->
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
 │   ├── flag-set            # Set a feature flag (optionally with a value)
@@ -174,7 +174,7 @@ Linux_post_install/
 │   ├── SYSTEMD.md          # Systemd units + completion
 │   ├── DEV.md              # Developer guide
 │   ├── HOWTO.md            # Hands-on guides index (per-category tutorials)
-│   ├── howto/              # Per-category tutorials (network, docker, media, system, ssh, usb, communication, entertainment)
+│   ├── howto/              # Per-category tutorials (network, docker, media, system, ssh, share, communication, entertainment)
 │   ├── AGENT_Context_Project.md  # This file — AI agent context
 │   └── algorithm.md        # Algorithm diagrams
 │
@@ -277,15 +277,15 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
+| share | nfs-client | `pos-share-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |
+| share | nfs-server | `pos-share-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | system | event-trigger | `pos-system-event-trigger` | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
-| system | nfs-client | `pos-system-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |
-| system | nfs-server | `pos-system-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
-| usb | server | `pos-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
 <!-- GEN:END dispatch -->
 
 ### Legacy Wrappers
@@ -588,15 +588,15 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
+| `bin/pos-share-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 126 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-event-trigger` | 219 | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
-| `bin/pos-system-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
-| `bin/pos-system-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `bin/pos-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `completions/pos.bash` | 288 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
@@ -622,7 +622,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify Docker Compose logic | Edit `bin/pos-docker-compose` |
 | Modify Docker health check | Edit `bin/pos-docker-health` |
 | Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
-| Modify USB forwarding logic | Edit `bin/pos-usb-server` |
+| Modify USB forwarding logic | Edit `bin/pos-share-usb-server` |
+| Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |

@@ -11,7 +11,7 @@
   - [media](#media)
   - [system](#system)
   - [ssh](#ssh)
-  - [usb](#usb)
+  - [share](#share)
   - [communication](#communication)
   - [entertainment](#entertainment)
   - [flags](#flags)
@@ -185,8 +185,6 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 | `pos system backup <folder-path>` | `bin/pos-system-backup` | Create a gpg-encrypted (AES-256) `tar.gz` snapshot of a folder and verify it | Prompts twice for a password (never stored). Uses `sudo tar`; needs `gnupg` (in `preinstall.sh` PACKAGES). Artifact `<name>_<date>.tar.gz.gpg` in the current directory, `chmod 600`. Success/failure are announced via `lib/notify.sh` |
 | `pos system backup --service` | `bin/pos-system-backup` | Lists folders under `/srv` and `~/srv`, lets you pick one, then runs the same backup | Roots via `BACKUP_SERVICE_ROOTS` (space-separated, default `/srv $HOME/srv`) or `~/.config/linux_post_install/system.env` |
 | `pos system health [--send] [--markdown]` | `bin/pos-system-health` | Host health dashboard: disk per mount, RAM/swap, failed systemd units, backup age, fail2ban, docker containers. Exits 1 if any check FAILs | `--send`/`--markdown` are notification-only: they send the summary via `lib/notify.sh` to every platform in `NOTIFY_PLATFORM` and do NOT print the dashboard (so wrappers like the Telegram listener don't echo it back — pair with the listener's `@quiet` marker). `HEALTH_BACKUP_MAX_AGE_DAYS` (default 2) and `BACKUP_SERVICE_ROOTS` come from `~/.config/linux_post_install/system.env`; `--help` shows the effective values. Platform list from `~/.config/linux_post_install/notify.env` |
-| `pos system nfs-server <cmd>` | `bin/pos-system-nfs-server` | Manage the NFS kernel server: `status`, `share <path> [client]`, `unshare <path>`, `list`, `reload`, `enable`, `disable` | Requires `nfs-kernel-server` (added to `preinstall.sh` PACKAGES). Exports live in `/etc/exports`; `share` is idempotent (replaces any existing line for the path) and runs `exportfs -ra`. Default client `*(rw,sync,no_subtree_check)` — the tool warns you to restrict it; help prints Tailscale CGNAT (`100.64.0.0/10`), WireGuard (`10.10.0.0/24`) and LAN examples. Mutating commands announce via `lib/notify.sh` |
-| `pos system nfs-client <cmd>` | `bin/pos-system-nfs-client` | Mount and manage NFS shares: `mount <server:export> <local-dir>`, `unmount <local-dir>`, `list`, `persist <server:export> <local-dir>`, `unpersist <local-dir>` | Requires `nfs-common` (added to `preinstall.sh` PACKAGES). `persist` writes a systemd `.mount` unit (`systemd-escape --path --suffix=mount`) with `After=network-online.target` / `Wants=network-online.target` — mounts only once all interfaces are up, no fstab edits to break boot — then `daemon-reload` + `enable --now`. `unpersist` stops/disables/removes the unit. `mount`/`persist` announce via `lib/notify.sh` |
 | `pos system event-trigger <cmd>` | `bin/pos-system-event-trigger` | State-based rule monitors: `run`, `config`, `list`, `enable [interval]`, `disable`, `status`. Each line of `~/.config/linux_post_install/event.env` is an independent rule `["msg" if ] <check-command> <op> <threshold>` (op `> < >= <= == !=`, unit suffix ok: `60c`, `80%`); the check command's first numeric output is compared float-safe. Alerts once on false→true, plus one recovery message on true→false — no repeats while the condition holds, via `lib/notify.sh` | `config` is an interactive editor that validates rules by test-running the check; `run` is what the systemd user timer (`pos-event-trigger.timer` + oneshot `.service`, interval set at `enable`) executes; supports `--dry-run`; rules are arbitrary shell commands (chmod 600, same trust model as the Telegram map); template `config/event.env` auto-installed no-clobber by postinstall |
 
 `systemd/pos-health.service` + `systemd/pos-health.timer` run `pos system health --send --markdown` daily at 08:00 as the installing user. `postinstall.sh` enables the timer automatically once `~/.config/linux_post_install/telegram.env` exists — re-run postinstall after configuring a notify platform to pick it up. The service also loads `system.env` + `notify.env` via `EnvironmentFile=`.
@@ -197,28 +195,35 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 |---------|------|---------|---------------|
 | `pos ssh load-keys` | `bin/pos-ssh-load-keys` | Load all `~/.ssh/id_*` private keys into the ssh-agent | Uses `SSH_AUTH_SOCK` (default `/run/ssh-agent/socket`, provided by `ssh-agent.service`); skips `.pub`, `known_hosts`, `authorized_keys`, `config`; validates keys before adding |
 
-### usb
+### share
 
-**File:** `bin/pos-usb-server`
+Share files and devices over the network (USB over network, NFS; SMB planned).
+
+**File:** `bin/pos-share-usb-server`
 **Purpose:** control the USB Redirector server (`usbsrv`) — share local USB devices over the network and manage connected clients. Requires `usbsrv` (manual install from incentivespro.com — not in `PACKAGES`).
 
 | Command | Behavior |
 |---------|----------|
-| `pos usb server --ls` | List host USB devices and connected clients |
-| `pos usb server --ls-shared` | List shared or in-use devices only |
-| `pos usb server --share [dev-id] [client-id]` | Share a device and connect it to a client; interactive picker when IDs are omitted (`-share` + `-connect-to CLIENT-DEV`) |
-| `pos usb server --unshare [dev-id]` | Stop sharing a device |
-| `pos usb server --auto-share on\|off` | Toggle automatic sharing of new devices |
-| `pos usb server --callback [addr:port]` | Create a callback connection to a client |
-| `pos usb server --close-callback [target\|all]` | Close a client callback |
-| `pos usb server --auto-connect on\|off [client]` | Toggle remote auto-connect for a client |
-| `pos usb server --disconnect [dev-id\|all]` | Disconnect a device from its clients |
-| `pos usb server --nickname [dev-id] [nick]` | Set a device nickname (empty nick removes it) |
-| `pos usb server --timeout [dev-id] [sec]` | Set device inactivity timeout (0 disables) |
-| `pos usb server --port [num]` | Set the TCP port (restart server to apply) |
-| `pos usb server --info` / `--version` | Show server info / version |
+| `pos share usb server --ls` | List host USB devices and connected clients |
+| `pos share usb server --ls-shared` | List shared or in-use devices only |
+| `pos share usb server --share [dev-id] [client-id]` | Share a device and connect it to a client; interactive picker when IDs are omitted (`-share` + `-connect-to CLIENT-DEV`) |
+| `pos share usb server --unshare [dev-id]` | Stop sharing a device |
+| `pos share usb server --auto-share on\|off` | Toggle automatic sharing of new devices |
+| `pos share usb server --callback [addr:port]` | Create a callback connection to a client |
+| `pos share usb server --close-callback [target\|all]` | Close a client callback |
+| `pos share usb server --auto-connect on\|off [client]` | Toggle remote auto-connect for a client |
+| `pos share usb server --disconnect [dev-id\|all]` | Disconnect a device from its clients |
+| `pos share usb server --nickname [dev-id] [nick]` | Set a device nickname (empty nick removes it) |
+| `pos share usb server --timeout [dev-id] [sec]` | Set device inactivity timeout (0 disables) |
+| `pos share usb server --port [num]` | Set the TCP port (restart server to apply) |
+| `pos share usb server --info` / `--version` | Show server info / version |
 
 Subcommands that need input prompt interactively when args are omitted.
+
+| Command | File | Purpose | Configuration |
+|---------|------|---------|---------------|
+| `pos share nfs server <cmd>` | `bin/pos-share-nfs-server` | Manage the NFS kernel server: `status`, `share <path> [client]`, `unshare <path>`, `list`, `reload`, `enable`, `disable` | Requires `nfs-kernel-server` (added to `preinstall.sh` PACKAGES). Exports live in `/etc/exports`; `share` is idempotent (replaces any existing line for the path) and runs `exportfs -ra`. Default client `*(rw,sync,no_subtree_check)` — the tool warns you to restrict it; help prints Tailscale CGNAT (`100.64.0.0/10`), WireGuard (`10.10.0.0/24`) and LAN examples. Mutating commands announce via `lib/notify.sh` |
+| `pos share nfs client <cmd>` | `bin/pos-share-nfs-client` | Mount and manage NFS shares: `mount <server:export> <local-dir>`, `unmount <local-dir>`, `list`, `persist <server:export> <local-dir>`, `unpersist <local-dir>` | Requires `nfs-common` (added to `preinstall.sh` PACKAGES). `persist` writes a systemd `.mount` unit (`systemd-escape --path --suffix=mount`) with `After=network-online.target` / `Wants=network-online.target` — mounts only once all interfaces are up, no fstab edits to break boot — then `daemon-reload` + `enable --now`. `unpersist` stops/disables/removes the unit. `mount`/`persist` announce via `lib/notify.sh` |
 
 ### communication
 
