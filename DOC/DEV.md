@@ -107,6 +107,7 @@ esac
 - Shebang: `#!/usr/bin/env bash`
 - Strict mode: `set -euo pipefail`
 - `--help` flag: accept `-h` / `--help` via `case` pattern
+- **Deps guards run before `--help`:** `command -v <bin> &>/dev/null || err "… (install <pkg>)"` lines sit at the top of the script, **before** the `-h|--help` case — so `--help` also errors when a dependency is missing. This matches every existing deps-gated tool; keep it that way.
 - Shared library: always source `common.sh` for colors, logging, spinners
 - Exit codes: `0` success, `1` error
 - No shared lib? Inline fallbacks:
@@ -162,8 +163,11 @@ Place public keys in `config/authorized_keys` (one per line). `postinstall.sh` r
 ### 6. Update the docs
 
 - `DOC/POS.md`: add the command to the section table + a detail block (commands, behavior, configuration). This is the one hand-written doc.
-- `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, no-common.sh list, line-count table) and the `completions/pos.bash` flags block are produced by `make gen` — do **not** hand-edit between the `GEN:START`/`GEN:END` markers.
+- `DOC/HOWTO.md` index row + a hands-on section in `DOC/howto/<category>.md` (recipes + troubleshooting) for user-facing tools.
+- `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, no-common.sh list, line-count table) and the `completions/pos.bash` flags block are produced by `make gen` — do **not** hand-edit between the `GEN:START`/`GEN:END` markers. Hand-maintained, not gen-checked: the line-count rows **above** the filetable marker (non-`pos-*` files only — bump a row's count when that file's length changes) and the "Common Tasks for Agents" table (add a row for the new tool).
+- `AGENTS.md` Quick facts: update if a structural fact changed (new category, new convention).
 - Root `README.md`: only if the `pos` category list in the help text changes.
+- Move the finished task to the `Done` section of `AGENT_TODO.md` (dated) in the same commit.
 
 ### 7. Test
 
@@ -179,6 +183,16 @@ make check                    # full self-consistency gate (syntax, exec bits, d
 ```
 
 `make check` is the definition of done — the same check runs as a pre-commit hook once you've run `make hook`.
+
+### Testing tools that need root / systemd / missing deps
+
+`make check` only proves syntax, exec bits, doc sync and dispatch — not behaviour. For tools that need `sudo`, systemd, or binaries absent from the dev box (samba, usbsrv, …), test them end-to-end with two patterns:
+
+- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), `SMB_CONF` (`bin/pos-share-smb-server`, default `/etc/samba/smb.conf`), `SMB_CREDS_DIR`/`UNIT_DIR` (`bin/pos-share-smb-client`). Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing.
+- **Stub PATH.** Create a temp dir with fake binaries, then run the tool with `PATH="$stubs:$PATH"`: fake `sudo` → `exec "$@"`; fake `systemctl`/`smbcontrol`/`mount.cifs` → echo their args; fake `testparm` → `cat` the file back (so validation passes); fake `systemd-escape` → print a fixed name. Assert on output **and** exit codes — happy path plus each failure path (`err` sets rc=1).
+- **Interactive prompts** (`read … </dev/tty`): drive them with a PTY — `printf 'answer\n' | script -qec "cmd" /dev/null` — then assert the side effect (e.g. the chmod-600 creds file lands with the right mode).
+
+Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
 
 ---
 
@@ -303,6 +317,22 @@ then listing it in `NOTIFY_PLATFORM`. Platform keys map to tool names via `notif
 ### Idempotency
 
 Check before creating, use `>>` with grep guards, don't overwrite user configs.
+
+### Managed Config Blocks
+
+To let a tool own a slice of a user/system config file (e.g. Samba shares in `/etc/samba/smb.conf`) without clobbering hand edits, delimit the tool's section with start/end marker lines and rewrite only that slice:
+
+```
+# >>> pos-managed share: <name>
+[media]
+   path = /mnt/hdd
+# <<< end pos-managed share
+```
+
+- Idempotent upsert: one `awk` pass drops the existing block (or nothing if absent), then append the new block; removal uses the same `awk` with only the slice dropped.
+- The block-deletion guard matters: `$0 == s {inblock=1}` … `$0 == e && inblock == 1 {inblock=0; next}` — without the `inblock == 1` check, deleting one block also eats the end markers of other blocks further down the file.
+- Validate before writing: run the config's own checker on a temp copy (`testparm -s` for Samba), then apply with `sudo cp`; hot-reload instead of restarting (`smbcontrol smbd reload-config`).
+- Precedent: `bin/pos-share-smb-server`.
 
 ### Error Handling
 
