@@ -16,7 +16,7 @@ authoritative one-line reference (every command + flag), see
 | `pos system` | Backups, firewall, health dashboard | [system](howto/system.md) |
 | `pos system event-trigger` | Threshold-rule monitors that alert on crossing | [event-trigger](howto/event-trigger.md) |
 | `pos ssh` | Load keys into the agent | [ssh](howto/ssh.md) |
-| `pos share` | Share USB devices & filesystems over the network (USB, NFS) | [share](howto/share.md) |
+| `pos share` | Share USB devices & filesystems over the network (USB, NFS, SMB) | [share](howto/share.md) |
 | `pos communication` | Send Telegram/Matrix messages & alerts, /command listeners | [communication](howto/communication.md) |
 | `pos entertainment` | Scheduled auto-messages from public APIs | [entertainment](howto/entertainment.md) |
 

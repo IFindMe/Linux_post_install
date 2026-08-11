@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: share smb-server — Manage the Samba server (status, share/unshare exports, users, enable/disable)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+command -v smbd &>/dev/null || err "smbd not found (install samba)"
+command -v smbcontrol &>/dev/null || err "smbcontrol not found (install samba)"
+command -v testparm &>/dev/null || err "testparm not found (install samba)"
+command -v smbpasswd &>/dev/null || err "smbpasswd not found (install samba)"
+
+usage() {
+    cat <<EOF
+Usage: pos share smb-server <command> [args]
+
+Manage the Samba server (smbd, /etc/samba/smb.conf).
+
+Commands:
+  status              Show server status + current shares + users
+  share <path> [name]  Add or update a share (default name: folder basename)
+  unshare <name>      Remove a share and reload
+  list                Show current shares
+  adduser <user>      Create a Samba user (prompts for password)
+  deluser <user>      Remove a Samba user
+  reload              Validate smb.conf and reload the server
+  enable              Start smbd and enable it on boot
+  disable             Stop smbd and disable it on boot
+
+Options for share:
+  --read-only         Export read-only
+  --guest             Allow guest access (ANY user on the network — warns)
+  --users <u1,u2>     Restrict to these Samba users (comma-separated)
+
+Examples:
+  pos share smb-server share /mnt/hdd media --users bob,alice
+  pos share smb-server share /mnt/hdd/media --read-only
+  pos share smb-server adduser bob
+  pos share smb-server list
+  pos share smb-server unshare media
+EOF
+    exit 0
+}
+
+SMB_CONF="${SMB_CONF:-/etc/samba/smb.conf}"
+
+cmd="${1:-}"
+case "$cmd" in
+    -h|--help) usage ;;
+    status|share|unshare|list|adduser|deluser|reload|enable|disable) ;;
+    "") err "Missing command (status|share|unshare|list|adduser|deluser|reload|enable|disable)" ;;
+    *) err "Unknown command '$cmd' (see --help)" ;;
+esac
+
+require_root_dir() {
+    local path="$1"
+    case "$path" in
+        /*) ;;
+        *) err "Path must be absolute: $path" ;;
+    esac
+    [ -d "$path" ] || err "Path not found: $path"
+}
+
+validate_share_name() {
+    case "$1" in
+        *[!A-Za-z0-9._-]*) err "Invalid share name '$1' — use letters, digits, . _ -" ;;
+    esac
+}
+
+# Validate smb.conf with testparm, then hot-reload smbd if it is running.
+reload_config() {
+    testparm -s "$SMB_CONF" >/dev/null || err "smb.conf is invalid — changes not loaded (fix with 'pos share smb-server reload')"
+    if systemctl is-active --quiet smbd 2>/dev/null; then
+        sudo smbcontrol smbd reload-config
+        log "smbd config reloaded"
+    else
+        warn "smbd not running — config validated but not loaded (enable with 'pos share smb-server enable')"
+    fi
+}
+
+list_shares() {
+    local out
+    out="$(testparm -s "$SMB_CONF" 2>/dev/null | grep -F '[' || true)"
+    if [ -z "$out" ]; then
+        echo " (none)"
+        return
+    fi
+    printf '%s\n' "$out" | grep -Fv '[global]' | sed 's/\[\(.*\)\]/  \1/'
+}
+
+case "$cmd" in
+    status)
+        if systemctl is-active --quiet smbd 2>/dev/null; then
+            ok "smbd: running"
+        else
+            warn "smbd: not running (enable with 'pos share smb-server enable')"
+        fi
+        echo
+        section "Shares"
+        list_shares
+        echo
+        section "Users"
+        sudo pdbedit -L 2>/dev/null | cut -d: -f1 | sed 's/^/  /' || echo " (none)"
+        ;;
+
+    share)
+        path="${2:-}"
+        [ -n "$path" ] || err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]"
+        case "$path" in
+            -*) err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]" ;;
+        esac
+        require_root_dir "$path"
+        [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
+
+        shift 2
+        name="" ro=0 guest=0 users=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --read-only) ro=1; shift ;;
+                --guest) guest=1; shift ;;
+                --users) [ $# -ge 2 ] || err "--users needs a value"; users="$2"; shift 2 ;;
+                -*) err "unknown option '$1'" ;;
+                *) name="$1"; shift ;;
+            esac
+        done
+        name="${name:-$(basename "$path")}"
+        validate_share_name "$name"
+
+        if [ "$guest" -eq 1 ]; then
+            warn "guest access on — ANY network user can access $path. Restrict with --users."
+        elif [ -z "$users" ]; then
+            warn "No valid users — any Samba account can access $path. Restrict with --users u1,u2."
+        fi
+
+        ro_val=no; [ "$ro" -eq 1 ] && ro_val=yes
+        guest_val=no; [ "$guest" -eq 1 ] && guest_val=yes
+        block="[$name]
+   path = $path
+   browseable = yes
+   read only = $ro_val
+   guest ok = $guest_val"
+        [ -n "$users" ] && block="$block
+   valid users = $users"
+
+        tmp="$(mktemp)"
+        awk -v s="# >>> pos-managed share: $name" -v e="# <<< end pos-managed share" '
+            $0 == s {inblock=1}
+            $0 == e && inblock == 1 {inblock=0; next}
+            !inblock {print}
+        ' "$SMB_CONF" > "$tmp"
+        {
+            echo
+            echo "# >>> pos-managed share: $name"
+            printf '%s\n' "$block"
+            echo "# <<< end pos-managed share"
+        } >> "$tmp"
+
+        testparm -s "$tmp" >/dev/null || { rm -f "$tmp"; err "Invalid smb.conf — changes not applied (see testparm -s $SMB_CONF)"; }
+        sudo cp "$tmp" "$SMB_CONF"
+        rm -f "$tmp"
+        reload_config
+        log "Share added: [$name] → $path"
+        notify_send "SMB share added: $name ($path)"
+        ;;
+
+    unshare)
+        name="${2:-}"
+        [ -n "$name" ] || err "Usage: pos share smb-server unshare <name>"
+        validate_share_name "$name"
+        [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
+
+        if ! grep -Fq "# >>> pos-managed share: $name" "$SMB_CONF"; then
+            warn "No share '$name' found in $SMB_CONF"
+            exit 0
+        fi
+
+        tmp="$(mktemp)"
+        awk -v s="# >>> pos-managed share: $name" -v e="# <<< end pos-managed share" '
+            $0 == s {inblock=1}
+            $0 == e && inblock == 1 {inblock=0; next}
+            !inblock {print}
+        ' "$SMB_CONF" > "$tmp"
+        sudo cp "$tmp" "$SMB_CONF"
+        rm -f "$tmp"
+        reload_config
+        log "Removed share: $name"
+        notify_send "SMB share removed: $name"
+        ;;
+
+    list)
+        list_shares
+        ;;
+
+    adduser)
+        user="${2:-}"
+        [ -n "$user" ] || err "Usage: pos share smb-server adduser <user>"
+        id -u "$user" >/dev/null 2>&1 || err "No system user '$user' — create it first (e.g. sudo adduser $user)"
+        sudo smbpasswd -a "$user"
+        log "Samba user added: $user"
+        notify_send "SMB user added: $user"
+        ;;
+
+    deluser)
+        user="${2:-}"
+        [ -n "$user" ] || err "Usage: pos share smb-server deluser <user>"
+        sudo smbpasswd -x "$user"
+        log "Samba user removed: $user"
+        notify_send "SMB user removed: $user"
+        ;;
+
+    reload)
+        reload_config
+        ;;
+
+    enable)
+        sudo systemctl enable --now smbd
+        log "smbd enabled (starts on boot)"
+        notify_send "SMB server enabled"
+        ;;
+
+    disable)
+        sudo systemctl disable --now smbd
+        log "smbd disabled (will not start on boot)"
+        notify_send "SMB server disabled"
+        ;;
+esac

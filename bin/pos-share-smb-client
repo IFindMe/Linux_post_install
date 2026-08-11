@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: share smb-client — Mount SMB/CIFS shares (ephemeral or persistent systemd mount units)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+SMB_CREDS_DIR="${SMB_CREDS_DIR:-/etc/samba/credentials}"
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
+command -v mount.cifs &>/dev/null || err "mount.cifs not found (install cifs-utils)"
+command -v systemd-escape &>/dev/null || err "systemd-escape not found"
+
+usage() {
+    cat <<EOF
+Usage: pos share smb-client <command> [args]
+
+Mount and manage SMB/CIFS shares from remote servers (cifs-utils).
+
+Commands:
+  mount <//server/share> <local-dir> [user]   One-shot mount (creates local-dir if needed)
+  unmount <local-dir>                          Unmount the share
+  list                                         Show active SMB mounts
+  persist <//server/share> <local-dir> [user]  Persistent mount via a systemd .mount unit
+                                               (automount — never blocks boot)
+  unpersist <local-dir>                        Stop, disable and remove the mount unit
+
+With no user, guest access is attempted. With a user, you are prompted for
+the Samba password — one-shot mounts use a throwaway chmod-600 credentials
+file; persistent mounts keep one at /etc/samba/credentials/.
+
+Examples:
+  pos share smb-client mount //100.100.100.1/media /mnt/smb/media
+  pos share smb-client persist //100.100.100.1/media /mnt/smb/media bob
+  pos share smb-client list
+  pos share smb-client unmount /mnt/smb/media
+EOF
+    exit 0
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    -h|--help) usage ;;
+    mount|unmount|list|persist|unpersist) ;;
+    "") err "Missing command (mount|unmount|list|persist|unpersist)" ;;
+    *) err "Unknown command '$cmd' (see --help)" ;;
+esac
+
+validate_share() {
+    case "$1" in
+        //*) ;;
+        *) err "Invalid share '$1' — expected <//server/share> (e.g. //10.0.0.5/media)" ;;
+    esac
+}
+
+validate_dir() {
+    case "$1" in
+        /*) ;;
+        *) err "Mount point must be an absolute path: $1" ;;
+    esac
+}
+
+# Prompt for the Samba password (no echo, via /dev/tty) and write a fresh
+# chmod-600 credentials file; prints its path, caller removes it.
+make_creds() {
+    local user="$1" pw tmp
+    read -rsp "Samba password for $user: " pw </dev/tty || true
+    echo >&2
+    [ -n "$pw" ] || err "empty password"
+    tmp="$(mktemp)"
+    chmod 600 "$tmp"
+    printf 'username=%s\npassword=%s\n' "$user" "$pw" > "$tmp"
+    printf '%s' "$tmp"
+}
+
+mount_opts() {
+    local user="$1"
+    printf 'uid=%s,gid=%s' "$(id -u)" "$(id -g)"
+}
+
+case "$cmd" in
+    mount)
+        what="${2:-}"
+        where="${3:-}"
+        user="${4:-}"
+        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share smb-client mount <//server/share> <local-dir> [user]"
+        validate_share "$what"
+        validate_dir "$where"
+
+        sudo mkdir -p "$where"
+        if [ -n "$user" ]; then
+            creds="$(make_creds "$user")"
+            trap 'rm -f "$creds"' EXIT
+            sudo mount -t cifs "$what" "$where" -o "credentials=$creds,$(mount_opts "$user")"
+        else
+            warn "No user — attempting guest mount (works only if the server allows guest access)"
+            sudo mount -t cifs "$what" "$where" -o "guest,$(mount_opts "")"
+        fi
+        log "Mounted $what at $where"
+        ;;
+
+    unmount)
+        where="${2:-}"
+        [ -n "$where" ] || err "Usage: pos share smb-client unmount <local-dir>"
+        validate_dir "$where"
+
+        sudo umount "$where"
+        log "Unmounted $where"
+        ;;
+
+    list)
+        if findmnt -t cifs >/dev/null 2>&1; then
+            findmnt -t cifs
+        else
+            echo "No SMB mounts"
+        fi
+        ;;
+
+    persist)
+        what="${2:-}"
+        where="${3:-}"
+        user="${4:-}"
+        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share smb-client persist <//server/share> <local-dir> [user]"
+        validate_share "$what"
+        validate_dir "$where"
+
+        unit="$(systemd-escape --path --suffix=mount "$where")"
+        unit_file="${UNIT_DIR}/${unit}"
+        opts="$(mount_opts "$user"),_netdev,noexec,x-systemd.automount"
+        if [ -n "$user" ]; then
+            creds_file="$SMB_CREDS_DIR/$(basename "$where")"
+            sudo mkdir -p "$SMB_CREDS_DIR"
+            tmp="$(make_creds "$user")"
+            sudo install -m 600 "$tmp" "$creds_file"
+            rm -f "$tmp"
+            opts="credentials=$creds_file,$opts"
+        else
+            warn "No user — persisting a guest mount (works only if the server allows guest access)"
+            opts="guest,$opts"
+        fi
+
+        sudo mkdir -p "$where"
+        cat <<UNIT | sudo tee "$unit_file" >/dev/null
+[Unit]
+Description=SMB mount of ${what} at ${where}
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=${what}
+Where=${where}
+Type=cifs
+Options=${opts}
+UNIT
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now "$unit"
+        log "Persistent SMB mount: ${what} → ${where} (${unit})"
+        notify_send "SMB mount persisted: ${what} → ${where}"
+        ;;
+
+    unpersist)
+        where="${2:-}"
+        [ -n "$where" ] || err "Usage: pos share smb-client unpersist <local-dir>"
+        validate_dir "$where"
+
+        unit="$(systemd-escape --path --suffix=mount "$where")"
+        unit_file="${UNIT_DIR}/${unit}"
+
+        if [ ! -f "$unit_file" ]; then
+            warn "No systemd mount unit for $where (${unit})"
+            exit 0
+        fi
+
+        sudo systemctl disable "$unit" 2>/dev/null || true
+        sudo systemctl stop "$unit" 2>/dev/null || true
+        sudo systemctl stop "${unit%.mount}.automount" 2>/dev/null || true
+        sudo rm -f "$unit_file"
+        sudo rm -f "$SMB_CREDS_DIR/$(basename "$where")"
+        sudo rmdir "$SMB_CREDS_DIR" 2>/dev/null || true
+        sudo systemctl daemon-reload
+        log "Removed persistent SMB mount: $where"
+        notify_send "SMB persistent mount removed: $where"
+        ;;
+esac

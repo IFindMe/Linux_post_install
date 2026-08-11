@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–186 |
-| ## 3. Installation Flow | 187–239 |
-| ## 4. The `pos` CLI System | 240–306 |
-| ## 5. Shared Library — `lib/common.sh` | 307–338 |
-| ## 6. Docker Compose / ScaleTail | 339–381 |
-| ## 7. Optional Apps (`apps/`) | 382–411 |
-| ## 8. Entertainment Module | 412–425 |
-| ## 9. Systemd Services | 426–438 |
-| ## 10. Configuration Files | 439–465 |
-| ## 11. Coding Conventions | 466–498 |
-| ## 12. Development Workflow | 499–551 |
-| ## 13. Key File Quick Reference | 552–605 |
-| ## 14. Common Tasks for Agents | 606–632 |
+| ## 2. Directory Structure | 44–188 |
+| ## 3. Installation Flow | 189–241 |
+| ## 4. The `pos` CLI System | 242–310 |
+| ## 5. Shared Library — `lib/common.sh` | 311–342 |
+| ## 6. Docker Compose / ScaleTail | 343–385 |
+| ## 7. Optional Apps (`apps/`) | 386–415 |
+| ## 8. Entertainment Module | 416–429 |
+| ## 9. Systemd Services | 430–442 |
+| ## 10. Configuration Files | 443–469 |
+| ## 11. Coding Conventions | 470–502 |
+| ## 12. Development Workflow | 503–555 |
+| ## 13. Key File Quick Reference | 556–611 |
+| ## 14. Common Tasks for Agents | 612–639 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -81,6 +81,8 @@ Linux_post_install/
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
 │   ├── pos-share-nfs-client                # Mount NFS shares (ephemeral or persistent systemd mount units)
 │   ├── pos-share-nfs-server                # Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+│   ├── pos-share-smb-client                # Mount SMB/CIFS shares (ephemeral or persistent systemd mount units)
+│   ├── pos-share-smb-server                # Manage the Samba server (status, share/unshare exports, users, enable/disable)
 │   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
@@ -279,6 +281,8 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
 | share | nfs-client | `pos-share-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | share | nfs-server | `pos-share-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| share | smb-client | `pos-share-smb-client` | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
+| share | smb-server | `pos-share-smb-server` | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) |
@@ -566,7 +570,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 286 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 290 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 565 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
@@ -590,6 +594,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
 | `bin/pos-share-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| `bin/pos-share-smb-client` | 183 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-smb-server` | 226 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 126 | Encrypted (AES-256) folder snapshots (tar + gpg) |
@@ -624,6 +630,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
 | Modify USB forwarding logic | Edit `bin/pos-share-usb-server` |
 | Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
+| Modify SMB share logic | Edit `bin/pos-share-smb-server` / `bin/pos-share-smb-client` |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |

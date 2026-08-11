@@ -1,13 +1,15 @@
 # How-To: `pos share`
 
 Share files and devices over the network: USB devices via the USB Redirector
-server, filesystems via NFS (SMB planned). Tools: `usb`, `nfs`.
+server, filesystems via NFS and SMB/Samba. Tools: `usb`, `nfs`, `smb`.
 
 | Tool | What it does |
 |------|--------------|
 | `pos share usb server` | Control `usbsrv`: share USB devices, manage clients, callbacks, nicknames |
 | `pos share nfs server` | Manage the NFS kernel server (exports, enable/disable) |
 | `pos share nfs client` | Mount NFS shares (ephemeral or persistent systemd units) |
+| `pos share smb server` | Manage the Samba server (shares, users, enable/disable) |
+| `pos share smb client` | Mount SMB/CIFS shares (ephemeral or persistent systemd units) |
 
 ---
 
@@ -146,6 +148,105 @@ up — a down/unreachable NFS server can't break boot (with fstab it could).
 - Persistent mount fails at boot when the server is off → intended: the unit
   waits for network-online and fails cleanly, and boot continues (unlike fstab);
   `pos share nfs client unpersist` removes it
+
+---
+
+## `pos share smb server` — Samba server
+
+Requires `samba` (in `preinstall.sh` PACKAGES). Writes idempotent share blocks
+to `/etc/samba/smb.conf` (between `# >>> pos-managed share: <name>` /
+`# <<< end pos-managed share` markers — anything outside the markers survives),
+validates with `testparm`, and hot-reloads via `smbcontrol smbd reload-config`.
+Mutating commands announce via `notify_send`.
+
+```bash
+pos share smb server status                              # smbd active? + shares + users
+pos share smb server share /mnt/hdd media                # share (default name: basename)
+pos share smb server share /mnt/hdd media --users bob,alice   # restrict to Samba users
+pos share smb server share /mnt/hdd/backups --read-only  # read-only
+pos share smb server share /mnt/public --guest           # guest access (warns)
+pos share smb server list                                # current shares
+pos share smb server unshare media                       # remove a share
+pos share smb server adduser bob                         # create a Samba user (prompts)
+pos share smb server deluser bob                         # remove a Samba user
+pos share smb server reload                              # validate + reload after hand edits
+pos share smb server enable / disable                    # start + boot-persist smbd / stop it
+```
+
+New shares default to read-write + browsable. `--guest` and shares without
+`--users` both **warn** — any Samba account (or any network user with guest)
+can then access them; print the restricted form with `--users`.
+
+SMB shares need Samba accounts, not just system users: `adduser <user>`
+(prompts for the password via `smbpasswd -a`) after the system user exists.
+
+**Recipes:**
+- **Share the media drive to the tailnet (users bob + alice):**
+  ```bash
+  sudo adduser bob                          # system user first
+  pos share smb server adduser bob          # then a Samba password
+  pos share smb server share /mnt/hdd media --users bob,alice
+  pos share smb server enable
+  ```
+- **Public read-only download share:** `pos share smb server share /srv/pub pub --read-only --guest`
+- **Change a share's access later:** re-run `share` with the same name — the
+  block is replaced, not duplicated.
+
+**Troubleshooting:**
+- "smbd not found" → `samba` isn't installed; `sudo apt install samba`
+- Windows can't connect → check the client is in `--users` / has a Samba
+  password (`adduser`), and that `smbd` is running (`status`)
+- `valid users` users can't log in → their Samba password differs from the
+  system one; re-run `pos share smb server adduser <user>`
+- After editing `/etc/samba/smb.conf` by hand, run `pos share smb server reload`
+- SMB is blocked → allow Samba in `pos system firewall` (or `ufw allow samba`)
+
+---
+
+## `pos share smb client` — mount SMB/CIFS shares
+
+Requires `cifs-utils` (in `preinstall.sh` PACKAGES).
+
+```bash
+pos share smb client mount //100.100.100.1/media /mnt/smb/media        # guest
+pos share smb client mount //100.100.100.1/media /mnt/smb/media bob    # prompts for password
+pos share smb client persist //100.100.100.1/media /mnt/smb/media bob  # persistent (systemd)
+pos share smb client list                                              # active SMB mounts
+pos share smb client unmount /mnt/smb/media
+pos share smb client unpersist /mnt/smb/media                          # remove the unit
+```
+
+With no user, a **guest** mount is attempted (only works if the server allows
+guest access). With a user you are prompted for the Samba password: one-shot
+mounts use a throwaway chmod-600 credentials file, `persist` keeps one at
+`/etc/samba/credentials/<name>` (chmod 600) and references it from the unit.
+
+**Persistent mounts use systemd, not fstab.** `persist` writes a
+`/etc/systemd/system/<mnt-name>.mount` unit (`systemd-escape`) with
+`x-systemd.automount` + `_netdev`: the share is mounted **on first access**
+instead of at boot, so an unreachable SMB server can never hang boot (with
+fstab it could). `enable --now` arms the automount immediately.
+
+**Recipes:**
+- **Mount the server's media share and keep it across reboots:**
+  ```bash
+  pos share smb client persist //100.100.100.1/media /mnt/smb/media bob
+  ```
+- **One-off guest mount (no persistence):**
+  `pos share smb client mount //10.0.0.5/pub /mnt/pub`
+- **Check what a server shares before mounting:** `smbclient -L //10.0.0.5 -N`
+  (or with `-U bob`)
+
+**Troubleshooting:**
+- "mount.cifs not found" → `cifs-utils` isn't installed; `sudo apt install cifs-utils`
+- Mount fails with `Permission denied` / `NT_STATUS_LOGON_FAILURE` → wrong Samba
+  user/password; verify the account with `pos share smb server list` on the
+  server and re-run with the right user
+- Mount fails with `NT_STATUS_ACCESS_DENIED` on a guest mount → the server
+  share has no `guest ok`; use a user or add `--guest` on the server
+- Persistent mount doesn't appear until accessed → intended (`x-systemd.automount`);
+  `pos share smb client list` only shows actively mounted shares, access the
+  directory to trigger the mount
 
 ---
 

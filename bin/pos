@@ -157,6 +157,10 @@ EXAMPLES
   pos share nfs server share /mnt/hdd      Share a folder via NFS
   pos share nfs client persist 10.0.0.5:/srv/data /mnt/nfs/data
                                           Persistent NFS mount (systemd)
+  pos share smb server share /mnt/hdd media --users bob
+                                          Share a folder via SMB (Samba)
+  pos share smb client persist //10.0.0.5/media /mnt/smb/media bob
+                                          Persistent SMB mount (automount)
 
   pos ssh load-keys                       Load all SSH keys into agent
 
@@ -250,7 +254,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-firewall media-mp4 system-backup share-usb-server communication-telegram-listener communication-matrix-listener ai-gemini system-event-trigger config"
+INTERACTIVE_CMDS="system-firewall media-mp4 system-backup share-usb-server share-smb-server share-smb-client communication-telegram-listener communication-matrix-listener ai-gemini system-event-trigger config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"
