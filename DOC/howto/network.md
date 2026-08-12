@@ -1,7 +1,8 @@
 # How-To: `pos network`
 
-Networking day-to-day: IP/diagnostic info, Wi-Fi hotspots, host discovery, and
-port checks. Tools: `ip`, `hotspot`, `scan`, `checkport`.
+Networking day-to-day: IP/diagnostic info, Wi-Fi hotspots, host discovery, port
+checks, and the aria2 download daemon. Tools: `ip`, `hotspot`, `scan`,
+`checkport`, `download`.
 
 | Tool | What it does |
 |------|--------------|
@@ -9,6 +10,7 @@ port checks. Tools: `ip`, `hotspot`, `scan`, `checkport`.
 | `pos network hotspot` | Wi-Fi AP via `create_ap` / `wihotspot-gui` |
 | `pos network scan` | Two-phase host discovery with `nmap` |
 | `pos network checkport` | Is a TCP port open on a host? |
+| `pos network download` | aria2 download daemon + queue control (add/torrent/metalink, watch, limits) |
 
 ---
 
@@ -153,6 +155,23 @@ tmux attach -t dl-ubuntu.iso      # live progress; session closes itself when do
 download status`; if the unit failed, check the journal with
 `journalctl --user -u pos-aria2 -n 50`. Seed/limit knobs live on `add`/`torrent`
 (`--seed`, `--split`) and on `limit`/`set` for the running queue.
+
+**Recipe: survive a long internet outage.** A download that fails while the
+internet is down is stopped with `error` status — the retry machinery brings it
+back without you:
+
+```bash
+pos network download add https://example.com/big.iso   # arms the retry healer
+# ...router dies for 3 hours; big.iso sits in STOPPED/error...
+pos network download retry all          # waits for connectivity, re-queues, verifies
+pos network download watch 2e9dffc4     # or: watch a live one — auto-restarts when back
+```
+
+The healer timer (`pos-aria2-retry.timer`) already runs `retry all` every 2 min
+on its own once a download started, so no shell is needed on headless boxes.
+`retry <gid>` for one download; sources that fail with a *real* 404/410 are
+remembered in `~/.config/linux_post_install/download.retry` and skipped by
+`retry all` — `pos network download restart <gid>` re-queues them by hand.
 
 ---
 

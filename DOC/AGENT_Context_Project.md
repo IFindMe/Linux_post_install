@@ -591,7 +591,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 558 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 874 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |

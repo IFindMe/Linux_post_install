@@ -25,7 +25,7 @@ _pos_subcmds[communication-matrix-sender]="send test login"
 _pos_subcmds[communication-telegram-sender]="send test"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
-_pos_subcmds[network-download]="start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch"
+_pos_subcmds[network-download]="start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry"
 _pos_subcmds[system-event-trigger]="run config list enable disable status"
 # GEN:END possubcmds
 # GEN:START posconfigscopes

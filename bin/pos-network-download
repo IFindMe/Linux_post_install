@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: network download — aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
-# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch
+# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry
 # POS_FLAGS: --dir --out --split --seed --force --upload --gid --tmux
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -18,6 +18,12 @@ CONFIG_FILE="$CONFIG_DIR/download.env"
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-$HOME/Downloads}"
 USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 SERVICE="pos-aria2.service"
+HEALER_SERVICE="pos-aria2-retry.service"
+HEALER_TIMER="pos-aria2-retry.timer"
+RETRY_STATE="$CONFIG_DIR/download.retry"
+NET_PROBE="${NET_PROBE:-timeout 3 bash -c '</dev/tcp/8.8.8.8/53>'}"
+RETRY_INTERVAL="${RETRY_INTERVAL:-30}"
+RETRY_VERIFY_SLEEP="${RETRY_VERIFY_SLEEP:-3}"
 
 load_secret() {
     if [ -z "${RPC_SECRET:-}" ] && [ -f "$CONFIG_FILE" ]; then
@@ -58,6 +64,11 @@ Commands:
   limit [gid] <speed>       Speed limit, global or per-download (--upload = up; 0 = unlimited)
   set <key=value>...        Set global aria2 options (--gid <gid> = per-download)
   watch [gid]               Live progress, 2s refresh (Ctrl+C to detach)
+  restart <gid>             Re-queue a finished/errored download (resumes partial files;
+                            torrents re-add via magnet, HTTP via their original URLs)
+  retry <gid|all>           Smart retry: waits out internet outages, then re-queues and
+                            re-checks; reports real problems (dead source) instead of looping
+                            (--once: single check without waiting — used by the healer timer)
 
 Options (add / torrent / metalink):
   --dir <path>    download directory (default: $DOWNLOAD_DIR)
@@ -67,6 +78,12 @@ Options (add / torrent / metalink):
   --tmux          show live progress in a tmux session named after the file
                   (attach with: tmux attach -t dl-<name>)
 
+Options (retry):
+  --interval <s>  poll seconds while waiting for internet (default: 30)
+  --max-wait <s>  give up waiting after N seconds (default: 0 = wait forever)
+  --once          single pass: no waiting for internet (healer timer mode)
+  --quiet         suppress progress output (exit 0 even if retries failed)
+
 Examples:
   pos network download add https://example.com/ubuntu.iso --tmux
   pos network download add https://example.com/a.bin https://example.com/b.bin --dir /mnt/hdd/dl
@@ -74,9 +91,14 @@ Examples:
   pos network download list
   pos network download limit 2M
   pos network download watch
+  pos network download restart 2e9dffc4
+  pos network download retry all
+
+Failed downloads are auto-retried by the 'retry healer' systemd timer while the
+daemon runs; it arms on download start and disables itself when nothing is left.
 
 Config: RPC secret in $CONFIG_FILE (chmod 600).
-Env:   RPC_PORT, RPC_SECRET, DOWNLOAD_DIR override defaults (test seams).
+Env:   RPC_PORT, RPC_SECRET, DOWNLOAD_DIR, NET_PROBE override defaults (test seams).
 EOF
     exit 0
 }
@@ -237,6 +259,7 @@ cmd_add() {
     resp=$(rpc aria2.addUri "$(json_arr "${urls[@]}")" "$(opts_json "${oa[@]}")")
     gid=$(printf '%s' "$resp" | jq -r '.result')
     log "added $gid: ${urls[*]}"
+    ensure_healer
     if [ "$tmux" -eq 1 ]; then tmux_watch "$gid" "${out:-$(basename_url "${urls[0]}")}"; fi
 }
 
@@ -278,6 +301,7 @@ cmd_torrent() {
         fi
         if [ "$tmux" -eq 1 ]; then tmux_watch "$gid" "$name"; fi
     done
+    ensure_healer
 }
 
 cmd_metalink() {
@@ -314,7 +338,283 @@ cmd_metalink() {
         rm -f "$src"
     fi
     log "added metalink $gid: $item"
+    ensure_healer
     if [ "$tmux" -eq 1 ]; then tmux_watch "$gid" "$name"; fi
+}
+
+# ── Restart / retry / healer ───────────────────────────────────
+net_up() { bash -c "$NET_PROBE" >/dev/null 2>&1; }
+
+resolve_gid() {
+    # Accept a full 16-hex gid or the unique 8-char prefix shown by 'list'.
+    local g="${1:-}" hits n
+    [ -n "$g" ] || err "gid required (see 'pos network download list')"
+    [[ "$g" =~ ^[0-9a-f]{16}$ ]] && { printf '%s' "$g"; return 0; }
+    [[ "$g" =~ ^[0-9a-f]{1,15}$ ]] || err "invalid gid: $g (16 hex chars, or the short id from 'list')"
+    hits=$( { rpc aria2.tellStopped 0 200; rpc aria2.tellActive; rpc aria2.tellWaiting 0 200; } \
+        | jq -r --arg p "$g" '.result[]? | select(.gid | startswith($p)) | .gid' )
+    hits=$(printf '%s\n' "$hits" | sed '/^$/d')
+    n=$(printf '%s\n' "$hits" | sed '/^$/d' | wc -l | tr -d ' ')
+    [ "$n" -eq 0 ] && err "no download matches gid '$g' (stopped history is lost when the daemon restarts)"
+    [ "$n" -gt 1 ] && err "gid prefix '$g' is ambiguous — matches: $(printf '%s' "$hits" | paste -sd' ' -)"
+    printf '%s\n' "$hits"
+}
+
+download_name() {  # download_name <tellStatus-json> → name of the file / torrent
+    printf '%s' "$1" | jq -r '(.result.bittorrent.info.name // (.result.files[0].path // "")) | split("/") | last'
+}
+
+do_restart() {  # do_restart <gid> <dir> <seed 0|1> <split> → prints new gids
+    local gid="$1" dir="$2" seed="$3" split="$4"
+    local data st is_bt newgids=() uri fdir fname oa ng d magnet
+    data=$(rpc aria2.tellStatus "$(json_str "$gid")")
+    st=$(printf '%s' "$data" | jq -r '.result.status')
+    case "$st" in
+        complete|error|removed) ;;
+        active) err "gid $gid is active — it's already downloading" ;;
+        *) err "gid $gid has status '$st' — cannot restart" ;;
+    esac
+    is_bt=$(printf '%s' "$data" | jq -r 'if .result.bittorrent then 1 else 0 end')
+    if [ "$is_bt" = "1" ]; then
+        magnet=$(printf '%s' "$data" | jq -r '.result.bittorrent as $b | "magnet:?xt=urn:btih:\($b.infoHash)" + (($b.announceList // []) | flatten | map("&tr=" + @uri) | join(""))')
+        d="${dir:-$(printf '%s' "$data" | jq -r '.result.dir')}"; d="${d/#\~/$HOME}"
+        oa=()
+        [ -n "$d" ] && oa+=("dir=$d")
+        [ -n "$split" ] && oa+=("split=$split")
+        ng=$(rpc aria2.addUri "$(json_arr "$magnet")" "$(opts_json "${oa[@]}")" | jq -r '.result')
+        newgids+=("$ng")
+        if [ "$seed" -eq 1 ]; then
+            rpc aria2.changeOption "$(json_str "$ng")" "$(opts_json "seed-ratio=0")" >/dev/null
+        fi
+    else
+        while IFS=$'\t' read -r uri fdir fname; do
+            [ -n "$uri" ] || continue
+            oa=()
+            [ -n "$fdir" ] && oa+=("dir=$fdir")
+            [ -n "$fname" ] && oa+=("out=$fname")
+            [ -n "$split" ] && oa+=("split=$split")
+            ng=$(rpc aria2.addUri "$(json_arr "$uri")" "$(opts_json "${oa[@]}")" | jq -r '.result')
+            newgids+=("$ng")
+        done < <(printf '%s' "$data" | jq -r '.result.files[] | [(.uris[0].uri // ""), (.path | split("/") | .[:-1] | join("/")), (.path | split("/") | last)] | @tsv')
+    fi
+    [ ${#newgids[@]} -gt 0 ] || err "gid $gid has no reusable URIs"
+    printf '%s\n' "${newgids[@]}"
+}
+
+cmd_restart() {
+    local gid="" dir="" split="" seed=0 tmux=0 newgids=() name=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir)   dir="${2:-}"; shift 2 ;;
+            --dir=*) dir="${1#*=}"; shift ;;
+            --seed)  seed=1; shift ;;
+            --split) split="${2:-}"; shift 2 ;;
+            --split=*) split="${1#*=}"; shift ;;
+            --tmux)  tmux=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "restart: unknown option: $1" ;;
+            *) gid="$1"; shift ;;
+        esac
+    done
+    [ -n "$gid" ] || err "restart: gid required (see 'pos network download list')"
+    [ "$tmux" -eq 1 ] && { command -v tmux &>/dev/null || err "tmux not found (install tmux) — needed for --tmux"; }
+    dir="${dir/#\~/$HOME}"
+    ensure_daemon
+    gid=$(resolve_gid "$gid")
+    mapfile -t newgids < <(do_restart "$gid" "$dir" "$seed" "$split")
+    [ ${#newgids[@]} -gt 0 ] || err "restart failed"
+    name=$(download_name "$(rpc aria2.tellStatus "$(json_str "$gid")")")
+    [ -n "$name" ] || name="download"
+    if [ "$seed" -eq 1 ]; then
+        log "restarted $gid → ${newgids[*]}: $name (seeding until stopped)"
+    else
+        log "restarted $gid → ${newgids[*]}: $name"
+    fi
+    ensure_healer
+    if [ "$tmux" -eq 1 ]; then tmux_watch "${newgids[0]}" "$name"; fi
+}
+
+retry_src_id() {  # stable identity for the permanent-failure list (survives new gids)
+    local data
+    data=$(rpc aria2.tellStatus "$(json_str "$1")")
+    printf '%s' "$data" | jq -r 'if .result.bittorrent then "bt:" + .result.bittorrent.infoHash else "url:" + (.result.files[0].uris[0].uri // .result.files[0].path // "?") end'
+}
+
+retry_is_permanent() { grep -qxF "$1" "$RETRY_STATE" 2>/dev/null; }
+
+retry_mark_permanent() {
+    mkdir -p "$CONFIG_DIR"
+    retry_is_permanent "$1" || printf '%s\n' "$1" >> "$RETRY_STATE"
+}
+
+retry_verify() {  # retry_verify <newgid> <src-id> → 0 ok / 1 failed (marks real failures permanent)
+    local g="$1" src="$2" attempt=0 st ec em data
+    while [ "$attempt" -lt 5 ]; do
+        attempt=$((attempt + 1))
+        sleep "$RETRY_VERIFY_SLEEP"
+        data=$(rpc aria2.tellStatus "$(json_str "$g")" 2>/dev/null || true)
+        st=$(printf '%s' "$data" | jq -r '.result.status // "?"')
+        case "$st" in
+            active|waiting) [ "$quiet" -eq 1 ] || log "retry running — $g (${g:0:8})"; return 0 ;;
+            complete) [ "$quiet" -eq 1 ] || log "retry finished instantly — $g already on disk"; return 0 ;;
+            error|removed)
+                ec=$(printf '%s' "$data" | jq -r '.result.errorCode // "?"')
+                em=$(printf '%s' "$data" | jq -r '.result.errorMessage // "?"')
+                if [ "$ec" = "3" ]; then
+                    retry_mark_permanent "$src"
+                    [ "$quiet" -eq 1 ] || err "real problem — source is gone (aria2 error 3: $em). Marked permanent; manual 'restart' overrides."
+                    return 1
+                fi
+                [ "$quiet" -eq 1 ] || warn "retry attempt $attempt failed (aria2 error $ec: $em) — will re-check"
+                ;;
+        esac
+    done
+    [ "$quiet" -eq 1 ] || warn "retry of $g did not stabilize after 5 checks"
+    return 1
+}
+
+cmd_retry() {
+    local target="all" interval="$RETRY_INTERVAL" maxwait=0 once=0 quiet=0
+    local rdir="" rsplit="" seed=0 tmux=0 rargs=() gids=() gid st failures=0 ng newgids src deadline=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --interval)  interval="${2:-30}"; shift 2 ;;
+            --interval=*) interval="${1#*=}"; shift ;;
+            --max-wait)  maxwait="${2:-0}"; shift 2 ;;
+            --max-wait=*) maxwait="${1#*=}"; shift ;;
+            --once)  once=1; shift ;;
+            --quiet) quiet=1; shift ;;
+            --dir)   rdir="${2:-}"; shift 2 ;;
+            --dir=*) rdir="${1#*=}"; shift ;;
+            --seed)  seed=1; shift ;;
+            --split) rsplit="${2:-}"; shift 2 ;;
+            --split=*) rsplit="${1#*=}"; shift ;;
+            --tmux)  tmux=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "retry: unknown option: $1" ;;
+            *) target="$1"; shift ;;
+        esac
+    done
+    if ! daemon_active; then
+        [ "$quiet" -eq 1 ] && return 0
+        err "daemon not running — start it first (pos network download start)"
+    fi
+    rdir="${rdir/#\~/$HOME}"
+    [ "$tmux" -eq 1 ] && { command -v tmux &>/dev/null || err "tmux not found (install tmux) — needed for --tmux"; }
+    [ -n "$rdir" ] && rargs+=(--dir "$rdir")
+    [ "$seed" -eq 1 ] && rargs+=(--seed)
+    [ -n "$rsplit" ] && rargs+=(--split "$rsplit")
+    [ "$tmux" -eq 1 ] && rargs+=(--tmux)
+    if [ "$target" = "all" ]; then
+        mapfile -t gids < <(rpc aria2.tellStopped 0 200 | jq -r '.result[] | select(.status == "error") | .gid')
+    else
+        gid=$(resolve_gid "$target")
+        st=$(rpc aria2.tellStatus "$(json_str "$gid")" | jq -r '.result.status')
+        [ "$st" = "error" ] || err "gid $target has status '$st' — nothing to retry"
+        gids+=("$gid")
+    fi
+    if [ ${#gids[@]} -eq 0 ]; then
+        [ "$quiet" -eq 1 ] || log "nothing to retry — queue clean"
+        healer_done
+        return 0
+    fi
+    [ "$maxwait" -gt 0 ] && deadline=$((SECONDS + maxwait))
+    while ! net_up; do
+        if [ "$once" -eq 1 ]; then
+            [ "$quiet" -eq 1 ] || log "no internet — will retry on the next run"
+            return 0
+        fi
+        [ "$quiet" -eq 1 ] || log "no internet — waiting for connectivity (checking every ${interval}s, Ctrl+C to abort)"
+        [ "$maxwait" -gt 0 ] && [ "$SECONDS" -ge "$deadline" ] && err "timed out waiting for internet ($maxwait s)"
+        sleep "$interval"
+    done
+    for gid in "${gids[@]}"; do
+        src=$(retry_src_id "$gid")
+        if retry_is_permanent "$src"; then
+            [ "$quiet" -eq 1 ] || log "skip $gid — source marked permanently failing (override: pos network download restart $gid)"
+            continue
+        fi
+        [ "$quiet" -eq 1 ] || log "retrying ${gid:0:8}…"
+        newgids=$(do_restart "$gid" "$rdir" "$seed" "$rsplit" || true)
+        [ -n "$newgids" ] || { failures=$((failures + 1)); continue; }
+        ng=$(printf '%s\n' "$newgids" | head -1)
+        retry_verify "$ng" "$src" || failures=$((failures + 1))
+    done
+    healer_done
+    [ "$quiet" -eq 1 ] && return 0
+    [ "$failures" -eq 0 ] || err "$failures retry(s) failed — see messages above"
+}
+
+install_healer_units() {
+    mkdir -p "$USER_SYSTEMD_DIR"
+    local runner
+    if [ -x /usr/local/bin/pos-network-download ]; then
+        runner=/usr/local/bin/pos-network-download
+    else
+        runner="$(cd "$(dirname "$0")/.." && pwd)/bin/pos-network-download"
+        warn "using repo path $runner — re-run 'install.sh' so the healer survives a deleted repo"
+    fi
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) install $HEALER_SERVICE + $HEALER_TIMER in $USER_SYSTEMD_DIR"
+        return 0
+    fi
+    cat > "$USER_SYSTEMD_DIR/$HEALER_SERVICE" <<EOF
+[Unit]
+Description=pos aria2 retry healer (linux-post-install)
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=$runner retry all --once --quiet
+EOF
+    chmod 644 "$USER_SYSTEMD_DIR/$HEALER_SERVICE"
+    cat > "$USER_SYSTEMD_DIR/$HEALER_TIMER" <<EOF
+[Unit]
+Description=pos aria2 retry healer timer (linux-post-install)
+
+[Timer]
+OnUnitActiveSec=2min
+OnBootSec=2min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    chmod 644 "$USER_SYSTEMD_DIR/$HEALER_TIMER"
+    systemctl --user daemon-reload
+}
+
+ensure_healer() {
+    # Arm the retry timer whenever a download starts; it heals failed downloads.
+    if ! systemctl --user is-enabled "$HEALER_TIMER" >/dev/null 2>&1; then
+        install_healer_units
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) systemctl --user enable --now $HEALER_TIMER"
+        else
+            systemctl --user enable --now "$HEALER_TIMER" >/dev/null 2>&1 \
+                || warn "could not enable retry healer ($HEALER_TIMER)"
+            log "retry healer armed — failed downloads auto-retry every 2 min"
+        fi
+    fi
+}
+
+healer_done() {
+    # Disable the timer when nothing is left to heal (no active/waiting/errored).
+    [ -f "$USER_SYSTEMD_DIR/$HEALER_TIMER" ] || return 0
+    local n
+    n=$(rpc aria2.tellActive | jq '.result | length')
+    [ "$n" -gt 0 ] && return 0
+    n=$(rpc aria2.tellWaiting 0 200 | jq '.result | length')
+    [ "$n" -gt 0 ] && return 0
+    n=$(rpc aria2.tellStopped 0 200 | jq '[.result[] | select(.status == "error")] | length')
+    [ "$n" -gt 0 ] && return 0
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) systemctl --user disable --now $HEALER_TIMER"
+    else
+        systemctl --user disable --now "$HEALER_TIMER" >/dev/null 2>&1 || true
+        log "retry healer disabled — no active or failed downloads left"
+    fi
 }
 
 # ── Listing / inspection ───────────────────────────────────────
@@ -465,10 +765,10 @@ cmd_set() {
 cmd_watch() {
     local gid="${1:-}"
     printf '\033[?25l'
-    trap 'printf "\033[?25h"; exit 0' INT TERM EXIT
+    trap 'st=$?; printf "\033[?25h"; exit "$st"' INT TERM EXIT
     if [ -n "$gid" ]; then
         while :; do
-            local raw row st
+            local raw row st ng
             raw=$(rpc aria2.tellStatus "$(json_str "$gid")")
             row=$(printf '%s' "$raw" | jq -r '
               .result as $r |
@@ -485,7 +785,23 @@ cmd_watch() {
                 printf '%s' "$row" | awk -F'\t' "$ROW_AWK"'{ printf "  %-9s %6.1f%%  %s / %s  dl %s  up %s  conn %s  eta %s", $1, $2, $3, $4, hs($5), hs($6), $7, et($8) }'
             fi
             case "$st" in
-                complete|error|removed) printf '\n'; exit 0 ;;
+                complete) printf '\n'; exit 0 ;;
+                error|removed)
+                    if net_up; then
+                        printf '\n'
+                        err "download $gid failed while internet is up — real problem (diagnose: pos network download info $gid; retry: pos network download retry $gid)"
+                    fi
+                    printf '\033[J  network down — waiting for connectivity (auto-retry when back)\n'
+                    while ! net_up; do sleep "$RETRY_INTERVAL"; done
+                    printf '\r\033[J  network back — restarting download\n'
+                    gid=$(resolve_gid "$gid")
+                    ng=$(do_restart "$gid" "" 0 "" | head -1)
+                    [ -n "$ng" ] || exit 1
+                    name=$(download_name "$(rpc aria2.tellStatus "$(json_str "$gid")")")
+                    [ -n "$name" ] || name="download"
+                    log "auto-restarted $gid → $ng: $name"
+                    gid="$ng"
+                    ;;
             esac
             sleep 2
         done
@@ -548,7 +864,7 @@ main() {
         torrent) cmd_torrent "$@" ;;
         metalink) cmd_metalink "$@" ;;
         list)    cmd_list ;;
-        info|files|peers|pause|resume|remove|move|limit|set|watch)
+        info|files|peers|pause|resume|remove|move|limit|set|watch|restart|retry)
             "cmd_$cmd" "$@" ;;
         purge)   cmd_purge ;;
         *) err "unknown command: $cmd (see 'pos network download --help')" ;;

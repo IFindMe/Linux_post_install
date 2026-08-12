@@ -6,6 +6,7 @@ The units installed and enabled by `postinstall.sh`, plus the `pos` bash complet
   - [`autostart.service`](#autostartservice)
   - [`ssh-agent.service`](#ssh-agentservice)
   - [`pos-health.service`](#pos-healthservice)
+- [Per-user units (`pos network download`)](#per-user-units-pos-network-download)
 - [Feature-flag gating](#feature-flag-gating)
 - [Bash completion](#bash-completion)
 
@@ -85,6 +86,31 @@ Persistent=true
 The service is `Type=oneshot` and is driven **only** by its companion `pos-health.timer` (`WantedBy=timers.target`); the service itself is never enabled directly.
 
 **Configuration:** `postinstall.sh` substitutes `__POS_USER__` with the installing user (`${SUDO_USER:-$USER}`) so the digest uses that user's real notify config. The `EnvironmentFile=` lines load `system.env` (health/backup settings) and `notify.env` (`NOTIFY_PLATFORM`). The timer is enabled only when a Telegram config (`~/.config/linux_post_install/telegram.env`) already exists — otherwise postinstall warns and skips; re-run postinstall after configuring a notify platform to install it.
+
+---
+
+## Per-user units (`pos network download`)
+
+The aria2 download tool installs **user-scope** units (not by postinstall):
+written to `~/.config/systemd/user/` and enabled with `systemctl --user` on
+first use, so they need no sudo.
+
+- `pos-aria2.service` — the daemon (`Type=simple`, `Restart=on-failure`,
+  `WantedBy=default.target`): runs `aria2c --enable-rpc
+  --rpc-listen-port=6800 --rpc-secret=… --dir=$HOME/Downloads --continue=true
+  --max-connection-per-server=16 --split=16 --seed-time=0`. `pos network
+  download start` generates the `RPC_SECRET` into
+  `~/.config/linux_post_install/download.env` (chmod 600).
+- `pos-aria2-retry.service` — `Type=oneshot`; `ExecStart=<pos> network download
+  retry all --once --quiet` (runner = `/usr/local/bin/pos-network-download`,
+  repo-path fallback with a warning). Driven only by its companion timer.
+- `pos-aria2-retry.timer` — `OnUnitActiveSec=2min` + `OnBootSec=2min`,
+  `AccuracySec=30s`, `Persistent=true`, `WantedBy=timers.target`. Arms itself
+  when a download starts (`add`/`torrent`/`metalink`/`restart`) and disables
+  itself when no active, waiting, or errored downloads remain.
+
+On headless boxes `pos network download start` prints a `loginctl
+enable-linger` warning so the user units survive logout.
 
 ---
 

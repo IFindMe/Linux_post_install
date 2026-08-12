@@ -129,8 +129,12 @@ Runs a persistent `aria2c` JSON-RPC daemon (`localhost:6800`) as a **systemd use
 | `pos network download limit [gid] <speed>` | Speed limit, global or per-download (`--upload` = upload speed; `0` = unlimited); accepts `2M`/`512K` |
 | `pos network download set <k=v>...` | Set global aria2 options (`--gid <gid>` = per-download) |
 | `pos network download watch [gid]` | Live table, 2 s refresh; with a GID it exits when that download completes |
+| `pos network download restart <gid>` | Re-queue a finished/errored download from history: torrents re-add via magnet (info-hash + trackers), HTTP via their original URLs — `--continue=true` resumes partial files, a complete file re-verifies instantly. Options `--dir`, `--seed`, `--split`, `--tmux` |
+| `pos network download retry <gid\|all>` | Smart retry of errored downloads: waits out internet outages (poll `--interval`, give up after `--max-wait`), then re-queues and re-verifies. Sources failing with aria2 error 3 are marked permanent in `~/.config/linux_post_install/download.retry` (id = `url:<uri>` / `bt:<infohash>`) and skipped by `retry all` — manual `restart` overrides. `--once` (healer timer mode) skips the wait and exits 0 even on failure; `--quiet` silences output. Options `--dir`, `--seed`, `--split`, `--tmux` |
 
 **`--tmux`:** after enqueueing, `add`/`torrent`/`metalink` open a detached tmux session `dl-<name>` running `watch <gid>` (name from `--out` or the URL basename, sanitized and truncated to 40 chars; `-2` suffix on collision). The session closes itself when the download finishes — attach with `tmux attach -t dl-<name>`.
+
+**Outage resilience:** `watch <gid>` auto-restarts its download when the network comes back (it polls `NET_PROBE`, default `timeout 3 bash -c '</dev/tcp/8.8.8.8/53'`). For unattended machines the **retry healer** timer (`pos-aria2-retry.timer`, systemd **user** scope) runs `retry all --once --quiet` every 2 min; it arms automatically whenever a download starts (`add`/`torrent`/`metalink`/`restart`) and disables itself when no active, waiting, or errored downloads remain. Both are dry-run aware.
 
 ### docker
 
