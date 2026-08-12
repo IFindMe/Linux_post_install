@@ -142,6 +142,7 @@ EXAMPLES
   pos network checkport 10.0.0.1:80       Check if a TCP port is open
   pos network scan 192.168.1.0/24         Fast parallel ping sweep
   pos network hotspot                     Launch wihotspot-gui
+  pos network download add <url>          Enqueue an aria2 download (--tmux = live view)
 
   pos docker ps                           List containers (health, IPs, ports)
   pos docker compose ls                   List available ScaleTail services

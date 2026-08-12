@@ -1,0 +1,558 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: network download — aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
+# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch
+# POS_FLAGS: --dir --out --split --seed --force --upload --gid --tmux
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+command -v aria2c &>/dev/null || err "aria2c not found (install aria2)"
+command -v jq &>/dev/null || err "jq not found (install jq)"
+command -v curl &>/dev/null || err "curl not found (install curl)"
+
+# ── Config / seams (env overrides for tests) ───────────────────
+RPC_PORT="${RPC_PORT:-6800}"
+RPC_URL="http://127.0.0.1:$RPC_PORT/jsonrpc"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/linux_post_install}"
+CONFIG_FILE="$CONFIG_DIR/download.env"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-$HOME/Downloads}"
+USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
+SERVICE="pos-aria2.service"
+
+load_secret() {
+    if [ -z "${RPC_SECRET:-}" ] && [ -f "$CONFIG_FILE" ]; then
+        RPC_SECRET=$(grep -E '^RPC_SECRET=' "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+    fi
+    RPC_SECRET="${RPC_SECRET:-}"
+}
+load_secret
+
+# Shared awk helpers: hs = human speed, et = human eta (seconds).
+ROW_AWK='
+function hs(s){ if(s>=1073741824)return sprintf("%.1fG/s", s/1073741824); if(s>=1048576)return sprintf("%.1fM/s", s/1048576); if(s>=1024)return sprintf("%.1fK/s", s/1024); return sprintf("%dB/s", s) }
+function et(s){ s=s+0; if(s<=0)return "—"; if(s>=86400)return sprintf("%dd%dh", int(s/86400), int(s%86400/3600)); if(s>=3600)return sprintf("%dh%dm", int(s/3600), int(s%3600/60)); if(s>=60)return sprintf("%dm%ds", int(s/60), s%60); return sprintf("%ds", s) }
+'
+
+usage() {
+    cat <<EOF
+Usage: pos network download <command> [args]
+
+aria2 download daemon + queue control. Runs a persistent aria2c with JSON-RPC
+(systemd user service on localhost:$RPC_PORT) and drives it via the RPC API.
+
+Commands:
+  start                     Start the daemon (installs the systemd user service, generates RPC secret)
+  stop                      Stop the daemon and remove the service
+  status                    Daemon health + global transfer stats
+  add <url> [<url>...]      Enqueue HTTP/FTP downloads (auto-starts the daemon)
+  torrent <file|magnet>...  Enqueue .torrent files or magnet links
+  metalink <file|url>       Enqueue a .metalink file or URL
+  list                      Show active / waiting / finished downloads
+  info <gid>                Full status of one download
+  files <gid>               Files of a download
+  peers <gid>               Peers of a torrent download
+  pause|resume [gid|all]    Pause / resume one or all downloads (default all)
+  remove [gid|all]          Remove one or all (--force kills immediately)
+  purge                     Clear finished/error download history
+  move <gid> <pos>          Reorder the waiting queue
+  limit [gid] <speed>       Speed limit, global or per-download (--upload = up; 0 = unlimited)
+  set <key=value>...        Set global aria2 options (--gid <gid> = per-download)
+  watch [gid]               Live progress, 2s refresh (Ctrl+C to detach)
+
+Options (add / torrent / metalink):
+  --dir <path>    download directory (default: $DOWNLOAD_DIR)
+  --out <name>    output file name (add only)
+  --split <n>     connections per download (default: 16)
+  --seed          torrent: keep seeding after download (torrent only)
+  --tmux          show live progress in a tmux session named after the file
+                  (attach with: tmux attach -t dl-<name>)
+
+Examples:
+  pos network download add https://example.com/ubuntu.iso --tmux
+  pos network download add https://example.com/a.bin https://example.com/b.bin --dir /mnt/hdd/dl
+  pos network download torrent file.torrent --seed
+  pos network download list
+  pos network download limit 2M
+  pos network download watch
+
+Config: RPC secret in $CONFIG_FILE (chmod 600).
+Env:   RPC_PORT, RPC_SECRET, DOWNLOAD_DIR override defaults (test seams).
+EOF
+    exit 0
+}
+
+# ── JSON helpers ────────────────────────────────────────────────
+json_arr() { jq -nc '$ARGS.positional' --args "$@"; }
+json_str() { jq -nc --arg s "$1" '$s'; }
+
+opts_json() {  # key=value... → JSON object
+    local kv k v o="{}"
+    for kv in "$@"; do
+        k="${kv%%=*}"; v="${kv#*=}"
+        o=$(jq -nc --argjson o "$o" --arg k "$k" --arg v "$v" '$o + {($k): $v}')
+    done
+    printf '%s' "$o"
+}
+
+# ── RPC client ─────────────────────────────────────────────────
+rpc() {  # rpc <method> [json-args...]
+    local method="$1"; shift
+    local params="" a
+    for a in "$@"; do params="$params,$a"; done
+    local body
+    body=$(curl -fsS --noproxy '*' -m 60 -H 'Content-Type: application/json' \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\",\"params\":[\"token:${RPC_SECRET}\"${params}]}" \
+        "$RPC_URL" 2>/dev/null) \
+        || err "RPC failed — is the daemon running? (pos network download start)"
+    local ecode
+    ecode=$(printf '%s' "$body" | jq -r '.error.code // empty' 2>/dev/null || true)
+    if [ -n "$ecode" ]; then
+        err "aria2 RPC error $ecode: $(printf '%s' "$body" | jq -r '.error.message // "?"')"
+    fi
+    printf '%s' "$body"
+}
+
+# ── Daemon lifecycle (systemd user service) ────────────────────
+daemon_active() { systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; }
+
+cmd_start() {
+    if [ -z "$RPC_SECRET" ] && [ -f "$CONFIG_FILE" ]; then
+        RPC_SECRET=$(grep -E '^RPC_SECRET=' "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+    fi
+    if [ -z "$RPC_SECRET" ]; then
+        RPC_SECRET=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) write RPC secret to $CONFIG_FILE"
+        else
+            mkdir -p "$CONFIG_DIR"
+            printf 'RPC_SECRET=%s\n' "$RPC_SECRET" > "$CONFIG_FILE"
+            chmod 600 "$CONFIG_FILE"
+            log "rpc secret written: $CONFIG_FILE"
+        fi
+    fi
+    mkdir -p "$DOWNLOAD_DIR" 2>/dev/null || warn "cannot create download dir: $DOWNLOAD_DIR"
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) install unit $USER_SYSTEMD_DIR/$SERVICE"
+        log "(dry-run) systemctl --user daemon-reload && enable --now $SERVICE"
+    else
+        mkdir -p "$USER_SYSTEMD_DIR"
+        cat > "$USER_SYSTEMD_DIR/$SERVICE" <<EOF
+[Unit]
+Description=pos aria2 RPC daemon (linux-post-install)
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/aria2c --enable-rpc --rpc-listen-port=$RPC_PORT --rpc-secret=$RPC_SECRET --rpc-listen-all=false "--dir=$DOWNLOAD_DIR" --continue=true --max-connection-per-server=16 --split=16 --seed-time=0 --console-log-level=warn
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+        chmod 644 "$USER_SYSTEMD_DIR/$SERVICE"
+        systemctl --user daemon-reload
+        systemctl --user enable --now "$SERVICE"
+        sleep 1
+    fi
+    log "aria2 daemon running on http://127.0.0.1:$RPC_PORT (dir: $DOWNLOAD_DIR)"
+    if command -v loginctl >/dev/null 2>&1; then
+        if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
+            warn "enable linger so the daemon survives logout: sudo loginctl enable-linger $(id -un)"
+        fi
+    fi
+}
+
+cmd_stop() {
+    if [ ! -f "$USER_SYSTEMD_DIR/$SERVICE" ]; then
+        warn "no aria2 daemon service installed ($SERVICE)"
+        exit 0
+    fi
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) systemctl --user disable --now $SERVICE; remove unit"
+    else
+        systemctl --user disable --now "$SERVICE" 2>/dev/null || true
+        rm -f "$USER_SYSTEMD_DIR/$SERVICE"
+        systemctl --user daemon-reload
+    fi
+    log "aria2 daemon stopped and removed"
+}
+
+cmd_status() {
+    if daemon_active; then echo "daemon:     running"; else echo "daemon:     not running"; fi
+    if systemctl --user is-enabled "$SERVICE" >/dev/null 2>&1; then
+        echo "autostart:  enabled (starts on login)"
+    else
+        echo "autostart:  disabled"
+    fi
+    echo "rpc:        http://127.0.0.1:$RPC_PORT"
+    [ -f "$CONFIG_FILE" ] && echo "secret:     $CONFIG_FILE"
+    echo "dir:        $DOWNLOAD_DIR"
+    if daemon_active; then
+        rpc aria2.getGlobalStat | jq -r '"active: \(.result.numActive)   waiting: \(.result.numWaiting)   stopped: \(.result.numStopped)   (history: \(.result.numStoppedTotal))"'
+        echo "aria2:      $(rpc aria2.getVersion | jq -r '.result.version')"
+    fi
+}
+
+ensure_daemon() {
+    if ! daemon_active; then
+        log "daemon not running — starting it"
+        cmd_start
+    fi
+}
+
+# ── Submit ─────────────────────────────────────────────────────
+basename_url() {
+    local u="$1" b
+    b="${u##*/}"; b="${b%%\?*}"; b="${b%%\#*}"
+    [ -n "$b" ] || b="download"
+    printf '%s' "$b"
+}
+
+cmd_add() {
+    local dir="$DOWNLOAD_DIR" out="" split="" tmux=0
+    local urls=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir)   dir="${2:-$DOWNLOAD_DIR}"; shift 2 ;;
+            --dir=*) dir="${1#*=}"; shift ;;
+            --out)   out="${2:-}"; shift 2 ;;
+            --out=*) out="${1#*=}"; shift ;;
+            --split) split="${2:-}"; shift 2 ;;
+            --split=*) split="${1#*=}"; shift ;;
+            --tmux)  tmux=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "add: unknown option: $1" ;;
+            *) urls+=("$1"); shift ;;
+        esac
+    done
+    [ ${#urls[@]} -gt 0 ] || err "add: no URL given"
+    [ "$tmux" -eq 1 ] && { command -v tmux &>/dev/null || err "tmux not found (install tmux) — needed for --tmux"; }
+    dir="${dir/#\~/$HOME}"
+    ensure_daemon
+    local oa=()
+    [ -n "$dir" ]   && oa+=("dir=$dir")
+    [ -n "$out" ]   && oa+=("out=$out")
+    [ -n "$split" ] && oa+=("split=$split")
+    local resp gid
+    resp=$(rpc aria2.addUri "$(json_arr "${urls[@]}")" "$(opts_json "${oa[@]}")")
+    gid=$(printf '%s' "$resp" | jq -r '.result')
+    log "added $gid: ${urls[*]}"
+    if [ "$tmux" -eq 1 ]; then tmux_watch "$gid" "${out:-$(basename_url "${urls[0]}")}"; fi
+}
+
+cmd_torrent() {
+    local dir="$DOWNLOAD_DIR" seed=0 tmux=0
+    local items=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir)   dir="${2:-$DOWNLOAD_DIR}"; shift 2 ;;
+            --dir=*) dir="${1#*=}"; shift ;;
+            --seed)  seed=1; shift ;;
+            --tmux)  tmux=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "torrent: unknown option: $1" ;;
+            *) items+=("$1"); shift ;;
+        esac
+    done
+    [ ${#items[@]} -gt 0 ] || err "torrent: need a .torrent file or magnet link"
+    [ "$tmux" -eq 1 ] && { command -v tmux &>/dev/null || err "tmux not found (install tmux) — needed for --tmux"; }
+    dir="${dir/#\~/$HOME}"
+    ensure_daemon
+    local item
+    for item in "${items[@]}"; do
+        local resp gid name
+        if [[ "$item" =~ ^magnet: ]]; then
+            resp=$(rpc aria2.addUri "$(json_arr "$item")" "$(opts_json "dir=$dir")")
+            name="magnet"
+        else
+            [ -f "$item" ] || err "torrent: no such file: $item"
+            name=$(basename "$item"); name="${name%.torrent}"
+            resp=$(rpc aria2.addTorrent "$(json_str "$(base64 -w0 "$item")")" "[]" "$(opts_json "dir=$dir")")
+        fi
+        gid=$(printf '%s' "$resp" | jq -r '.result')
+        if [ "$seed" -eq 1 ]; then
+            rpc aria2.changeOption "$(json_str "$gid")" "$(opts_json "seed-ratio=0")" >/dev/null
+            log "added torrent $gid: $item (seeding until stopped)"
+        else
+            log "added torrent $gid: $item"
+        fi
+        if [ "$tmux" -eq 1 ]; then tmux_watch "$gid" "$name"; fi
+    done
+}
+
+cmd_metalink() {
+    local dir="$DOWNLOAD_DIR" tmux=0 item=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir)   dir="${2:-$DOWNLOAD_DIR}"; shift 2 ;;
+            --dir=*) dir="${1#*=}"; shift ;;
+            --tmux)  tmux=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "metalink: unknown option: $1" ;;
+            *) item="$1"; shift ;;
+        esac
+    done
+    [ -n "$item" ] || err "metalink: need a .metalink file or URL"
+    [ "$tmux" -eq 1 ] && { command -v tmux &>/dev/null || err "tmux not found (install tmux) — needed for --tmux"; }
+    dir="${dir/#\~/$HOME}"
+    ensure_daemon
+    local src="$item" name
+    if [[ "$item" =~ ^https?:// ]]; then
+        src=$(mktemp)
+        trap 'rm -f "$src"' EXIT
+        curl -fsSL --noproxy '*' -m 120 -o "$src" "$item" || err "metalink: failed to fetch $item"
+        name=$(basename_url "$item")
+    else
+        [ -f "$item" ] || err "metalink: no such file: $item"
+        name=$(basename "$item")
+    fi
+    local resp gid
+    resp=$(rpc aria2.addMetalink "$(json_str "$(base64 -w0 "$src")")" "{}")
+    gid=$(printf '%s' "$resp" | jq -r '.result')
+    if [[ "$item" =~ ^https?:// ]]; then
+        trap - EXIT
+        rm -f "$src"
+    fi
+    log "added metalink $gid: $item"
+    if [ "$tmux" -eq 1 ]; then tmux_watch "$gid" "$name"; fi
+}
+
+# ── Listing / inspection ───────────────────────────────────────
+LIST_JQ='.result[] | [.gid[0:8], .status,
+ (if ((.totalLength|tonumber) > 0) then (100*(.completedLength|tonumber)/(.totalLength|tonumber)) else 0 end),
+ (.downloadSpeed|tonumber), (.uploadSpeed|tonumber),
+ (.bittorrent.info.name // ((.files[0].path // "")|split("/")|last))] | @tsv'
+
+fmt_list() {
+    awk -F'\t' "$ROW_AWK"'{ printf "  %-8s %-9s %6.1f%% %9s %9s %s\n", $1, $2, $3, hs($4), hs($5), $6 }'
+}
+
+cmd_list() {
+    local act wait stp n
+    act=$(rpc aria2.tellActive)
+    wait=$(rpc aria2.tellWaiting 0 100)
+    stp=$(rpc aria2.tellStopped 0 50)
+    n=$(printf '%s' "$act" | jq '.result | length')
+    printf 'ACTIVE (%s)\n' "$n"
+    printf '  %-8s %-9s %7s %9s %9s %s\n' GID STATUS PCT DL UL NAME
+    printf '%s' "$act" | jq -r "$LIST_JQ" | fmt_list
+    n=$(printf '%s' "$wait" | jq '.result | length')
+    printf 'WAITING (%s)\n' "$n"
+    printf '  %-8s %-9s %7s %9s %9s %s\n' GID STATUS PCT DL UL NAME
+    printf '%s' "$wait" | jq -r "$LIST_JQ" | fmt_list
+    n=$(printf '%s' "$stp" | jq '.result | length')
+    printf 'STOPPED (last %s)\n' "$n"
+    printf '  %-8s %-9s %7s %9s %9s %s\n' GID STATUS PCT DL UL NAME
+    printf '%s' "$stp" | jq -r "$LIST_JQ" | fmt_list
+}
+
+cmd_info() {
+    local gid="${1:-}"
+    [ -n "$gid" ] || err "info: gid required (see 'pos network download list')"
+    rpc aria2.tellStatus "$(json_str "$gid")" | jq -r '
+      .result as $r |
+      "gid:          \($r.gid)",
+      "status:       \($r.status)",
+      (if (($r.totalLength|tonumber) > 0) then "progress:     \(100*($r.completedLength|tonumber)/($r.totalLength|tonumber)|floor)%  \($r.completedLength)/\($r.totalLength) bytes" else "progress:     unknown (metadata still downloading)" end),
+      "dl speed:     \($r.downloadSpeed) B/s",
+      "up speed:     \($r.uploadSpeed) B/s",
+      "connections:  \($r.connections)",
+      (if ($r.numSeeders // 0 | tonumber) > 0 then "seeders:      \($r.numSeeders)" else empty end),
+      (if ($r.errorCode | tonumber) > 0 then "error:        \($r.errorCode) — \($r.errorMessage // "?")" else empty end),
+      (if $r.bittorrent then "torrent:      \($r.bittorrent.info.name // "?")" + "\n" + "info-hash:    \($r.infoHash)" else empty end),
+      "dir:          \($r.dir)",
+      "files:",
+      ($r.files[] | "  [\(.index)] \(.path)  \(.completedLength)/\(.length) bytes")'
+}
+
+cmd_files() {
+    local gid="${1:-}"
+    [ -n "$gid" ] || err "files: gid required"
+    rpc aria2.getFiles "$(json_str "$gid")" | jq -r '.result[] | [.index, .path, .length, .completedLength] | @tsv' \
+        | awk -F'\t' '{ printf "  [%s] %s  %s/%s bytes\n", $1, $2, $4, $3 }'
+}
+
+cmd_peers() {
+    local gid="${1:-}"
+    [ -n "$gid" ] || err "peers: gid required"
+    rpc aria2.getPeers "$(json_str "$gid")" | jq -r '.result[] | [.peerId[0:12], .ip, (.port|tostring), .downloadSpeed, .uploadSpeed, ((.progress|tonumber) * 100)] | @tsv' \
+        | awk -F'\t' "$ROW_AWK"'{ printf "  %-12s %-16s %6s  dl %s  up %s  %5.1f%%\n", $1, $2, $3, hs($4), hs($5), $6 }'
+}
+
+# ── Queue control ──────────────────────────────────────────────
+queue_cmd() {
+    local single="$1" all="$2" verb="$3" target="${4:-all}"
+    if [ "$target" = "all" ]; then
+        rpc "$all" >/dev/null
+    else
+        rpc "$single" "$(json_str "$target")" >/dev/null
+    fi
+    log "$verb: $target"
+}
+
+cmd_pause()  { queue_cmd aria2.pause  aria2.pauseAll  "paused"  "$@"; }
+cmd_resume() { queue_cmd aria2.unpause aria2.unpauseAll "resumed" "$@"; }
+
+cmd_remove() {
+    local force=0 target="${1:-all}"
+    if [ "${1:-}" = "--force" ]; then force=1; target="${2:-all}"; fi
+    if [ "$target" = "all" ]; then
+        if [ "$force" -eq 1 ]; then rpc aria2.forceRemoveAll >/dev/null; else rpc aria2.removeAll >/dev/null; fi
+    else
+        if [ "$force" -eq 1 ]; then rpc aria2.forceRemove "$(json_str "$target")" >/dev/null; else rpc aria2.remove "$(json_str "$target")" >/dev/null; fi
+    fi
+    log "removed: $target"
+}
+
+cmd_purge() { rpc aria2.purgeDownloadResult >/dev/null; log "download history purged"; }
+
+cmd_move() {
+    local gid="${1:-}" pos="${2:-}"
+    [ -n "$gid" ] && [ -n "$pos" ] || err "move: usage: pos network download move <gid> <position>"
+    local newpos
+    newpos=$(rpc aria2.changePosition "$(json_str "$gid")" "$(json_str "$pos")" "$(json_str "POS_SET")" | jq -r '.result')
+    log "moved $gid to position $newpos"
+}
+
+# ── Tuning ─────────────────────────────────────────────────────
+cmd_limit() {
+    local upload=0 gid="" speed=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --upload) upload=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "limit: unknown option: $1" ;;
+            *) if [ -z "$speed" ]; then speed="$1"; else gid="$speed"; speed="$1"; fi; shift ;;
+        esac
+    done
+    [ -n "$speed" ] || err "limit: speed required (0 = unlimited; e.g. 2M)"
+    local key="max-overall-download-limit"
+    if [ "$upload" -eq 1 ]; then key="max-overall-upload-limit"; fi
+    if [ -n "$gid" ]; then
+        key="max-download-limit"; [ "$upload" -eq 1 ] && key="max-upload-limit"
+        rpc aria2.changeOption "$(json_str "$gid")" "$(opts_json "$key=$speed")" >/dev/null
+        log "limit: $gid $key=$speed"
+    else
+        rpc aria2.changeGlobalOption "$(opts_json "$key=$speed")" >/dev/null
+        log "limit: global $key=$speed"
+    fi
+}
+
+cmd_set() {
+    local gid="" kvs=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --gid)   gid="${2:-}"; shift 2 ;;
+            --gid=*) gid="${1#*=}"; shift ;;
+            -h|--help) usage ;;
+            -*) err "set: unknown option: $1" ;;
+            *) kvs+=("$1"); shift ;;
+        esac
+    done
+    [ ${#kvs[@]} -gt 0 ] || err "set: need key=value (see: aria2c --help=#rpc-options)"
+    local opts
+    opts=$(opts_json "${kvs[@]}")
+    if [ -n "$gid" ]; then
+        rpc aria2.changeOption "$gid" "$opts" >/dev/null
+        log "set: gid $gid — ${kvs[*]}"
+    else
+        rpc aria2.changeGlobalOption "$opts" >/dev/null
+        log "set: global — ${kvs[*]}"
+    fi
+}
+
+# ── Live view ──────────────────────────────────────────────────
+cmd_watch() {
+    local gid="${1:-}"
+    printf '\033[?25l'
+    trap 'printf "\033[?25h"; exit 0' INT TERM EXIT
+    if [ -n "$gid" ]; then
+        while :; do
+            local raw row st
+            raw=$(rpc aria2.tellStatus "$(json_str "$gid")")
+            row=$(printf '%s' "$raw" | jq -r '
+              .result as $r |
+              [$r.status,
+               (if (($r.totalLength|tonumber) > 0) then (100*($r.completedLength|tonumber)/($r.totalLength|tonumber)) else 0 end),
+               $r.completedLength, $r.totalLength,
+               ($r.downloadSpeed|tonumber), ($r.uploadSpeed|tonumber),
+               ($r.connections|tonumber),
+               (if (($r.downloadSpeed|tonumber) > 0) then (((($r.totalLength|tonumber) - ($r.completedLength|tonumber)) / ($r.downloadSpeed|tonumber))) else 0 end)]
+              | @tsv' 2>/dev/null || true)
+            st=$(printf '%s' "$row" | cut -f1)
+            printf '\r\033[J'
+            if [ -n "$row" ]; then
+                printf '%s' "$row" | awk -F'\t' "$ROW_AWK"'{ printf "  %-9s %6.1f%%  %s / %s  dl %s  up %s  conn %s  eta %s", $1, $2, $3, $4, hs($5), hs($6), $7, et($8) }'
+            fi
+            case "$st" in
+                complete|error|removed) printf '\n'; exit 0 ;;
+            esac
+            sleep 2
+        done
+    else
+        while :; do
+            local act g n
+            act=$(rpc aria2.tellActive)
+            g=$(rpc aria2.getGlobalStat)
+            n=$(printf '%s' "$act" | jq '.result | length')
+            printf '\r\033[J'
+            if [ "$n" -eq 0 ]; then
+                printf 'no active downloads\n'
+                exit 0
+            fi
+            printf '%s' "$g" | jq -r '[.result.numActive, (.result.downloadSpeed|tonumber), (.result.uploadSpeed|tonumber)] | @tsv' | awk -F'\t' "$ROW_AWK"'{ printf "active %s   dl %s   up %s", $1, hs($2), hs($3) }'
+            printf '  %-8s %-9s %7s %9s %9s %s\n' GID STATUS PCT DL UL NAME
+            printf '%s' "$act" | jq -r "$LIST_JQ" | fmt_list
+            sleep 2
+        done
+    fi
+}
+
+tmux_watch() {
+    local gid="$1" name="$2"
+    name=$(printf '%s' "$name" | tr -cs 'A-Za-z0-9._-' '-' | cut -c1-40)
+    name="${name%-}"
+    [ -n "$name" ] || name="download"
+    local base sname n=2
+    base="dl-$name"
+    sname="$base"
+    while tmux has-session -t "$sname" 2>/dev/null; do
+        sname="${base}-${n}"; n=$((n+1))
+    done
+    local self
+    self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) tmux new-session -d -s $sname -- $self watch $gid"
+    else
+        TERM="${TERM:-xterm-256color}" tmux new-session -d -s "$sname" "$self watch $gid"
+    fi
+    log "tmux session '$sname' started — attach: tmux attach -t '$sname'"
+}
+
+# ── Dispatch ───────────────────────────────────────────────────
+overview() {
+    cmd_status
+    if daemon_active; then echo; cmd_list; fi
+}
+
+main() {
+    local cmd="${1:-}"
+    shift 2>/dev/null || true
+    case "$cmd" in
+        "")      overview ;;
+        -h|--help) usage ;;
+        start)   cmd_start ;;
+        stop)    cmd_stop ;;
+        status)  cmd_status ;;
+        add)     cmd_add "$@" ;;
+        torrent) cmd_torrent "$@" ;;
+        metalink) cmd_metalink "$@" ;;
+        list)    cmd_list ;;
+        info|files|peers|pause|resume|remove|move|limit|set|watch)
+            "cmd_$cmd" "$@" ;;
+        purge)   cmd_purge ;;
+        *) err "unknown command: $cmd (see 'pos network download --help')" ;;
+    esac
+}
+
+main "$@"

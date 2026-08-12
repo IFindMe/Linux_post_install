@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 PACKAGES=(
-    git curl wget vim nano tmux tree jq
+    git curl wget aria2 vim nano tmux tree jq
     unzip zip rsync htop btop telnet
     net-tools iputils-ping traceroute tcpdump nmap
     openssh-client openssh-server ufw fail2ban

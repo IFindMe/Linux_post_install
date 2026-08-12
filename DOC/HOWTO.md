@@ -10,7 +10,7 @@ authoritative one-line reference (every command + flag), see
 | Category | What you can do | Guide |
 |----------|-----------------|-------|
 | `pos ai` | Chat with Google Gemini from CLI or Telegram | [ai](howto/ai.md) |
-| `pos network` | IP info, hotspot, scan, port check | [network](howto/network.md) |
+| `pos network` | IP info, hotspot, scan, port check, aria2 download daemon | [network](howto/network.md) |
 | `pos docker` | Compose services, container dashboards, disposable VMs | [docker](howto/docker.md) |
 | `pos media` | Download audio/video via yt-dlp | [media](howto/media.md) |
 | `pos system` | Backups, firewall, health dashboard | [system](howto/system.md) |

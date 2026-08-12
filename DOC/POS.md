@@ -86,6 +86,7 @@ Precedence: `--model` flag > `AI_GEMINI_MODEL` env > config file > `gemini-2.5-f
 | `pos network checkport <ip:port>` | `bin/pos-network-checkport` | Check if a TCP port is open | None. Uses `/dev/tcp` with a 2s timeout; exit 0/1 via OPEN/CLOSED |
 | `pos network scan <cidr> [--full] [--retries N]` | `bin/pos-network-scan` | Two-phase nmap scan | See below |
 | `pos network hotspot [cmd]` | `bin/pos-network-hotspot` | Wi-Fi hotspot via `create_ap` (CLI) or `wihotspot-gui` (GUI) | Uses the precompiled binaries from `x64_bin/`; see below |
+| `pos network download <cmd>` | `bin/pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) | `aria2c`/`jq`/`curl`; daemon = systemd user service; secret in `~/.config/linux_post_install/download.env`; see below |
 
 **`pos network scan` in detail:**
 
@@ -106,6 +107,30 @@ Backed by the precompiled binaries shipped in `x64_bin/` (see [SCRIPTS.md → x6
 | `pos network hotspot start --foreground <wifi-iface> [<internet-iface>] <ssid> [<passphrase>]` | Skips the prompt, runs in the foreground |
 | `pos network hotspot stop [<id>]` | Stops the running access point via `create_ap --stop`; `<id>` is an interface name or PID, auto-detected if omitted |
 | `pos network hotspot status` | Runs `create_ap --list-running` |
+
+**`pos network download` in detail:**
+
+Runs a persistent `aria2c` JSON-RPC daemon (`localhost:6800`) as a **systemd user service** (`pos-aria2.service`, enabled with `systemctl --user enable --now`; prints a linger warning on headless boxes). `start` installs the unit and generates a random `RPC_SECRET` into `~/.config/linux_post_install/download.env` (chmod 600); the secret is also respected as the `RPC_SECRET` env var. Unit flags: `--continue=true --max-connection-per-server=16 --split=16 --seed-time=0 --dir=$HOME/Downloads`.
+
+| Command | Behavior |
+|---------|----------|
+| `pos network download start` / `stop` | Install+enable the systemd user service / stop and remove it |
+| `pos network download status` | Daemon health + global transfer stats (`getGlobalStat`) |
+| `pos network download add <url>...` | Enqueue HTTP/FTP downloads (auto-starts the daemon); options `--dir`, `--out`, `--split`, `--tmux` |
+| `pos network download torrent <file|magnet>...` | Enqueue `.torrent` files (base64 via `addTorrent`) or magnet links; `--seed` keeps seeding (default `--seed-time=0`), `--dir`, `--tmux` |
+| `pos network download metalink <file|url>...` | Enqueue `.metalink` files or URLs; `--tmux` |
+| `pos network download list` | Table of active / waiting / finished downloads (GID, status, %, dl/up speeds, name) |
+| `pos network download info <gid>` | Full `tellStatus` dump (status, progress, speeds, ETA, error) |
+| `pos network download files <gid>` / `peers <gid>` | Files of a download / peers of a torrent |
+| `pos network download pause\|resume [gid\|all]` | Pause/resume one or all (default `all`) |
+| `pos network download remove [gid\|all]` | Remove one or all; `--force` = `forceRemove` (kills immediately) |
+| `pos network download purge` | Clear finished/error history |
+| `pos network download move <gid> <pos>` | Reorder the waiting queue (`changePosition`) |
+| `pos network download limit [gid] <speed>` | Speed limit, global or per-download (`--upload` = upload speed; `0` = unlimited); accepts `2M`/`512K` |
+| `pos network download set <k=v>...` | Set global aria2 options (`--gid <gid>` = per-download) |
+| `pos network download watch [gid]` | Live table, 2 s refresh; with a GID it exits when that download completes |
+
+**`--tmux`:** after enqueueing, `add`/`torrent`/`metalink` open a detached tmux session `dl-<name>` running `watch <gid>` (name from `--out` or the URL basename, sanitized and truncated to 40 chars; `-2` suffix on collision). The session closes itself when the download finishes — attach with `tmux attach -t dl-<name>`.
 
 ### docker
 

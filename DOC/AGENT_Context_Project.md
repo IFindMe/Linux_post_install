@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–188 |
-| ## 3. Installation Flow | 189–241 |
-| ## 4. The `pos` CLI System | 242–310 |
-| ## 5. Shared Library — `lib/common.sh` | 311–342 |
-| ## 6. Docker Compose / ScaleTail | 343–385 |
-| ## 7. Optional Apps (`apps/`) | 386–415 |
-| ## 8. Entertainment Module | 416–429 |
-| ## 9. Systemd Services | 430–442 |
-| ## 10. Configuration Files | 443–469 |
-| ## 11. Coding Conventions | 470–502 |
-| ## 12. Development Workflow | 503–555 |
-| ## 13. Key File Quick Reference | 556–611 |
-| ## 14. Common Tasks for Agents | 612–639 |
+| ## 2. Directory Structure | 44–189 |
+| ## 3. Installation Flow | 190–242 |
+| ## 4. The `pos` CLI System | 243–312 |
+| ## 5. Shared Library — `lib/common.sh` | 313–344 |
+| ## 6. Docker Compose / ScaleTail | 345–387 |
+| ## 7. Optional Apps (`apps/`) | 388–417 |
+| ## 8. Entertainment Module | 418–431 |
+| ## 9. Systemd Services | 432–444 |
+| ## 10. Configuration Files | 445–471 |
+| ## 11. Coding Conventions | 472–504 |
+| ## 12. Development Workflow | 505–557 |
+| ## 13. Key File Quick Reference | 558–614 |
+| ## 14. Common Tasks for Agents | 615–643 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -76,6 +76,7 @@ Linux_post_install/
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
 │   ├── pos-network-checkport               # Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
+│   ├── pos-network-download                # aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
 │   ├── pos-network-ip                      # Show interfaces, routes, public IP + location
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
@@ -276,6 +277,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
 | network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
+| network | download | `pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
@@ -558,7 +560,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | File | Lines | Purpose |
 |------|-------|---------|
 | `install.sh` | 206 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
-| `preinstall.sh` | 55 | System packages + hotspot deps + yt-dlp + fail2ban |
+| `preinstall.sh` | 73 | System packages + hotspot deps + yt-dlp + fail2ban |
 | `postinstall.sh` | 152 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
@@ -570,7 +572,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 290 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 291 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 565 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
@@ -589,6 +591,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
+| `bin/pos-network-download` | 558 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
@@ -603,7 +606,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 289 | Dynamic bash completion |
+| `completions/pos.bash` | 291 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -629,6 +632,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify Docker health check | Edit `bin/pos-docker-health` |
 | Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
 | Modify USB forwarding logic | Edit `bin/pos-share-usb-server` |
+| Modify aria2 download daemon / queue logic | Edit `bin/pos-network-download` |
 | Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
 | Modify SMB share logic | Edit `bin/pos-share-smb-server` / `bin/pos-share-smb-client` |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |

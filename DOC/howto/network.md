@@ -109,6 +109,53 @@ local firewall — check `sudo pos system firewall` rules and service binds
 
 ---
 
+## `pos network download` — aria2 download daemon + queue
+
+Runs a persistent `aria2c` JSON-RPC daemon as a systemd **user** service
+(`pos-aria2.service`, enabled via `systemctl --user enable --now`; a linger
+warning is printed when no session is active, so the daemon survives logout).
+The RPC secret lives in `~/.config/linux_post_install/download.env` (chmod 600).
+Downloads land in `~/Downloads` by default.
+
+```bash
+# enqueue one or many files (auto-starts the daemon if needed)
+pos network download add https://example.com/ubuntu.iso
+pos network download add https://example.com/a.bin https://example.com/b.bin --dir /mnt/hdd/dl
+
+# torrents / magnets — keep seeding with --seed (default: stop at 100%)
+pos network download torrent debian.torrent --seed
+pos network download torrent "magnet:?xt=urn:btih:…"
+
+# watch progress live (Ctrl+C detaches); with a GID it exits when that one finishes
+pos network download watch
+pos network download watch a1b2c3d4e5f60718
+
+# the queue
+pos network download list
+pos network download pause a1b2c3d4e5f60718     # resume / remove work the same
+pos network download remove --force all          # kill everything immediately
+pos network download limit 2M                    # global speed cap (0 = unlimited)
+pos network download move a1b2c3d4e5f60718 0     # jump to the front of the queue
+```
+
+**Recipe:** grab a big ISO in the background and keep an eye on it from a
+terminal:
+
+```bash
+pos network download add https://example.com/ubuntu.iso --tmux
+tmux attach -t dl-ubuntu.iso      # live progress; session closes itself when done
+```
+
+`--tmux` opens a detached `dl-<name>` session running `watch <gid>` (name from
+`--out` or the URL basename, sanitized; `-2` suffix on collision).
+
+**Troubleshooting:** "RPC failed — is the daemon running?" → `pos network
+download status`; if the unit failed, check the journal with
+`journalctl --user -u pos-aria2 -n 50`. Seed/limit knobs live on `add`/`torrent`
+(`--seed`, `--split`) and on `limit`/`set` for the running queue.
+
+---
+
 ## Related
 
 - Reference tables: [DOC/POS.md → network](../POS.md)
