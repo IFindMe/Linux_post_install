@@ -256,7 +256,13 @@ install the current GitHub release (bundles `adb`) with the optional app
 pos communication scrcpy                          # USB device, config defaults
 pos communication scrcpy --turn-screen-off        # pass any scrcpy flag through
 pos communication scrcpy --no-audio --always-on-top
+pos communication scrcpy --new-display=1920x1080  # mirror to a NEW phone display
 ```
+
+`--new-display` mirrors a fresh virtual display instead of the phone's real
+screen (nice for watching the phone screen content elsewhere): no `=…` uses the
+main display's size/dpi, or force size/dpi — `1920x1080`, `1920x1080/420`,
+`/240`. Set it persistently with `SCRCPY_NEW_DISPLAY` in `pos config scrcpy`.
 
 The window needs a display — over ssh use `ssh -X` (and a phone already
 reachable over WiFi, see below). `scrcpy --help` lists every flag; the wrapper

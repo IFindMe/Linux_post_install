@@ -582,7 +582,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
-| `bin/pos-communication-scrcpy` | 240 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
+| `bin/pos-communication-scrcpy` | 248 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |

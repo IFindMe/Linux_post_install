@@ -328,6 +328,7 @@ The daemon long-polls `/sync` (30s timeout, per-sync `since` token, compact filt
 | Command | Behavior |
 |---------|----------|
 | `pos communication scrcpy` | Mirror the device: opens the scrcpy window (needs a display — over ssh use `ssh -X`). Built from `scrcpy.env` defaults plus any pass-through scrcpy flags (`pos communication scrcpy --turn-screen-off --stay-awake`) |
+| `pos communication scrcpy --new-display[=…]` | Mirror to a new virtual display on the phone (no need to mirror the real screen): `--new-display` (default size/dpi), `--new-display=1920x1080`, `--new-display=1920x1080/420` or `--new-display=/240`. Also settable persistently via `SCRCPY_NEW_DISPLAY` |
 | `pos communication scrcpy devices` | `adb devices -l` — the source of serials for `SCRCPY_SERIAL` |
 | `pos communication scrcpy record [file] [--headless]` | Record a session to an mp4 — default `$SCRCPY_RECORD_DIR/<device>_<date>.mp4`; `--headless` adds `--no-playback` (no window — headless-server friendly) |
 | `pos communication scrcpy tcpip [port]` | `adb tcpip <port>` (default 5555) — switch the USB device to wireless adb, prints the reconnect command with the detected device IP |
@@ -348,6 +349,7 @@ A device must have **USB debugging** enabled (Developer options) and the phone's
 | `SCRCPY_MAX_FPS` | no | — | Limit frame rate, e.g. `60` (scrcpy `--max-fps`) |
 | `SCRCPY_BIT_RATE` | no | — | Video bit rate, e.g. `8M` (scrcpy `--video-bit-rate`) |
 | `SCRCPY_FULLSCREEN` | no | `false` | `true` adds `--fullscreen` |
+| `SCRCPY_NEW_DISPLAY` | no | — | New virtual display on the phone (`--new-display`): `true` (default size/dpi), `1920x1080`, `1920x1080/420` or `/240` |
 | `SCRCPY_RECORD_DIR` | no | `~/Videos/scrcpy` | Output dir for `record`/`screenshot` defaults |
 | `SCRCPY_PUSH_TARGET` | no | `/sdcard/Download` | Default `adb push` destination |
 | `SCRCPY_EXTRA_FLAGS` | no | — | Extra scrcpy flags appended to every mirror |
