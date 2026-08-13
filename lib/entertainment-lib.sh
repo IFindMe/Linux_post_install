@@ -254,6 +254,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$runner $plugin
+TimeoutStopSec=5s
 
 [Install]
 WantedBy=timers.target

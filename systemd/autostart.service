@@ -8,6 +8,7 @@ Type=simple
 ExecStart=/usr/local/bin/autostart.sh
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=5s
 
 [Install]
 WantedBy=multi-user.target

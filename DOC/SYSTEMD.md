@@ -6,8 +6,8 @@ The units installed and enabled by `postinstall.sh`, plus the `pos` bash complet
   - [`autostart.service`](#autostartservice)
   - [`usb-automount.service`](#usb-automountservice)
   - [`ssh-agent.service`](#ssh-agentservice)
-  - [`pos-health.service`](#pos-healthservice)
 - [Per-user units (`pos network download`)](#per-user-units-pos-network-download)
+- [Stop behavior](#stop-behavior)
 - [Feature-flag gating](#feature-flag-gating)
 - [Bash completion](#bash-completion)
 
@@ -81,32 +81,6 @@ WantedBy=multi-user.target
 
 **Configuration:** socket at `/run/ssh-agent/socket` (world-readable/writable). `~/.bashrc` (set by `postinstall.sh`) exports `SSH_AUTH_SOCK` to it. Not gated on any feature flag.
 
-### pos-health.service
-
-**Purpose:** daily "health digest" — runs `pos system health --send --markdown` at 08:00 and sends the report to the configured notify platform(s).
-
-```ini
-[Unit]
-Description=POS Health digest (daily report via configured notify platforms)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-User=__POS_USER__
-EnvironmentFile=-%h/.config/linux_post_install/system.env
-EnvironmentFile=-%h/.config/linux_post_install/notify.env
-ExecStart=/usr/local/bin/pos system health --send --markdown
-
-[Timer]
-OnCalendar=*-*-* 08:00:00
-Persistent=true
-```
-
-The service is `Type=oneshot` and is driven **only** by its companion `pos-health.timer` (`WantedBy=timers.target`); the service itself is never enabled directly.
-
-**Configuration:** `postinstall.sh` substitutes `__POS_USER__` with the installing user (`${SUDO_USER:-$USER}`) so the digest uses that user's real notify config. The `EnvironmentFile=` lines load `system.env` (health/backup settings) and `notify.env` (`NOTIFY_PLATFORM`). The timer is enabled only when a Telegram config (`~/.config/linux_post_install/telegram.env`) already exists — otherwise postinstall warns and skips; re-run postinstall after configuring a notify platform to install it.
-
 ---
 
 ## Per-user units (`pos network download`)
@@ -134,9 +108,23 @@ enable-linger` warning so the user units survive logout.
 
 ---
 
+## Stop behavior
+
+Every pos unit — the tool-written user units (`pos-aria2`, `pos-aria2-retry`,
+`scheduler-lib.sh` job units, `entertainment-lib.sh` plugin units, the Telegram
+and Matrix listener units) and the shipped `systemd/*.service` files — sets
+`TimeoutStopSec=5s` so nothing can stall a reboot for the systemd default of
+90s. The two long-polling listener daemons also `trap TERM INT` in their poll
+loop (kills in-flight curl, exits 0), so `systemctl --user stop` returns in
+well under a second; `TimeoutStopSec` is the backstop if a process ignores
+SIGTERM. A oneshot job that happens to be running at shutdown gets SIGKILLed
+5s after stop begins — timers are `Persistent`, so the work re-runs next boot.
+
+---
+
 ## Feature-flag gating
 
-The systemd loop in `postinstall.sh` special-cases three units:
+The systemd loop in `postinstall.sh` special-cases two units:
 
 ```bash
 if [ "$svc_name" = "autostart.service" ] && ! flag_is_set autostart; then
@@ -147,14 +135,10 @@ if [ "$svc_name" = "usb-automount.service" ] && ! flag_is_set usb-automount; the
     warn "usb-automount feature not installed — skipping usb-automount.service (run ./install.sh --feature)"
     continue
 fi
-if [ "$svc_name" = "pos-health.service" ]; then
-    # substitute User= and enable pos-health.timer only if Telegram is configured
-fi
 ```
 
 - `autostart.service` is **enabled** only when the `autostart` feature flag is set (`./install.sh --feature` or `flag-set autostart`). See [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libflagssh--feature-flags).
 - `usb-automount.service` is **enabled** only when the `usb-automount` feature flag is set — same mechanism.
-- `pos-health.service` is **not** enabled at all — `postinstall.sh` enables `pos-health.timer` instead, and only when a Telegram config already exists.
 
 ---
 
