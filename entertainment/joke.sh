@@ -5,7 +5,10 @@ set -euo pipefail
 # POS_PLUGIN: joke
 # Contract: stdout is the message sent by 'pos entertainment send joke'.
 
-err() { echo "ERROR: $*" >&2; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/entertainment-plugin-lib.sh"
 
 case "${1:-}" in
     -h|--help)
@@ -21,13 +24,9 @@ EOF
         ;;
 esac
 
-command -v curl &>/dev/null || err "curl not found"
-command -v jq &>/dev/null || err "jq not found"
+plugin_have curl
+plugin_have jq
 
-if ! joke="$(curl -fsS --max-time 20 -H 'Accept: application/json' \
-    https://icanhazdadjoke.com/ | jq -r '.joke')"; then
-    err "Failed to fetch a joke from icanhazdadjoke.com"
-fi
-
-[ -n "$joke" ] || err "No joke received"
+joke="$(plugin_http_json --key '.joke' -H 'Accept: application/json' "https://icanhazdadjoke.com/")"
+[ -n "$joke" ] || plugin_err "No joke received"
 printf '%s\n' "$joke"

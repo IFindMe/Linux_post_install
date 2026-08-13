@@ -27,10 +27,18 @@ keys_section() {
 
 usage() {
     cat <<EOF
-Usage: pos entertainment config [set KEY=VALUE ...]
+Usage: pos entertainment config [get KEY | set KEY=VALUE ... | unset KEY | ls | edit]
 
-Show the entertainment config file, or set one or more keys.
-After 'set', auto-trigger timers are re-synced from ENABLED.
+Manage the entertainment config file.
+
+Subcommands:
+  (none)        Show the whole config file + the declared keys reference
+  get KEY       Print the current value of one key ('(not set)' if absent)
+  set KEY=V...  Set one or more keys (validated first, all-or-nothing)
+  unset KEY     Remove a key from the file
+  ls            Declared keys with their current values, aligned
+  edit          Interactive editor for the entertainment scope
+After 'set'/'unset'/'edit', auto-trigger timers are re-synced from ENABLED.
 
 Config file: $CONFIG_FILE
 
@@ -41,9 +49,12 @@ Intervals: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=...
 
 Examples:
   pos entertainment config
-  pos entertainment config set ENABLED="weather, 5m gold, 1h"
+  pos entertainment config ls
+  pos entertainment config get WEATHER_LAT
   pos entertainment config set WEATHER_LAT=36.51 WEATHER_LON=40.75
   pos entertainment config set ENABLED=""
+  pos entertainment config unset WEATHER_CITY
+  pos entertainment config edit
 EOF
     exit 0
 }
@@ -54,6 +65,39 @@ key_known() {
 
 case "${1:-}" in
     -h|--help) usage ;;
+    get)
+        shift
+        [ $# -eq 1 ] || usage
+        v="$(config_value "$1")"
+        [ -n "$v" ] && printf '%s\n' "$v" || echo "(not set)"
+        ;;
+    unset)
+        shift
+        [ $# -eq 1 ] || usage
+        write_config_key "$1" "-"
+        ok "$1 removed from $CONFIG_FILE"
+        sync_timers
+        ;;
+    ls)
+        shift
+        maxw=8
+        while IFS= read -r line; do
+            IFS='|' read -r _plugin key _desc _req <<<"$line"
+            [ ${#key} -gt "$maxw" ] && maxw=${#key}
+        done <<< "$(config_keys "$(plugin_dir)")"
+        printf '  %-*s %s\n' "$maxw" "ENABLED" "\"$(config_value ENABLED)\""
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            IFS='|' read -r plugin key desc req <<<"$line"
+            v="$(config_value "$key")"
+            printf '  %-*s %s  [%s] %s (%s)\n' "$maxw" "$key" "${v:-<not set>}" "$plugin" "$desc" "$req"
+        done <<< "$(config_keys "$(plugin_dir)")"
+        ;;
+    edit)
+        shift
+        source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+        cfg_ui entertainment
+        ;;
     set)
         shift
         [ $# -ge 1 ] || usage

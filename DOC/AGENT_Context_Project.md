@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–189 |
-| ## 3. Installation Flow | 190–241 |
-| ## 4. The `pos` CLI System | 242–311 |
-| ## 5. Shared Library — `lib/common.sh` | 312–343 |
-| ## 6. Docker Compose / ScaleTail | 344–386 |
-| ## 7. Optional Apps (`apps/`) | 387–416 |
-| ## 8. Entertainment Module | 417–430 |
-| ## 9. Systemd Services | 431–442 |
-| ## 10. Configuration Files | 443–469 |
-| ## 11. Coding Conventions | 470–502 |
-| ## 12. Development Workflow | 503–555 |
-| ## 13. Key File Quick Reference | 556–613 |
-| ## 14. Common Tasks for Agents | 614–643 |
+| ## 2. Directory Structure | 44–192 |
+| ## 3. Installation Flow | 193–244 |
+| ## 4. The `pos` CLI System | 245–314 |
+| ## 5. Shared Library — `lib/common.sh` | 315–346 |
+| ## 6. Docker Compose / ScaleTail | 347–389 |
+| ## 7. Optional Apps (`apps/`) | 390–419 |
+| ## 8. Entertainment Module | 420–433 |
+| ## 9. Systemd Services | 434–445 |
+| ## 10. Configuration Files | 446–472 |
+| ## 11. Coding Conventions | 473–505 |
+| ## 12. Development Workflow | 506–558 |
+| ## 13. Key File Quick Reference | 559–618 |
+| ## 14. Common Tasks for Agents | 619–648 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -53,7 +53,10 @@ Linux_post_install/
 │   ├── common.sh           # Shared library (colors, logging, spinner, timer, run, load_system_env)
 │   ├── flags.sh            # Feature flag store (flag_set/clear/is_set/value/list/status)
 │   ├── notify.sh           # Multi-platform alerting (notify_send) — sourced opt-in, silent-fails
-│   └── entertainment-lib.sh # Entertainment module lib (ENABLED list, scheduler sync)
+│   ├── entertainment-lib.sh # Entertainment module lib (ENABLED list, last-run state, scheduler sync)
+│   ├── entertainment-plugin-lib.sh # Message-safe helpers for plugins (config load, require, fetch+retry)
+│   ├── scheduler-lib.sh    # System scheduler lib (job parsing, notify policies, per-job user timers)
+│   └── user-timers-lib.sh  # Shared systemd **user** timer machinery (interval→OnCalendar, unit pair, linger)
 │
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
@@ -71,7 +74,7 @@ Linux_post_install/
 │   ├── pos-entertainment-config            # Show or edit the entertainment config (ENABLED auto-trigger list, weather location)
 │   ├── pos-entertainment-disable           # Disable a plugin's auto-trigger (remove it from ENABLED)
 │   ├── pos-entertainment-enable            # Enable an auto-trigger for a plugin on a schedule
-│   ├── pos-entertainment-send              # Run a public-API plugin and send its output via Telegram (default sender)
+│   ├── pos-entertainment-send              # Run a public-API plugin and send its output via the configured notify platforms
 │   ├── pos-entertainment-status            # Show enabled plugins and scheduler state
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
@@ -271,7 +274,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | entertainment | config | `pos-entertainment-config` | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | entertainment | disable | `pos-entertainment-disable` | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | entertainment | enable | `pos-entertainment-enable` | Enable an auto-trigger for a plugin on a schedule |
-| entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via Telegram (default sender) |
+| entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via the configured notify platforms |
 | entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
@@ -416,13 +419,13 @@ ScaleTail provides 119+ Docker Compose templates with a Tailscale sidecar patter
 
 ## 8. Entertainment Module
 
-Public-API "entertainment" plugins (weather, joke, gold) that can auto-send their output to Telegram on a schedule.
+Public-API "entertainment" plugins (weather, joke, gold) that can auto-send their output to the configured notify platforms (default Telegram) on a schedule.
 
 - **CLI:** `pos entertainment {config|enable|disable|send|status}` — see the dispatch table in §4 and POS.md [entertainment](#entertainment).
-- **Library:** `lib/entertainment-lib.sh` — config-file helpers, ENABLED-list parsing, plugin lookup, and scheduler sync (systemd user timers, crontab fallback).
-- **Plugins:** `entertainment/*.sh` — standalone scripts that fetch a public API and **print the message to stdout** (what gets sent). Each declares its name with a `# POS_PLUGIN: <name>` header; a new plugin is auto-discovered.
+- **Library:** `lib/entertainment-lib.sh` — config-file helpers, ENABLED-list parsing, plugin lookup, per-plugin last-run state, and scheduler sync. Timer machinery (interval→OnCalendar, unit pair writer, linger) is shared via `lib/user-timers-lib.sh` with the system scheduler.
+- **Plugins:** `entertainment/*.sh` — standalone scripts that fetch a public API and **print the message to stdout** (what gets sent). Each declares its name with a `# POS_PLUGIN: <name>` header; a new plugin is auto-discovered. Plugins may source `lib/entertainment-plugin-lib.sh` (message-safe: no stdout chatter).
 - **Config:** `~/.config/linux_post_install/entertainment.env` (ENABLED auto-trigger list, weather location). Template: `config/entertainment.env`, auto-installed by postinstall.
-- **Sending:** `pos entertainment send <plugin> [--print] [--markdown]` runs the plugin and delivers via `pos communication telegram sender send`.
+- **Sending:** `pos entertainment send <plugin> [--print] [--markdown]` runs the plugin and delivers via `notify_send` (follows `NOTIFY_PLATFORM`, default Telegram). Last-run rc/timestamp is recorded per plugin and shown by `status`; a timer-context failure also notifies.
 - **Auto-trigger:** `pos entertainment enable <plugin> <interval>` writes the plugin into ENABLED and syncs a systemd user timer (allowed intervals: `5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly`, or `OnCalendar=…`); `disable` removes it.
 - **Docs:** DEV.md "Adding an Entertainment Plugin" (§1 step list) and POS.md [entertainment](#entertainment).
 
@@ -563,8 +566,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
-| `lib/entertainment-lib.sh` | 354 | Entertainment module lib (ENABLED parsing, scheduler sync) |
-| `lib/scheduler-lib.sh` | 830 | Scheduler lib (job parsing, notify policies, per-job user timers, legacy migrate) |
+| `lib/entertainment-lib.sh` | 311 | Entertainment module lib (ENABLED parsing, last-run state, scheduler sync via user-timers-lib) |
+| `lib/entertainment-plugin-lib.sh` | 67 | Message-safe helpers for plugins (config load, require, fetch+retry) — plugins MAY source it |
+| `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
+| `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -582,11 +587,11 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
-| `bin/pos-entertainment-config` | 99 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
+| `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
-| `bin/pos-entertainment-send` | 93 | Run a public-API plugin and send its output via Telegram (default sender) |
-| `bin/pos-entertainment-status` | 49 | Show enabled plugins and scheduler state |
+| `bin/pos-entertainment-send` | 95 | Run a public-API plugin and send its output via the configured notify platforms |
+| `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |

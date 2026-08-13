@@ -38,7 +38,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -194,9 +194,16 @@ Platform selection: `~/.config/linux_post_install/notify.env` (`NOTIFY_PLATFORM=
 ## lib/entertainment-lib.sh — entertainment module
 
 **File:** `lib/entertainment-lib.sh` (installed to `/usr/local/bin/entertainment-lib.sh`)
-**Purpose:** shared logic for the `pos entertainment` tools — config (`entertainment.env`), `ENABLED` auto-trigger list parsing (`plugin, interval` pairs), plugin lookup by `# POS_PLUGIN:` marker, interval→schedule mapping, and scheduler reconciliation (systemd **user** timers — the only backend; requires a reachable user manager, `ensure_linger()` enables linger if needed).
+**Purpose:** shared logic for the `pos entertainment` tools — config (`entertainment.env`), `ENABLED` auto-trigger list parsing (`plugin, interval` pairs), plugin lookup by `# POS_PLUGIN:` marker, per-plugin last-run state (`~/.local/share/linux_post_install/entertainment/last/<plugin>`), and scheduler reconciliation. Timer machinery (interval→OnCalendar, unit pair writer, linger) comes from `lib/user-timers-lib.sh`, shared with the system scheduler.
 
-Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib/common.sh`). **Plugins must not source it** — their stdout is the sent message.
+Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib/common.sh`). **Plugins must not source it** — their stdout is the sent message; they may instead source `lib/entertainment-plugin-lib.sh` (message-safe helpers: config load, `plugin_have`/`plugin_require`, `plugin_http_json` with retry).
+
+---
+
+## lib/user-timers-lib.sh — shared systemd user timers
+
+**File:** `lib/user-timers-lib.sh` (installed to `/usr/local/bin/user-timers-lib.sh`)
+**Purpose:** the one copy of the systemd **user** timer machinery used by both the entertainment module and the system scheduler — `ut_interval_to_oncalendar` (interval→`OnCalendar`, incl. raw `OnCalendar=…` passthrough), `ut_interval_label`, `ut_unit_name`, `ut_write_unit_pair` (oneshot service + `Persistent=true` timer, `TimeoutStopSec=5s`, `network-online` deps), and `ut_ensure_linger`. Sourced by `lib/entertainment-lib.sh` and `lib/scheduler-lib.sh`; defines only `ut_*` so it never collides with either.
 
 ---
 

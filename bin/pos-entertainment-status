@@ -24,19 +24,32 @@ esac
 raw="$(config_value ENABLED)"
 echo "Config: $CONFIG_FILE"
 
-if [ -z "$raw" ]; then
-    echo "No plugins enabled."
-    echo "Enable one with: pos entertainment enable <plugin> [interval]"
-    exit 0
-fi
-
 parse_enabled "$raw"
 echo "Enabled plugins:"
+if [ ${#ENABLED_ENTRIES[@]} -eq 0 ]; then
+    echo "  (none — enable one with: pos entertainment enable <plugin> [interval])"
+fi
 for entry in "${ENABLED_ENTRIES[@]}"; do
     plugin="${entry%%,*}"; interval="${entry##*,}"
     [ "$interval" = "$plugin" ] && interval="$DEFAULT_INTERVAL"
-    printf '  %-12s %s\n' "$plugin" "$(interval_label "$interval")"
+    printf '  %-12s %-16s last run: %s\n' "$plugin" "$(ut_interval_label "$interval")" "$(last_run_str "$plugin")"
 done
+
+not_enabled=()
+for name in $(list_plugins "$(plugin_dir)"); do
+    found=0
+    for entry in "${ENABLED_ENTRIES[@]}"; do
+        [ "${entry%%,*}" = "$name" ] && found=1 && break
+    done
+    [ "$found" -eq 0 ] && not_enabled+=("$name")
+done
+if [ ${#not_enabled[@]} -gt 0 ]; then
+    echo
+    echo "Installed but not enabled:"
+    for name in "${not_enabled[@]}"; do
+        printf '  %s\n' "$name"
+    done
+fi
 
 echo
 if systemctl --user show-environment >/dev/null 2>&1; then

@@ -20,7 +20,7 @@ How this repo works, how to add features, and what to keep in mind when editing.
 | Phase | Script | Responsibility |
 |-------|--------|----------------|
 | Pre | `preinstall.sh` | System packages, apt repos, global binaries (yt-dlp) |
-| Install | `install.sh` | Copies `bin/*` → `/usr/local/bin/` (chmod 755), `lib/common.sh` + `lib/flags.sh` + `lib/entertainment-lib.sh` → `/usr/local/bin/` (chmod 644) |
+| Install | `install.sh` | Copies `bin/*` → `/usr/local/bin/` (chmod 755), all `lib/*.sh` → `/usr/local/bin/` (chmod 644) |
 | Post | `postinstall.sh` | User config (SSH keys, PATH, bash completion), systemd services |
 
 Each phase is independent and runs only if the corresponding script exists.
@@ -31,7 +31,7 @@ Each phase is independent and runs only if the corresponding script exists.
 |-----------|---------|-------------|
 | `bin/` | Daily-use CLI tools and wrappers | `/usr/local/bin/` |
 | `apps/<category>/` | Optional desktop app installers | run on demand |
-| `lib/` | Shared libraries: `common.sh` (helpers), `flags.sh` (feature flags), `notify.sh` (multi-platform alerting), `entertainment-lib.sh` (entertainment scheduling) | sourced at build time |
+| `lib/` | Shared libraries: `common.sh` (helpers), `flags.sh` (feature flags), `notify.sh` (multi-platform alerting), `entertainment-lib.sh` (entertainment scheduling + last-run state), `entertainment-plugin-lib.sh` (message-safe plugin helpers), `scheduler-lib.sh` (system scheduler), `user-timers-lib.sh` (shared systemd user timer machinery), `config-ui.sh` (interactive config UI) | sourced at build time |
 | `config/` | Gitignored user config files | `~/.config/<app>/` (via postinstall) |
 | `entertainment/` | Public-API plugins for the entertainment module | `/usr/local/bin` (via install.sh Phase 2) |
 | `compose/` | ScaleTail templates (git submodule) | `/usr/local/share/linux_post_install/scale-tail` |
@@ -203,11 +203,13 @@ Stub harnesses are **throwaway by design**: no `tests/` dir and no CI in this re
 
 ## Adding an Entertainment Plugin
 
-The `entertainment` module routes public-API data to Telegram via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`). Auto-triggering is config-driven: `ENABLED` in `entertainment.env` holds `plugin, interval` pairs; the tools `pos entertainment config|enable|disable|status` (`bin/pos-entertainment-*`) reconcile the schedule. All shared logic (ENABLED parsing, interval→schedule mapping, scheduler sync) lives in `lib/entertainment-lib.sh` — sourced by the `pos-entertainment-*` tools (never by plugins). The scheduler is **systemd user timers** — the only backend (requires a reachable user systemd manager).
+The `entertainment` module routes public-API data to the configured notify platforms via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`). Auto-triggering is config-driven: `ENABLED` in `entertainment.env` holds `plugin, interval` pairs; the tools `pos entertainment config|enable|disable|status` (`bin/pos-entertainment-*`) reconcile the schedule. Shared logic (ENABLED parsing, plugin lookup, last-run state, scheduler sync) lives in `lib/entertainment-lib.sh` — sourced by the `pos-entertainment-*` tools (never by plugins). The scheduler is **systemd user timers** — the only backend (requires a reachable user systemd manager); the timer machinery itself is shared with the system scheduler via `lib/user-timers-lib.sh`.
 
 ### 1. Create the plugin
 
-Drop an executable script in `entertainment/<name>.sh` with a `# POS_PLUGIN: <name>` marker on line 3 (this is what makes it a plugin — the installed runner lists plugins by this marker, not by `.sh` files, since `/usr/local/bin` is shared with other tooling). Declare every config key the plugin reads with `# POS_KEYS: <KEY> <description> (required|optional)` lines right after it — `pos entertainment config` prints these in its Keys section and uses them to warn/not-warn on `config set`:
+Drop an executable script in `entertainment/<name>.sh` with a `# POS_PLUGIN: <name>` marker (this is what makes it a plugin — the installed runner lists plugins by this marker, not by `.sh` files, since `/usr/local/bin` is shared with other tooling). Declare every config key the plugin reads with `# POS_KEYS: <KEY> <description> (required|optional)` lines right after it — `pos entertainment config` prints these in its Keys section and uses them to warn/not-warn on `config set`.
+
+Plugins may source `lib/entertainment-plugin-lib.sh` — message-safe helpers (config load, dep guards, JSON fetch with retry) that never write to stdout. Template:
 
 ```bash
 #!/usr/bin/env bash
@@ -215,23 +217,27 @@ set -euo pipefail
 # POS_PLUGIN: myplugin
 # POS_KEYS: MYPLUGIN_URL <feed url> (required)
 # POS_KEYS: MYPLUGIN_TAG <filter tag> (optional)
-err() { echo "ERROR: $*" >&2; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/entertainment-plugin-lib.sh"
 
-command -v curl &>/dev/null || err "curl not found"
-
-data="$(curl -fsS --max-time 20 https://api.example.com/foo)"
-printf 'Title: %s\n' "$data"
+plugin_load_config
+plugin_require MYPLUGIN_URL
+tag="${MYPLUGIN_TAG:-}"
+json="$(plugin_http_json --key '.title' "${MYPLUGIN_URL}${tag:+/?tag=$tag}")"
+printf 'Title: %s\n' "$json"
 ```
 
-**Contract:** plugins are **self-contained** — do **not** source `lib/common.sh`. Its `log`/`warn`/`ok` helpers print to **stdout**, and the runner captures stdout as the message to send (helper chatter would be sent to Telegram). All stdout is the message; errors go to stderr and exit nonzero. Plugins must be non-interactive (no prompts) — the module is designed for systemd user timers.
+**Contract:** plugins are **self-contained** — do **not** source `lib/common.sh` or `lib/entertainment-lib.sh`. Their `log`/`warn`/`ok` helpers print to **stdout**, and the runner captures stdout as the message to send (helper chatter would be sent to the notify platforms). All stdout is the message; errors go to stderr and exit nonzero. `lib/entertainment-plugin-lib.sh` is the *only* lib plugins may source (it defines just `plugin_*` and writes nothing to stdout). Plugins must be non-interactive (no prompts) — the module is designed for systemd user timers.
 
 ### 2. Config (if needed)
 
-Read runtime values from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence) — same pattern as `telegram.env`. Example: `weather.sh` uses `WEATHER_LAT`/`WEATHER_LON`. Declare each key with a `# POS_KEYS:` header line (see step 1) so `pos entertainment config` lists it and `config set` recognizes it.
+Read runtime values from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence) via `plugin_load_config` — same pattern as `telegram.env`. Example: `weather.sh` uses `WEATHER_LAT`/`WEATHER_LON`. Declare each key with a `# POS_KEYS:` header line (see step 1) so `pos entertainment config` lists it and `config set` recognizes it.
 
 ### 3. Deps
 
-`curl` and `jq` are already in `preinstall.sh` PACKAGES. Anything else: guard with `command -v … || err "…"` and, if apt-available, add to PACKAGES.
+`curl` and `jq` are already in `preinstall.sh` PACKAGES (and are what `plugin_have curl`/`plugin_have jq` check). Anything else: guard with `plugin_have <cmd>` and, if apt-available, add to PACKAGES.
 
 ### 4. Done
 

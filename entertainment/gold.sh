@@ -6,7 +6,10 @@ set -euo pipefail
 # POS_PLUGIN: gold
 # Contract: stdout is the message sent by 'pos entertainment send gold'.
 
-err() { echo "ERROR: $*" >&2; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/entertainment-plugin-lib.sh"
 
 case "${1:-}" in
     -h|--help)
@@ -22,13 +25,10 @@ EOF
         ;;
 esac
 
-command -v curl &>/dev/null || err "curl not found"
-command -v jq &>/dev/null || err "jq not found"
+plugin_have curl
+plugin_have jq
 
-if ! json="$(curl -fsS --max-time 20 \
-    "https://api.goldprice.dev/v1/prices?symbol=XAU-USD-SPOT")"; then
-    err "Failed to fetch gold price from goldprice.dev"
-fi
+json="$(plugin_http_json "https://api.goldprice.dev/v1/prices?symbol=XAU-USD-SPOT")"
 
 price="$(jq -r '.symbols[0].price' <<<"$json")"
 bid="$(jq -r '.symbols[0].bid' <<<"$json")"
@@ -37,7 +37,7 @@ when="$(jq -r '.symbols[0].computed_at' <<<"$json")"
 when="${when:0:19}"
 when="${when/T/ }"
 
-[ -n "$price" ] || err "No price received"
+[ -n "$price" ] || plugin_err "No price received"
 
 # XAU spot is quoted per troy ounce (31.1034768 g) — convert to USD/gram.
 per_g="$(awk -v p="$price" -v o="31.1034768" 'BEGIN{printf "%.2f", p/o}')"
