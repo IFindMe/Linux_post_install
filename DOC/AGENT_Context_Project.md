@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–192 |
-| ## 3. Installation Flow | 193–244 |
-| ## 4. The `pos` CLI System | 245–314 |
-| ## 5. Shared Library — `lib/common.sh` | 315–346 |
-| ## 6. Docker Compose / ScaleTail | 347–389 |
-| ## 7. Optional Apps (`apps/`) | 390–419 |
-| ## 8. Entertainment Module | 420–433 |
-| ## 9. Systemd Services | 434–445 |
-| ## 10. Configuration Files | 446–472 |
-| ## 11. Coding Conventions | 473–505 |
-| ## 12. Development Workflow | 506–558 |
-| ## 13. Key File Quick Reference | 559–618 |
-| ## 14. Common Tasks for Agents | 619–648 |
+| ## 2. Directory Structure | 44–193 |
+| ## 3. Installation Flow | 194–245 |
+| ## 4. The `pos` CLI System | 246–316 |
+| ## 5. Shared Library — `lib/common.sh` | 317–348 |
+| ## 6. Docker Compose / ScaleTail | 349–391 |
+| ## 7. Optional Apps (`apps/`) | 392–421 |
+| ## 8. Entertainment Module | 422–435 |
+| ## 9. Systemd Services | 436–447 |
+| ## 10. Configuration Files | 448–474 |
+| ## 11. Coding Conventions | 475–507 |
+| ## 12. Development Workflow | 508–560 |
+| ## 13. Key File Quick Reference | 561–621 |
+| ## 14. Common Tasks for Agents | 622–652 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -64,6 +64,7 @@ Linux_post_install/
 │   ├── pos-ai-gemini                       # Chat with Google Gemini (ask, chat, models, sessions)
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
 │   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
+│   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
@@ -264,6 +265,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | ai | gemini | `pos-ai-gemini` | Chat with Google Gemini (ask, chat, models, sessions) |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |
 | communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
+| communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -580,6 +582,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
+| `bin/pos-communication-scrcpy` | 239 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
@@ -610,7 +613,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 291 | Dynamic bash completion |
+| `completions/pos.bash` | 292 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -639,6 +642,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify aria2 download daemon / queue logic | Edit `bin/pos-network-download` |
 | Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
 | Modify SMB share logic | Edit `bin/pos-share-smb-server` / `bin/pos-share-smb-client` |
+| Modify scrcpy mirroring logic | Edit `bin/pos-communication-scrcpy` (config scope `scrcpy` via `pos config scrcpy`; `SCRCPY_*` keys in `~/.config/linux_post_install/scrcpy.env`) |
 | Modify the scheduler / scheduled jobs | Edit `bin/pos-system-schedule` / `lib/scheduler-lib.sh` (jobs in `~/.config/linux_post_install/schedule.d/`) |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |

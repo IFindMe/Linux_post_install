@@ -26,3 +26,7 @@ config/rclone.conf
 
 # Stray session capture (accidentally created in the repo root)
 session
+
+# Scratch/plan notes — never committed
+TEMP_PLAN.md
+dream.md
