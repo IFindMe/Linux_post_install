@@ -352,7 +352,7 @@ A device must have **USB debugging** enabled (Developer options) and the phone's
 | `SCRCPY_PUSH_TARGET` | no | `/sdcard/Download` | Default `adb push` destination |
 | `SCRCPY_EXTRA_FLAGS` | no | — | Extra scrcpy flags appended to every mirror |
 
-Requires `scrcpy` + `adb` (added to `preinstall.sh` PACKAGES). The apt `scrcpy` build is older than the latest release — the optional app `apps/media/scrcpy.sh` installs the current GitHub release (bundles `adb`); run it via `./install.sh --apps` or directly.
+Requires `scrcpy` + `adb`. `adb` is in `preinstall.sh` PACKAGES; `scrcpy` is **not** — apt rarely ships it on Debian/Ubuntu without contrib/universe (and it's older there anyway), so it installs via the optional app `apps/media/scrcpy.sh` (GitHub latest release, bundles `adb`); run it via `./install.sh --apps` or directly. The tool errors with that hint when `scrcpy` is missing.
 
 ### entertainment
 
