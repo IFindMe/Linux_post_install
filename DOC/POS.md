@@ -325,19 +325,23 @@ The daemon long-polls `/sync` (30s timeout, per-sync `since` token, compact filt
 ### entertainment
 
 **File:** `bin/pos-entertainment-send`
-**Purpose:** run a public-API plugin and send its output to Telegram by default. Plugins are standalone scripts in `entertainment/` that fetch a public API and **print the message to stdout** — that stdout is what gets sent.
+**Purpose:** run a public-API plugin and send its output via `notify_send` — the platform follows `NOTIFY_PLATFORM` (default Telegram, silent-fail when none configured). Plugins are standalone scripts in `entertainment/` that fetch a public API and **print the message to stdout** — that stdout is what gets sent.
 
 | Command | Behavior |
 |---------|----------|
 | `pos entertainment send` | List available plugins + usage |
-| `pos entertainment send <plugin> [--print] [--markdown] [args…]` | Run the plugin, send its output to Telegram (silent) |
+| `pos entertainment send <plugin> [--print] [--markdown] [args…]` | Run the plugin, send its output via `notify_send` (silent) |
 | `pos entertainment send <plugin> --print` | Print the output locally; do not send |
-| `pos entertainment send <plugin> --markdown` | Send with `--parse-mode markdown` (via `pos communication telegram sender`) |
+| `pos entertainment send <plugin> --markdown` | Send with Markdown parse_mode (via the notify senders) |
 | `pos entertainment config` | Show the config file (`~/.config/linux_post_install/entertainment.env`) |
+| `pos entertainment config get KEY` | Print one key's current value (`(not set)` if absent) |
 | `pos entertainment config set KEY=VALUE…` | Set keys (any UPPER_SNAKE key; warns if no installed plugin uses it) and re-sync the schedule |
+| `pos entertainment config unset KEY` | Remove a key from the config file |
+| `pos entertainment config ls` | Declared keys with their current values, aligned |
+| `pos entertainment config edit` | Interactive editor for the scope (via `pos config` UI) |
 | `pos entertainment enable <plugin> [interval]` | Add plugin to `ENABLED` + schedule it as a systemd user timer |
 | `pos entertainment disable <plugin>` | Remove plugin from `ENABLED` + remove its scheduled job |
-| `pos entertainment status` | Enabled plugins + scheduler + schedule state |
+| `pos entertainment status` | Enabled plugins (each with interval + last run), installed-but-not-enabled plugins, scheduler + timers |
 
 **Plugin lookup order:** `$ENTERTAINMENT_DIR` → repo `entertainment/` → `/usr/local/bin/` (installed by `install.sh` Phase 2, beside the runner). A plugin name matches the file name with or without the `.sh` suffix.
 
@@ -351,7 +355,7 @@ Plugins:
 
 **Config auto-install:** `postinstall.sh` copies the repo's `config/entertainment.env` (a commented template showing each key's syntax) to `~/.config/linux_post_install/entertainment.env` on install — but only if you haven't already created your own (no clobber), and prints the template so you can fill in your location. Fill in `WEATHER_LAT`/`WEATHER_LON` (and optionally `WEATHER_CITY`) to enable the weather plugin.
 
-**Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`) with a `# POS_PLUGIN: <name>` marker on line 3 — the runner lists and validates plugins by this marker, so non-plugin `.sh` files in the shared `/usr/local/bin` are ignored. The plugin must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). If it needs coordinates/tokens, read them from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence). No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `command -v … || exit 1`.
+**Adding a plugin:** drop an executable script in `entertainment/` (e.g. `myfeed.sh`) with a `# POS_PLUGIN: <name>` marker — the runner lists and validates plugins by this marker, so non-plugin `.sh` files in the shared `/usr/local/bin` are ignored. The plugin must be non-interactive and print the message to stdout; errors go to stderr (exit nonzero). Source `lib/entertainment-plugin-lib.sh` for the standard helpers — `plugin_load_config` (reads `entertainment.env`, env precedence), `plugin_have <cmd>`, `plugin_require KEY <desc>`, `plugin_http_json <url> [--key <jq>] [-H <header>]` (curl, 2 retries, timeout) — it never writes to stdout, so the message stays clean. No registration needed. Dependencies beyond `curl`/`jq` (both in `preinstall.sh` PACKAGES) should be guarded with `plugin_have`.
 
 **Declaring config keys (pattern):** document every key the plugin reads with one `# POS_KEYS:` line right after `# POS_PLUGIN:` — `KEY`, a description, and `(required)`/`(optional)`:
 
@@ -373,15 +377,16 @@ ENABLED="weather, 5m gold, 1h joke, daily"
 
 - One **user timer** per enabled plugin (`~/.config/systemd/user/pos-entertainment-<plugin>.{service,timer}`), running `pos entertainment send <plugin>` as your user on that schedule (`OnCalendar` + `Persistent=true`). `pos entertainment enable` also tries `sudo loginctl enable-linger $USER` once so timers fire without login.
 
-The job runs as you, so it reads your `$HOME` configs (weather location, Telegram token) natively — no `Environment=HOME=` hacks.
+The job runs as you, so it reads your `$HOME` configs (weather location, notify platform) natively — no `Environment=HOME=` hacks.
 
 Intervals: `5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly`, or a raw `OnCalendar=…` spec. Default when omitted: `daily`.
 
-`pos entertainment status` shows the enabled plugins, the scheduler, and each plugin's interval + next fire time (`systemctl --user list-timers`).
+`pos entertainment status` shows the enabled plugins (each with interval + last run), the installed-but-not-enabled plugins, the scheduler, and each plugin's next fire time (`systemctl --user list-timers`). Last run is recorded by `pos entertainment send` on every non-`--print` run (`~/.local/share/linux_post_install/entertainment/last/<plugin>`); a run that fails while fired by a timer also notifies the configured platforms.
 
 Notes:
 - The runner is headless/timer-friendly — no TTY prompts, exit 0 on success / 1 on failure.
 - Scheduling is per-user for the user who runs `enable`; if you manage a different machine's user (e.g. via `runuser`/`sudo -u`), run the `enable`/`disable` commands as that user.
+- The unit template (`TimeoutStopSec=5s`, `Persistent=true`, network-online deps) is shared with the system scheduler via `lib/user-timers-lib.sh`.
 
 ### flags
 

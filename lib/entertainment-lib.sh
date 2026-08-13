@@ -4,7 +4,6 @@
 
 CONFIG_DIR="$HOME/.config/linux_post_install"
 CONFIG_FILE="$CONFIG_DIR/entertainment.env"
-USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 TIMER_PREFIX="pos-entertainment"
 DEFAULT_INTERVAL="daily"
 
@@ -13,6 +12,17 @@ declare -F err  >/dev/null || err()  { echo "ERROR: $*" >&2; exit 1; }
 declare -F warn >/dev/null || warn() { echo "[!] $*"; }
 declare -F ok   >/dev/null || ok()   { echo "  OK $*"; }
 declare -F log  >/dev/null || log()  { echo "[+] $*"; }
+
+# Shared systemd **user** timer machinery (interval→OnCalendar mapping, unit
+# pair writer, linger bootstrap) — the same lib the system scheduler uses, so
+# the two unit templates never drift apart. Defines USER_SYSTEMD_DIR + ut_*.
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/user-timers-lib.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/user-timers-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/user-timers-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/user-timers-lib.sh"
+
+# Per-plugin last-run state (rc + timestamp + first output line).
+LAST_RUN_DIR="${LAST_RUN_DIR:-$HOME/.local/share/linux_post_install/entertainment/last}"
 
 # ── Config file helpers (file is the source of truth, never sourced) ──
 config_value() {
@@ -28,6 +38,14 @@ write_config_key() {
     val="${val//$'\r'/}"
     val="${val%%$'\n'*}"
     mkdir -p "$CONFIG_DIR"
+    if [ "$val" = "-" ]; then
+        [ -f "$CONFIG_FILE" ] || return 0
+        tmp="$(mktemp)"
+        grep -v "^${key}=" "$CONFIG_FILE" >"$tmp" || true
+        mv "$tmp" "$CONFIG_FILE"
+        chmod 600 "$CONFIG_FILE"
+        return 0
+    fi
     tmp="$(mktemp)"
     grep -v "^${key}=" "$CONFIG_FILE" 2>/dev/null >"$tmp" || true
     printf '%s="%s"\n' "$key" "$val" >>"$tmp"
@@ -200,96 +218,10 @@ enabled_remove() {
     write_config_key ENABLED "$(render_enabled "${out[@]}")"
 }
 
-# ── Interval → systemd OnCalendar ─────────────────────────────────
-interval_to_oncalendar() {
-    local i="$1"
-    case "$i" in
-        OnCalendar=*) printf '%s' "${i#OnCalendar=}"; return 0 ;;
-    esac
-    if [[ "$i" =~ ^([0-9]+)m$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 59 ] || return 1
-        printf '*:00/%s:00' "$n"; return 0
-    fi
-    if [[ "$i" =~ ^([0-9]+)h$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 23 ] || return 1
-        printf '*-*-* 00/%s:00:00' "$n"; return 0
-    fi
-    case "$i" in
-        hourly) printf '*-*-* *:00:00' ;;
-        daily)  printf '*-*-* 08:00:00' ;;
-        weekly) printf 'Mon *-*-* 08:00:00' ;;
-        *) return 1 ;;
-    esac
-    return 0
-}
-
-interval_label() {
-    case "$1" in
-        daily)      echo "daily (08:00)" ;;
-        weekly)     echo "weekly (Mon 08:00)" ;;
-        hourly)     echo "hourly" ;;
-        OnCalendar=*) echo "${1#OnCalendar=}" ;;
-        *m|*h|*d)   echo "every $1" ;;
-        *)          echo "$1" ;;
-    esac
-}
-
 # ── systemd user timers ───────────────────────────────────────────
-unit_name() { echo "${TIMER_PREFIX}-${1}"; }
-
-write_units() {
-    local plugin="$1" oncal="$2"
-    local base="$USER_SYSTEMD_DIR/$(unit_name "$plugin")"
-    local runner
-    runner="$(command -v pos-entertainment-send 2>/dev/null || echo /usr/local/bin/pos-entertainment-send)"
-    mkdir -p "$USER_SYSTEMD_DIR"
-    cat >"$base.service" <<EOF
-[Unit]
-Description=pos entertainment send $plugin
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=$runner $plugin
-TimeoutStopSec=5s
-
-[Install]
-WantedBy=timers.target
-EOF
-    cat >"$base.timer" <<EOF
-[Unit]
-Description=Schedule: pos entertainment send $plugin
-
-[Timer]
-OnCalendar=$oncal
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-    chmod 644 "$base.service" "$base.timer"
-}
-
-ensure_linger() {
-    local user
-    user="$(id -un)"
-    [ "$user" = "root" ] && { warn "running as root — enable linger for your real user: sudo loginctl enable-linger <user>"; return 0; }
-    command -v loginctl >/dev/null 2>&1 || return 0
-    if loginctl show-user "$user" 2>/dev/null | grep -q '^Linger=yes'; then
-        return 0
-    fi
-    if sudo -n loginctl enable-linger "$user" 2>/dev/null; then
-        ok "enabled linger for $user (timers fire without login)"
-    else
-        warn "run once so timers fire without login: sudo loginctl enable-linger $user"
-    fi
-}
-
-# Reconcile the auto-trigger schedule with the ENABLED list in the config.
-# Backend: systemd user timers (requires a reachable user systemd manager).
+# Interval → OnCalendar mapping, unit naming, the unit pair writer and linger
+# bootstrap come from lib/user-timers-lib.sh (ut_*). Reconcile the auto-trigger
+# schedule with the ENABLED list in the config.
 sync_timers() {
     if systemctl --user show-environment >/dev/null 2>&1; then
         sync_systemd
@@ -312,24 +244,26 @@ sync_systemd() {
             warn "plugin '$plugin' not installed — skipping"
             continue
         fi
-        if ! oncal="$(interval_to_oncalendar "$interval")"; then
+        if ! oncal="$(ut_interval_to_oncalendar "$interval")"; then
             warn "invalid interval '$interval' for '$plugin' — skipping"
             continue
         fi
         wanted["$plugin"]="$oncal"
     done
 
-    local wrote=0 t n=0
+    local runner wrote=0 t n=0
+    runner="$(command -v pos-entertainment-send 2>/dev/null || echo /usr/local/bin/pos-entertainment-send)"
     for plugin in "${!wanted[@]}"; do
-        write_units "$plugin" "${wanted[$plugin]}"
+        local base="$USER_SYSTEMD_DIR/$(ut_unit_name "$TIMER_PREFIX" "$plugin")"
+        ut_write_unit_pair "$base.service" "$base.timer" "pos entertainment send $plugin" "$runner $plugin" "${wanted[$plugin]}"
         wrote=1; n=$((n + 1))
     done
     [ "$wrote" -eq 1 ] && systemctl --user daemon-reload >/dev/null 2>&1 || true
 
-    [ "$n" -gt 0 ] && ensure_linger
+    [ "$n" -gt 0 ] && ut_ensure_linger
 
     for plugin in "${!wanted[@]}"; do
-        t="$(unit_name "$plugin").timer"
+        t="$(ut_unit_name "$TIMER_PREFIX" "$plugin").timer"
         if systemctl --user is-enabled "$t" >/dev/null 2>&1; then
             systemctl --user restart "$t" >/dev/null 2>&1 || true
         else
@@ -343,12 +277,35 @@ sync_systemd() {
         [ -f "$f" ] || continue
         p="${f##*/}"; p="${p#${TIMER_PREFIX}-}"; p="${p%.timer}"
         if [ -z "${wanted[$p]:-}" ]; then
-            systemctl --user disable --now "$(unit_name "$p").timer" >/dev/null 2>&1 || true
-            rm -f "$USER_SYSTEMD_DIR/$(unit_name "$p").timer" "$USER_SYSTEMD_DIR/$(unit_name "$p").service"
+            systemctl --user disable --now "$(ut_unit_name "$TIMER_PREFIX" "$p").timer" >/dev/null 2>&1 || true
+            rm -f "$USER_SYSTEMD_DIR/$(ut_unit_name "$TIMER_PREFIX" "$p").timer" "$USER_SYSTEMD_DIR/$(ut_unit_name "$TIMER_PREFIX" "$p").service"
             log "removed timer for '$p'"
             removed=1
         fi
     done
     [ "$removed" -eq 1 ] && systemctl --user daemon-reload >/dev/null 2>&1 || true
+}
+
+# ── Per-plugin last-run state ────────────────────────────────────
+# Written by 'pos entertainment send' on every non---print run so 'status' can
+# show whether a scheduled run succeeded. State dir is per-user, not tracked.
+save_last_run() {   # $1 = plugin, $2 = rc, $3 = message (first line)
+    local f="$LAST_RUN_DIR/$1"
+    mkdir -p "$LAST_RUN_DIR"
+    {
+        printf 'rc=%s\n' "$2"
+        printf 'ts=%s\n' "$(date +%s)"
+        printf 'msg=%s\n' "$3"
+    } >"$f"
+    chmod 600 "$f"
+}
+
+last_run_str() {   # $1 = plugin → "rc=N (MM-DD HH:MM)" or "never"
+    local f="$LAST_RUN_DIR/$1" rc ts
+    [ -f "$f" ] || { echo "never"; return 0; }
+    rc="$(sed -n 's/^rc=//p' "$f" | tail -1)"
+    ts="$(sed -n 's/^ts=//p' "$f" | tail -1)"
+    [ -n "$rc" ] || { echo "never"; return 0; }
+    printf 'rc=%s (%s)' "$rc" "$(date -d "@$ts" '+%m-%d %H:%M' 2>/dev/null || echo '?')"
 }
 

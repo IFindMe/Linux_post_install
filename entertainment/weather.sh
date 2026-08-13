@@ -9,24 +9,48 @@ set -euo pipefail
 # POS_KEYS: WEATHER_CITY <city label> (optional)
 # Contract: stdout is the message sent by 'pos entertainment send weather'.
 
-err() { echo "ERROR: $*" >&2; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/entertainment-plugin-lib.sh"
 
-CONFIG_FILE="$HOME/.config/linux_post_install/entertainment.env"
+case "${1:-}" in
+    -h|--help)
+        cat <<EOF
+Usage: pos entertainment send weather
 
-load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
-}
+Current weather via Open-Meteo (no API key).
+
+Config: $plugin_config_file (chmod 600)
+  WEATHER_LAT, WEATHER_LON   Required — coordinates
+  WEATHER_CITY               Optional label (e.g. "Berlin")
+
+Example:
+  WEATHER_LAT=52.52 WEATHER_LON=13.41 pos entertainment send weather --print
+EOF
+        exit 0
+        ;;
+esac
+
+plugin_have curl
+plugin_have jq
+
+plugin_load_config
+plugin_require WEATHER_LAT
+plugin_require WEATHER_LON
+label="${WEATHER_CITY:-$WEATHER_LAT,$WEATHER_LON}"
+
+json="$(plugin_http_json \
+    "https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day")"
+
+temp="$(jq -r '.current.temperature_2m' <<<"$json")"
+feels="$(jq -r '.current.apparent_temperature' <<<"$json")"
+humidity="$(jq -r '.current.relative_humidity_2m' <<<"$json")"
+code="$(jq -r '.current.weather_code' <<<"$json")"
+wind="$(jq -r '.current.wind_speed_10m' <<<"$json")"
+is_day="$(jq -r '.current.is_day' <<<"$json")"
+unit_temp="$(jq -r '.current_units.temperature_2m' <<<"$json")"
+unit_wind="$(jq -r '.current_units.wind_speed_10m' <<<"$json")"
 
 # First arg: weather code; second arg: is_day (1=day). Prints the emoji.
 wmo_emoji() {
@@ -60,47 +84,6 @@ wmo_desc() {
         *)      echo "Weather code $1" ;;
     esac
 }
-
-case "${1:-}" in
-    -h|--help)
-        cat <<EOF
-Usage: pos entertainment send weather
-
-Current weather via Open-Meteo (no API key).
-
-Config: $CONFIG_FILE (chmod 600)
-  WEATHER_LAT, WEATHER_LON   Required — coordinates
-  WEATHER_CITY               Optional label (e.g. "Berlin")
-
-Example:
-  WEATHER_LAT=52.52 WEATHER_LON=13.41 pos entertainment send weather --print
-EOF
-        exit 0
-        ;;
-esac
-
-command -v curl &>/dev/null || err "curl not found"
-command -v jq &>/dev/null || err "jq not found"
-
-load_config
-
-[ -n "${WEATHER_LAT:-}" ] || err "WEATHER_LAT not set — add it to $CONFIG_FILE"
-[ -n "${WEATHER_LON:-}" ] || err "WEATHER_LON not set — add it to $CONFIG_FILE"
-label="${WEATHER_CITY:-$WEATHER_LAT,$WEATHER_LON}"
-
-if ! json="$(curl -fsS --max-time 20 \
-    "https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day")"; then
-    err "Failed to fetch weather from Open-Meteo"
-fi
-
-temp="$(jq -r '.current.temperature_2m' <<<"$json")"
-feels="$(jq -r '.current.apparent_temperature' <<<"$json")"
-humidity="$(jq -r '.current.relative_humidity_2m' <<<"$json")"
-code="$(jq -r '.current.weather_code' <<<"$json")"
-wind="$(jq -r '.current.wind_speed_10m' <<<"$json")"
-is_day="$(jq -r '.current.is_day' <<<"$json")"
-unit_temp="$(jq -r '.current_units.temperature_2m' <<<"$json")"
-unit_wind="$(jq -r '.current_units.wind_speed_10m' <<<"$json")"
 
 emoji="$(wmo_emoji "$code" "$is_day")"
 

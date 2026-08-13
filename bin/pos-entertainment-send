@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: entertainment send — Run a public-API plugin and send its output via Telegram (default sender)
+# POS: entertainment send — Run a public-API plugin and send its output via the configured notify platforms
 # POS_FLAGS: --print --markdown
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/entertainment-lib.sh" 2>/dev/null || source "$(dirname "$0")/entertainment-lib.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 
 usage() {
     local dir plugins
@@ -17,15 +18,16 @@ usage() {
     cat <<EOF
 Usage: pos entertainment send <plugin> [--print] [--markdown] [plugin args...]
 
-Run an entertainment plugin, capture its output, and send it via Telegram.
+Run an entertainment plugin, capture its output, and send it via the configured
+notify platforms (NOTIFY_PLATFORM, default Telegram).
 
 Plugins are scripts that fetch a public API and print the message to stdout —
 that stdout is what gets sent.
 
 Modes:
-  (default)     Send the plugin output to Telegram (silent)
+  (default)     Send the plugin output via notify_send (silent)
   --print       Print the output locally instead of sending
-  --markdown    Send with Markdown parse_mode (via pos communication telegram sender)
+  --markdown    Send with Markdown parse_mode (via the notify senders)
 
 Available plugins:
 $plugins
@@ -71,10 +73,12 @@ script="$(resolve_plugin "$dir" "$plugin")"
 rc=0
 output="$( "$script" "${plugin_args[@]}" )" || rc=$?
 if [ "$rc" -ne 0 ]; then
+    [ -n "${INVOCATION_ID:-}" ] && notify_send "⚠️ entertainment '$plugin' failed (exit $rc)"
+    save_last_run "$plugin" "$rc" "$(printf '%s' "$output" | head -1)"
     err "Plugin '$plugin' failed (exit $rc)"
 fi
 
-[ -n "$output" ] || { warn "Plugin '$plugin' produced no output — nothing to send"; exit 0; }
+[ -n "$output" ] || { warn "Plugin '$plugin' produced no output — nothing to send"; save_last_run "$plugin" 0 ""; exit 0; }
 
 # ── Route the output ────────────────────────────────────────────
 if [ "$PRINT" -eq 1 ]; then
@@ -82,12 +86,10 @@ if [ "$PRINT" -eq 1 ]; then
     exit 0
 fi
 
-telegram="$(dirname "$0")/pos-communication-telegram-sender"
-[ -x "$telegram" ] || telegram="$(command -v pos-communication-telegram-sender 2>/dev/null || true)"
-[ -n "$telegram" ] && [ -x "$telegram" ] || err "pos-communication-telegram-sender not found next to this script"
+save_last_run "$plugin" 0 "$(printf '%s' "$output" | head -1)"
 
 if [ "$MARKDOWN" -eq 1 ]; then
-    exec "$telegram" send --parse-mode markdown -- "$output"
+    notify_send --markdown "$output"
 else
-    exec "$telegram" send -- "$output"
+    notify_send "$output"
 fi

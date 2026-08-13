@@ -41,6 +41,14 @@ declare -F warn >/dev/null || warn() { echo "[!] $*"; }
 declare -F ok   >/dev/null || ok()   { echo "  OK $*"; }
 declare -F log  >/dev/null || log()  { echo "[+] $*"; }
 
+# Shared systemd **user** timer machinery (interval→OnCalendar mapping, unit
+# pair writer, linger bootstrap) — the same lib the entertainment module uses,
+# so the two unit templates never drift apart. Defines USER_SYSTEMD_DIR + ut_*.
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/user-timers-lib.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/user-timers-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/user-timers-lib.sh" 2>/dev/null \
+    || source "$(dirname "$0")/user-timers-lib.sh"
+
 # ── Job discovery / naming ───────────────────────────────────────
 sched_valid_name() {
     [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
@@ -341,92 +349,9 @@ sched_run_job() {   # $1 = job name
     [ "${DRY_RUN:-0}" -ne 1 ] && sched_save_run "$1" "$JOB_OUT" "$JOB_RC"
     return 0
 }
-# ── Interval → systemd OnCalendar (same list as entertainment) ──
-sched_interval_to_oncalendar() {
-    local i="$1"
-    case "$i" in
-        OnCalendar=*) printf '%s' "${i#OnCalendar=}"; return 0 ;;
-    esac
-    if [[ "$i" =~ ^([0-9]+)m$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 59 ] || return 1
-        printf '*:00/%s:00' "$n"; return 0
-    fi
-    if [[ "$i" =~ ^([0-9]+)h$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        [ "$n" -ge 1 ] && [ "$n" -le 23 ] || return 1
-        printf '*-*-* 00/%s:00:00' "$n"; return 0
-    fi
-    case "$i" in
-        hourly) printf '*-*-* *:00:00' ;;
-        daily)  printf '*-*-* 08:00:00' ;;
-        weekly) printf 'Mon *-*-* 08:00:00' ;;
-        *) return 1 ;;
-    esac
-    return 0
-}
-
-sched_interval_label() {
-    case "$1" in
-        daily)        echo "daily (08:00)" ;;
-        weekly)       echo "weekly (Mon 08:00)" ;;
-        hourly)       echo "hourly" ;;
-        OnCalendar=*) echo "${1#OnCalendar=}" ;;
-        *m|*h)        echo "every $1" ;;
-        *)            echo "$1" ;;
-    esac
-}
-
 # ── systemd user timers (one pair per job) ──────────────────────
-sched_unit() { printf '%s-%s\n' "$SCHED_PREFIX" "$1"; }
-
-sched_ensure_linger() {
-    local user
-    user="$(id -un)"
-    [ "$user" = "root" ] && { warn "running as root — enable linger for your real user: sudo loginctl enable-linger <user>"; return 0; }
-    command -v loginctl >/dev/null 2>&1 || return 0
-    if loginctl show-user "$user" 2>/dev/null | grep -q '^Linger=yes'; then
-        return 0
-    fi
-    if sudo -n loginctl enable-linger "$user" 2>/dev/null; then
-        ok "enabled linger for $user (timers fire without login)"
-    else
-        warn "run once so timers fire without login: sudo loginctl enable-linger $user"
-    fi
-}
-
-sched_write_units() {   # $1 = job name, $2 = OnCalendar
-    local name="$1" oncal="$2"
-    local base="$USER_SYSTEMD_DIR/$(sched_unit "$name")"
-    mkdir -p "$USER_SYSTEMD_DIR"
-    cat >"$base.service" <<EOF
-[Unit]
-Description=pos system schedule — run job $name
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=$SCHED_RUNNER run $name
-TimeoutStopSec=5s
-
-[Install]
-WantedBy=timers.target
-EOF
-    cat >"$base.timer" <<EOF
-[Unit]
-Description=Schedule: pos system schedule — $name
-
-[Timer]
-OnCalendar=$oncal
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-    chmod 644 "$base.service" "$base.timer"
-}
-
+# Interval → OnCalendar mapping, unit naming, the unit pair writer and linger
+# bootstrap come from lib/user-timers-lib.sh (ut_*).
 sched_job_active() {   # $1 = job name — valid AND not disabled
     sched_read_job "$1" >/dev/null 2>&1 || return 1
     [ "$JOB_ENABLED" = "false" ] && return 1
@@ -444,27 +369,32 @@ sched_sync() {
             continue
         fi
         [ "$JOB_ENABLED" = "false" ] && continue   # disabled: orphan cleanup drops its timer
-        if ! oncal="$(sched_interval_to_oncalendar "$JOB_INTERVAL")"; then
+        if ! oncal="$(ut_interval_to_oncalendar "$JOB_INTERVAL")"; then
             warn "invalid interval '$JOB_INTERVAL' for '$name' — skipping"
             continue
         fi
         if [ "${DRY_RUN:-0}" -eq 1 ]; then
-            log "(dry-run) write $(sched_unit "$name").timer (OnCalendar=$oncal)"
+            log "(dry-run) write $(ut_unit_name "$SCHED_PREFIX" "$name").timer (OnCalendar=$oncal)"
         else
-            sched_write_units "$name" "$oncal"
+            ut_write_unit_pair \
+                "$USER_SYSTEMD_DIR/$(ut_unit_name "$SCHED_PREFIX" "$name").service" \
+                "$USER_SYSTEMD_DIR/$(ut_unit_name "$SCHED_PREFIX" "$name").timer" \
+                "pos system schedule — run job $name" \
+                "$SCHED_RUNNER run $name" \
+                "$oncal"
         fi
         wrote=1; n=$((n + 1))
     done
     [ "${DRY_RUN:-0}" -eq 1 ] && return 0
     [ "$wrote" -eq 1 ] && systemctl --user daemon-reload >/dev/null 2>&1 || true
-    [ "$n" -gt 0 ] && sched_ensure_linger
+    [ "$n" -gt 0 ] && ut_ensure_linger
     for name in "${jobs[@]}"; do
         if ! sched_read_job "$name" >/dev/null 2>&1; then
             continue
         fi
         [ "$JOB_ENABLED" = "false" ] && continue
-        sched_interval_to_oncalendar "$JOB_INTERVAL" >/dev/null 2>&1 || continue
-        local t="$(sched_unit "$name").timer"
+        ut_interval_to_oncalendar "$JOB_INTERVAL" >/dev/null 2>&1 || continue
+        local t="$(ut_unit_name "$SCHED_PREFIX" "$name").timer"
         if systemctl --user is-enabled "$t" >/dev/null 2>&1; then
             systemctl --user restart "$t" >/dev/null 2>&1 || true
         else
@@ -483,8 +413,8 @@ sched_remove_orphans() {
         [ -f "$f" ] || continue
         p="${f##*/}"; p="${p#${SCHED_PREFIX}-}"; p="${p%.timer}"
         if ! sched_job_active "$p"; then
-            systemctl --user disable --now "$(sched_unit "$p").timer" >/dev/null 2>&1 || true
-            rm -f "$USER_SYSTEMD_DIR/$(sched_unit "$p").timer" "$USER_SYSTEMD_DIR/$(sched_unit "$p").service"
+            systemctl --user disable --now "$(ut_unit_name "$SCHED_PREFIX" "$p").timer" >/dev/null 2>&1 || true
+            rm -f "$USER_SYSTEMD_DIR/$(ut_unit_name "$SCHED_PREFIX" "$p").timer" "$USER_SYSTEMD_DIR/$(ut_unit_name "$SCHED_PREFIX" "$p").service"
             log "removed timer for '$p'"
             removed=1
         fi
@@ -693,8 +623,8 @@ sched_status() {
         local st="enabled" oncal next=""
         [ "$JOB_ENABLED" = "false" ] && st="disabled"
         if [ "$st" = "enabled" ]; then
-            if oncal="$(sched_interval_to_oncalendar "$JOB_INTERVAL")"; then
-                next="$(systemctl --user list-timers "$(sched_unit "$name").timer" --no-legend 2>/dev/null | awk '{print $1, $2}' | head -1)"
+            if oncal="$(ut_interval_to_oncalendar "$JOB_INTERVAL")"; then
+                next="$(systemctl --user list-timers "$(ut_unit_name "$SCHED_PREFIX" "$name").timer" --no-legend 2>/dev/null | awk '{print $1, $2}' | head -1)"
             else
                 oncal="(invalid interval: $JOB_INTERVAL)"
             fi
@@ -743,7 +673,7 @@ sched_editor_add() {
     [ -f "$SCHEDULE_DIR/$name.env" ] && { warn "job '$name' already exists — use edit"; return; }
     read -rp "interval [5m..59m | 1h..23h | hourly daily weekly | OnCalendar=…] (blank = $SCHED_DEFAULT_INTERVAL): " interval
     interval="${interval:-$SCHED_DEFAULT_INTERVAL}"
-    sched_interval_to_oncalendar "$interval" >/dev/null 2>&1 || warn "interval '$interval' not recognized — saved anyway, 'enable' will skip it"
+    ut_interval_to_oncalendar "$interval" >/dev/null 2>&1 || warn "interval '$interval' not recognized — saved anyway, 'enable' will skip it"
     read -rp "notify [always|onchange|onerror|threshold|never] (blank = onchange): " notify
     notify="${notify:-onchange}"
     case "$notify" in always|onchange|onerror|threshold|never) ;; *) warn "unknown policy '$notify' — job will run silently" ;; esac
@@ -775,7 +705,7 @@ sched_editor_edit() {
     local interval notify msg rule cmd
     read -rp "interval (blank keeps, current: $JOB_INTERVAL): " interval
     interval="${interval:-$JOB_INTERVAL}"
-    sched_interval_to_oncalendar "$interval" >/dev/null 2>&1 || warn "interval '$interval' not recognized — saved anyway, 'enable' will skip it"
+    ut_interval_to_oncalendar "$interval" >/dev/null 2>&1 || warn "interval '$interval' not recognized — saved anyway, 'enable' will skip it"
     read -rp "notify (blank keeps, current: $JOB_NOTIFY): " notify
     notify="${notify:-$JOB_NOTIFY}"
     read -rp "message (blank keeps, current: ${JOB_MSG:-<none>}): " msg
