@@ -22,6 +22,7 @@ _pos_flags[tree]="--depth"
 declare -A _pos_subcmds
 _pos_subcmds[ai-gemini]="ask chat models sessions"
 _pos_subcmds[communication-matrix-sender]="send test login"
+_pos_subcmds[communication-scrcpy]="devices record tcpip connect push pull screenshot info"
 _pos_subcmds[communication-telegram-sender]="send test"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
@@ -29,7 +30,7 @@ _pos_subcmds[network-download]="start stop status add torrent metalink list info
 _pos_subcmds[system-schedule]="run list config enable disable status migrate"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
-declare -a _pos_config_scopes=(ai compose entertainment matrix notify system telegram)
+declare -a _pos_config_scopes=(ai compose entertainment matrix notify scrcpy system telegram)
 # GEN:END posconfigscopes
 
 _pos() {

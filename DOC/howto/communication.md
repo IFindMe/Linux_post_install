@@ -1,7 +1,8 @@
 # How-To: `pos communication`
 
-Messaging and alerts over Telegram and Matrix. Tools: `telegram-sender`,
-`telegram-listener`, `matrix-sender`, `matrix-listener`.
+Messaging and alerts over Telegram and Matrix, plus Android mirroring. Tools:
+`telegram-sender`, `telegram-listener`, `matrix-sender`, `matrix-listener`,
+`scrcpy`.
 
 | Tool | What it does |
 |------|--------------|
@@ -9,6 +10,7 @@ Messaging and alerts over Telegram and Matrix. Tools: `telegram-sender`,
 | `pos communication telegram listener` | Bot listener: map `/command` → bash and run it from chat (systemd user daemon) |
 | `pos communication matrix sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `pos communication matrix listener` | Matrix listener: map `/command` → bash and run it from room messages (systemd user daemon) |
+| `pos communication scrcpy` | Mirror/control an Android device over USB or WiFi (scrcpy+adb) |
 
 `telegram-sender` is the workhorse: it backs the whole **notify system** —
 health digests, backup alerts, firewall changes — and can be used directly.
@@ -224,6 +226,77 @@ pos communication matrix listener --disable   # remove it
   `~/.local/share/linux_post_install/logs/pos.log`.
 - "Unknown command" → send `/help` for the mapped list.
 - Needs `jq` (in preinstall PACKAGES).
+
+---
+
+## `pos communication scrcpy`
+
+Mirror and control an Android device from the PC — the phone's screen in a
+window, controlled with mouse + keyboard (scrcpy by Genymobile, no root, no
+phone app). Works over USB or WiFi.
+
+### One-time setup
+
+```bash
+# phone: Settings → About → tap "Build number" 7× → Developer options → enable
+# "USB debugging"; plug it in and accept the "Allow USB debugging" dialog
+pos communication scrcpy devices          # confirm the phone shows as "device"
+pos communication scrcpy info             # model / Android version
+pos config scrcpy                         # optional defaults (serial, size, fps, ...)
+```
+
+Requires `scrcpy` + `adb` (both in preinstall PACKAGES). The apt build is older
+than the latest release — install the current GitHub release (bundles `adb`)
+with the optional app `apps/media/scrcpy.sh` (or `./install.sh --apps`).
+
+### Mirror
+
+```bash
+pos communication scrcpy                          # USB device, config defaults
+pos communication scrcpy --turn-screen-off        # pass any scrcpy flag through
+pos communication scrcpy --no-audio --always-on-top
+```
+
+The window needs a display — over ssh use `ssh -X` (and a phone already
+reachable over WiFi, see below). `scrcpy --help` lists every flag; the wrapper
+forwards flags verbatim.
+
+### Wireless (no USB cable)
+
+```bash
+pos communication scrcpy tcpip 5555       # switch the USB device to WiFi adb
+# unplug the phone, then:
+pos communication scrcpy connect 192.168.1.42:5555   # connect + mirror
+```
+
+`tcpip` prints the exact `connect` command with the phone's detected IP. Set
+`SCRCPY_SERIAL` in `pos config scrcpy` so later bare `pos communication scrcpy`
+goes straight to that device.
+
+### Record / screenshot / files
+
+```bash
+pos communication scrcpy record --headless     # record to ~/Videos/scrcpy/, no window
+pos communication scrcpy record clip.mp4        # explicit file
+pos communication scrcpy screenshot             # PNG to ~/Videos/scrcpy/
+pos communication scrcpy push ~/app.apk         # → /sdcard/Download/
+pos communication scrcpy pull /sdcard/DCIM/Camera ~/photos
+```
+
+These all work headless — handy on the homelab box for grabbing a phone's
+screen/file without a desktop.
+
+**Troubleshooting:**
+- "no device connected" → is USB debugging on, is the "Allow USB debugging"
+  dialog accepted, and does `pos communication scrcpy devices` show the serial?
+- Device shows `offline`/`unauthorized` → re-accept the USB debugging dialog on
+  the phone (unplug/replug); `adb kill-server` may help.
+- "not reachable" after `tcpip` → the phone's WiFi IP changed; re-check with
+  `adb devices` or run `tcpip` again while plugged in.
+- Mirror window is blank / no audio → older apt scrcpy lacks features; install
+  the latest with the `apps/media/scrcpy.sh` app installer.
+- `ssh -X` mirror is slow → prefer WiFi or a wired LAN; bump `SCRCPY_MAX_FPS`
+  down or set `SCRCPY_BIT_RATE` lower in `pos config scrcpy`.
 
 ---
 

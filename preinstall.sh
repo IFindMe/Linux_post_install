@@ -38,6 +38,7 @@ PACKAGES=(
     sysstat iotop atop vnstat
     python3 python3-pip rclone
     libqrencode4 libgtk-3-0
+    scrcpy adb
 )
 
 spawn "apt update" sudo apt update

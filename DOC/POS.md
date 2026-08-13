@@ -265,6 +265,7 @@ Subcommands that need input prompt interactively when args are omitted.
 | `pos communication telegram listener` | `bin/pos-communication-telegram-listener` | Telegram bot listener: map `/command` → bash commands and run them from chat; interactive editor for the map | Same `telegram.env` (the bot is the owner, `TELEGRAM_CHAT_ID`). Map lives in `~/.config/linux_post_install/telegram_commands.env` (`/cmd=bash command` lines, chmod 600) |
 | `pos communication matrix sender send "text"` | `bin/pos-communication-matrix-sender` | Send a text message (plain or `--markdown`) to a Matrix room via the client-server API; also `login` (password → access token) and `test` | Homeserver + room from `~/.config/linux_post_install/matrix.env` (`MATRIX_HOMESERVER`, `MATRIX_ACCESS_TOKEN`, `MATRIX_USER_ID`, `MATRIX_ROOM_ID`, chmod 600, secrets masked by `pos config matrix`). Precedence: `--room` flag > env > config file |
 | `pos communication matrix listener` | `bin/pos-communication-matrix-listener` | Matrix listener: map `/command` → bash commands and run them from room messages; interactive editor for the map | Same `matrix.env` (reacts to `MATRIX_USER_ID`'s own messages; watches `MATRIX_ROOM_ID` or all joined rooms). Map lives in `~/.config/linux_post_install/matrix_commands.env` (`/cmd=bash command` lines, chmod 600) |
+| `pos communication scrcpy [cmd]` | `bin/pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb: `devices`, `record`, `tcpip`, `connect`, `push`, `pull`, `screenshot`, `info` (bare = mirror) | `scrcpy.env` (`SCRCPY_SERIAL`, `SCRCPY_MAX_SIZE`, `SCRCPY_MAX_FPS`, `SCRCPY_BIT_RATE`, `SCRCPY_FULLSCREEN`, `SCRCPY_RECORD_DIR`, `SCRCPY_PUSH_TARGET`, `SCRCPY_EXTRA_FLAGS`) via `pos config scrcpy` |
 
 `pos communication telegram sender` in detail:
 
@@ -321,6 +322,37 @@ The access token is a secret — it is stored only in `~/.config/linux_post_inst
 | `pos communication matrix listener --run` | Run the polling loop in the foreground (what the service executes) |
 
 The daemon long-polls `/sync` (30s timeout, per-sync `since` token, compact filter that drops presence/account_data/device noise and only requests `m.room.message` timeline events). It reacts only to messages **from `MATRIX_USER_ID`** (your own account — resolved via `/account/whoami` if unset); a `MATRIX_ROOM_ID` restricts it to one room, otherwise every joined room is watched. `/` and `!` prefixes both resolve (`!status` = `/status`). `/help` lists mapped commands; an unmapped command replies "Unknown command". Non-command text starting with `ai ` (case-insensitive, e.g. `ai what is Nvidia`) is forwarded to Gemini via `pos ai gemini ask` with a per-room session (`matrix-<room>`; `ai /reset` clears it) and the answer is replied verbatim with markdown stripped. Replies are sent as `m.text` threaded with `m.in_reply_to` on your message. Commands run as your user via `timeout 60 bash -c "…"` (stdout + stderr are replied, truncated to ~3800 chars; empty output → `OK`; non-zero exit is prefixed with `exit <rc>`), so `sudo` inside them needs a NOPASSWD rule. A map value prefixed with `@quiet ` runs the command but does NOT reply — for commands that already send their own notification (e.g. `/status=@quiet pos system health --send`). Map lines may carry a `/cmd::description=…` description. `--enable` warns if linger is off — the service stops when you log out unless you run `sudo loginctl enable-linger $(whoami)`.
+
+`pos communication scrcpy` in detail:
+
+| Command | Behavior |
+|---------|----------|
+| `pos communication scrcpy` | Mirror the device: opens the scrcpy window (needs a display — over ssh use `ssh -X`). Built from `scrcpy.env` defaults plus any pass-through scrcpy flags (`pos communication scrcpy --turn-screen-off --stay-awake`) |
+| `pos communication scrcpy devices` | `adb devices -l` — the source of serials for `SCRCPY_SERIAL` |
+| `pos communication scrcpy record [file] [--headless]` | Record a session to an mp4 — default `$SCRCPY_RECORD_DIR/<device>_<date>.mp4`; `--headless` adds `--no-playback` (no window — headless-server friendly) |
+| `pos communication scrcpy tcpip [port]` | `adb tcpip <port>` (default 5555) — switch the USB device to wireless adb, prints the reconnect command with the detected device IP |
+| `pos communication scrcpy connect <ip[:port]>` | `adb connect` then mirror over WiFi (`-s <ip:port>`) |
+| `pos communication scrcpy push <local> [remote]` | `adb push` — default destination `$SCRCPY_PUSH_TARGET` (`/sdcard/Download`, scrcpy's own default) |
+| `pos communication scrcpy pull <remote> [local]` | `adb pull` — default local dir is the current directory |
+| `pos communication scrcpy screenshot [file]` | `adb exec-out screencap -p` → a PNG, default `$SCRCPY_RECORD_DIR/<device>_<date>.png` |
+| `pos communication scrcpy info` | Device model, Android version, SDK, serial (`adb shell getprop`) |
+
+A device must have **USB debugging** enabled (Developer options) and the phone's "allow USB debugging" dialog accepted on first connect. `devices`, `record --headless`, `tcpip`, `connect`, `push`/`pull`, `screenshot`, `info` work without a display; the bare mirror needs one.
+
+**Configuration** (`~/.config/linux_post_install/scrcpy.env`, edit with `pos config scrcpy`):
+
+| Key | Required | Default | Purpose |
+|-----|----------|---------|---------|
+| `SCRCPY_SERIAL` | no | — | Default device serial/`ip:port` (from `devices`) — passed as `-s` to adb/scrcpy |
+| `SCRCPY_MAX_SIZE` | no | — | Limit video size, e.g. `1920` (scrcpy `--max-size`) |
+| `SCRCPY_MAX_FPS` | no | — | Limit frame rate, e.g. `60` (scrcpy `--max-fps`) |
+| `SCRCPY_BIT_RATE` | no | — | Video bit rate, e.g. `8M` (scrcpy `--video-bit-rate`) |
+| `SCRCPY_FULLSCREEN` | no | `false` | `true` adds `--fullscreen` |
+| `SCRCPY_RECORD_DIR` | no | `~/Videos/scrcpy` | Output dir for `record`/`screenshot` defaults |
+| `SCRCPY_PUSH_TARGET` | no | `/sdcard/Download` | Default `adb push` destination |
+| `SCRCPY_EXTRA_FLAGS` | no | — | Extra scrcpy flags appended to every mirror |
+
+Requires `scrcpy` + `adb` (added to `preinstall.sh` PACKAGES). The apt `scrcpy` build is older than the latest release — the optional app `apps/media/scrcpy.sh` installs the current GitHub release (bundles `adb`); run it via `./install.sh --apps` or directly.
 
 ### entertainment
 

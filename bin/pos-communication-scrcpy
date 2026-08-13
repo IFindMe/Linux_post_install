@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: communication scrcpy — Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
+# POS_SUBCMDS: devices record tcpip connect push pull screenshot info
+# POS_CONFIG: scrcpy | scrcpy.env | SCRCPY_SERIAL=:Default adb serial (from 'pos communication scrcpy devices') | SCRCPY_MAX_SIZE=:Limit video size (e.g. 1920) | SCRCPY_MAX_FPS=:Limit frame rate (e.g. 60) | SCRCPY_BIT_RATE=:Video bit rate (e.g. 8M) | SCRCPY_FULLSCREEN=:Start fullscreen (true/false) | SCRCPY_RECORD_DIR=:Record output dir (default ~/Videos/scrcpy) | SCRCPY_PUSH_TARGET=:adb push destination (default /sdcard/Download) | SCRCPY_EXTRA_FLAGS=:Extra scrcpy flags appended to every mirror
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+CONFIG_FILE="$HOME/.config/linux_post_install/scrcpy.env"
+
+command -v scrcpy &>/dev/null || err "scrcpy not found — install it: 'sudo apt install scrcpy' (or the latest release via the app installer 'apps/media/scrcpy.sh', see 'pos help communication scrcpy')"
+command -v adb &>/dev/null || err "adb not found — install it: 'sudo apt install adb'"
+
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        v="${v//$'\r'/}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+load_config
+SCRCPY_SERIAL="${SCRCPY_SERIAL:-}"
+SCRCPY_MAX_SIZE="${SCRCPY_MAX_SIZE:-}"
+SCRCPY_MAX_FPS="${SCRCPY_MAX_FPS:-}"
+SCRCPY_BIT_RATE="${SCRCPY_BIT_RATE:-}"
+SCRCPY_FULLSCREEN="${SCRCPY_FULLSCREEN:-false}"
+SCRCPY_RECORD_DIR="${SCRCPY_RECORD_DIR:-$HOME/Videos/scrcpy}"
+SCRCPY_PUSH_TARGET="${SCRCPY_PUSH_TARGET:-/sdcard/Download}"
+SCRCPY_EXTRA_FLAGS="${SCRCPY_EXTRA_FLAGS:-}"
+
+usage() {
+    cat <<EOF
+Usage: pos communication scrcpy [command] [args]
+
+Mirror and control an Android device with scrcpy (a GUI window; needs a
+display — over ssh use 'ssh -X'). Over USB with USB debugging enabled, or
+wirelessly via 'tcpip'/'connect'.
+
+Commands:
+  (none)                    Mirror the device (config defaults + pass-through)
+  devices                   List connected devices (adb devices -l)
+  record [file] [--headless]  Record a session to an mp4 (default:
+                            \$SCRCPY_RECORD_DIR/<device>_<date>.mp4).
+                            --headless adds --no-playback (no window)
+  tcpip [port]              Switch the USB device to wireless adb (default 5555)
+  connect <ip[:port]>       adb connect + mirror over WiFi
+  push <local> [remote]     Copy a file/folder to the device (default
+                            \$SCRCPY_PUSH_TARGET, i.e. /sdcard/Download)
+  pull <remote> [local]     Copy a file/folder from the device (default: cwd)
+  screenshot [file]         Save a PNG of the screen (default:
+                            \$SCRCPY_RECORD_DIR/<date>.png)
+  info                      Show device model, Android version, SDK, serial
+
+Pass-through: any scrcpy flag given to the bare form is forwarded verbatim
+(e.g. 'pos communication scrcpy --turn-screen-off --stay-awake').
+All scrcpy options: run 'scrcpy --help'.
+
+Config:    $CONFIG_FILE (SCRCPY_*) — edit it with 'pos config scrcpy'
+Precedence: CLI flags > environment > config file.
+
+Examples:
+  pos communication scrcpy
+  pos communication scrcpy --no-audio --always-on-top
+  pos communication scrcpy devices
+  pos communication scrcpy record --headless
+  pos communication scrcpy tcpip 5555
+  pos communication scrcpy connect 192.168.1.42:5555
+  pos communication scrcpy push ~/file.apk
+  pos communication scrcpy pull /sdcard/DCIM/Camera
+  pos communication scrcpy screenshot shot.png
+  pos communication scrcpy info
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+# ── helpers ────────────────────────────────────────────────────
+_sflag() { [ -n "$SCRCPY_SERIAL" ] && printf -- '-s %s' "$SCRCPY_SERIAL"; }
+
+# Print the serial of the first reachable device, or nothing.
+_first_device() {
+    adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1; exit}'
+}
+
+# Exit 1 with a friendly hint when the target device isn't reachable.
+_require_device() {
+    local serial="${1:-$SCRCPY_SERIAL}"
+    if [ -n "$serial" ]; then
+        if ! adb -s "$serial" get-state 2>/dev/null | grep -qx device; then
+            err "device '$serial' not reachable — is USB debugging enabled? (plug it in, or 'pos communication scrcpy connect <ip>')"
+        fi
+    elif [ -z "$(_first_device)" ]; then
+        err "no device connected — 'pos communication scrcpy devices' to list, or 'pos communication scrcpy connect <ip[:port]>' for wireless"
+    fi
+}
+
+_dev_name() { printf '%s' "${SCRCPY_SERIAL:-device}" | tr ':' '-'; }
+
+_extra_flags() {
+    local -a extra
+    [ -n "$SCRCPY_EXTRA_FLAGS" ] && read -r -a extra <<< "$SCRCPY_EXTRA_FLAGS"
+    printf '%s\n' "${extra[@]+"${extra[@]}"}"
+}
+
+# Build the scrcpy command from config defaults + pass-through args.
+_mirror() {  # $@ = pass-through scrcpy flags
+    local -a cmd=(scrcpy)
+    local f
+    [ -n "$SCRCPY_SERIAL" ] && cmd+=(-s "$SCRCPY_SERIAL")
+    [ -n "$SCRCPY_MAX_SIZE" ] && cmd+=(--max-size "$SCRCPY_MAX_SIZE")
+    [ -n "$SCRCPY_MAX_FPS" ] && cmd+=(--max-fps "$SCRCPY_MAX_FPS")
+    [ -n "$SCRCPY_BIT_RATE" ] && cmd+=(--video-bit-rate "$SCRCPY_BIT_RATE")
+    [ "$SCRCPY_FULLSCREEN" = "true" ] && cmd+=(--fullscreen)
+    while IFS= read -r f; do cmd+=("$f"); done < <(_extra_flags)
+    cmd+=("$@")
+    exec "${cmd[@]}"
+}
+
+# ── subcommands ────────────────────────────────────────────────
+cmd_devices() {
+    adb devices -l
+}
+
+cmd_record() {
+    _require_device
+    local headless=0 file=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --headless) headless=1 ;;
+            -*) err "unknown record option: $1 (options: [file] [--headless])" ;;
+            *) [ -z "$file" ] && file="$1" || err "too many arguments: $1" ;;
+        esac
+        shift
+    done
+    mkdir -p "$SCRCPY_RECORD_DIR"
+    file="${file:-$SCRCPY_RECORD_DIR/$(_dev_name)_$(date +%Y%m%d_%H%M%S).mp4}"
+    log "recording to $file"
+    local -a cmd=(scrcpy $(_sflag) "--record=$file")
+    [ "$headless" -eq 1 ] && cmd+=(--no-playback)
+    exec "${cmd[@]}"
+}
+
+cmd_tcpip() {
+    _require_device
+    local port="${1:-5555}"
+    [[ "$port" =~ ^[0-9]+$ ]] || err "port must be a number (got '$port')"
+    adb $(_sflag) tcpip "$port"
+    local ip
+    ip="$(adb $(_sflag) shell 'ip route get 1.1.1.1 2>/dev/null' 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+    if [ -n "$ip" ]; then
+        log "device is now listening on tcpip port $port — reconnect wirelessly with:"
+        log "  pos communication scrcpy connect $ip:$port"
+    else
+        log "device is now listening on tcpip port $port — reconnect wirelessly with:"
+        log "  pos communication scrcpy connect <device-ip>:$port"
+        warn "could not auto-detect the device IP — find it with 'adb $(_sflag) shell ip addr'"
+    fi
+}
+
+cmd_connect() {
+    local target="${1:-}"
+    [ -n "$target" ] || err "usage: pos communication scrcpy connect <ip[:port]>"
+    log "adb connect $target"
+    adb connect "$target"
+    SCRCPY_SERIAL="$target"
+    _require_device "$target"
+    _mirror
+}
+
+cmd_push() {
+    _require_device
+    local local_path="${1:-}" remote="${2:-$SCRCPY_PUSH_TARGET}"
+    [ -n "$local_path" ] || err "usage: pos communication scrcpy push <local> [remote]"
+    [ -e "$local_path" ] || err "no such file or folder: $local_path"
+    log "adb push $local_path → $remote"
+    adb $(_sflag) push "$local_path" "$remote"
+}
+
+cmd_pull() {
+    _require_device
+    local remote="${1:-}" local_path="${2:-.}"
+    [ -n "$remote" ] || err "usage: pos communication scrcpy pull <remote> [local]"
+    log "adb pull $remote → $local_path"
+    adb $(_sflag) pull "$remote" "$local_path"
+}
+
+cmd_screenshot() {
+    _require_device
+    local file="${1:-}"
+    if [ -z "$file" ]; then
+        mkdir -p "$SCRCPY_RECORD_DIR"
+        file="$SCRCPY_RECORD_DIR/$(_dev_name)_$(date +%Y%m%d_%H%M%S).png"
+    fi
+    log "screenshot → $file"
+    adb $(_sflag) exec-out screencap -p > "$file"
+}
+
+cmd_info() {
+    _require_device
+    local model android sdk serial
+    model="$(adb $(_sflag) shell getprop ro.product.model | tr -d '\r')"
+    android="$(adb $(_sflag) shell getprop ro.build.version.release | tr -d '\r')"
+    sdk="$(adb $(_sflag) shell getprop ro.build.version.sdk | tr -d '\r')"
+    serial="$(adb $(_sflag) shell getprop ro.serialno | tr -d '\r')"
+    printf '%-12s %s\n' "model:" "${model:-unknown}"
+    printf '%-12s %s\n' "android:" "${android:-unknown}"
+    printf '%-12s %s\n' "sdk:" "${sdk:-unknown}"
+    printf '%-12s %s\n' "serial:" "${serial:-unknown}"
+}
+
+# ── dispatch ───────────────────────────────────────────────────
+cmd="${1:-}"
+case "$cmd" in
+    devices)   shift; cmd_devices "$@" ;;
+    record)    shift; cmd_record "$@" ;;
+    tcpip)     shift; cmd_tcpip "$@" ;;
+    connect)   shift; cmd_connect "$@" ;;
+    push)      shift; cmd_push "$@" ;;
+    pull)      shift; cmd_pull "$@" ;;
+    screenshot) shift; cmd_screenshot "$@" ;;
+    info)      shift; cmd_info "$@" ;;
+    *)
+        # Anything else is a pass-through scrcpy flag for the mirror command.
+        _require_device
+        _mirror "$@"
+        ;;
+esac
