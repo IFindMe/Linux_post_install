@@ -98,7 +98,7 @@ timer_start
 if should_run 1 preinstall; then
     step 1 4 "Installing system packages"
     if [ -f preinstall.sh ]; then
-        spawn "apt update" sudo apt update
+        # preinstall.sh owns 'apt update' — no duplicate update here.
         bash preinstall.sh
     fi
 fi
@@ -113,22 +113,26 @@ if should_run 2 scripts; then
         run sudo install -m 755 "$f" /usr/local/bin/
         count=$((count + 1))
     done
-    run sudo install -m 644 lib/common.sh /usr/local/bin/common.sh
-    run sudo install -m 644 lib/flags.sh /usr/local/bin/flags.sh
-    run sudo install -m 644 lib/notify.sh /usr/local/bin/notify.sh
-    run sudo install -m 644 lib/entertainment-lib.sh /usr/local/bin/entertainment-lib.sh
-    run sudo install -m 644 lib/scheduler-lib.sh /usr/local/bin/scheduler-lib.sh
-    run sudo install -m 644 lib/config-ui.sh /usr/local/bin/config-ui.sh
+    lib_count=0
+    lib_names=""
+    for lf in common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh; do
+        run sudo install -m 644 "lib/$lf" "/usr/local/bin/$lf"
+        lib_count=$((lib_count + 1))
+        lib_names+="$lf "
+    done
+    log "libs -> /usr/local/bin (644): ${lib_names% }"
 
     # ── Entertainment plugins ────────────────────────────────
     # Installed into /usr/local/bin so the repo can be deleted afterwards.
     pcount=0
+    pnames=""
     for f in entertainment/*.sh; do
         [ -f "$f" ] || continue
         run sudo install -m 755 "$f" /usr/local/bin/
         pcount=$((pcount + 1))
+        pnames+="$(basename "$f") "
     done
-    ok "$pcount entertainment plugins -> /usr/local/bin"
+    ok "$pcount entertainment plugins -> /usr/local/bin: ${pnames% }"
 
     # ── Precompiled architecture binaries ─────────────────────
     # Manually-compiled binaries (not available on the internet),
@@ -140,15 +144,21 @@ if should_run 2 scripts; then
         *)               prebuilt_dir="" ;;
     esac
     if [ -n "$prebuilt_dir" ] && [ -d "$prebuilt_dir" ]; then
+        bcount=0
+        bnames=""
         for f in "$prebuilt_dir"/*; do
             [ -f "$f" ] || continue
             run sudo install -m 755 "$f" /usr/local/bin/
+            bcount=$((bcount + 1))
+            bnames+="$(basename "$f") "
         done
-        ok "$prebuilt_dir binaries -> /usr/local/bin"
+        ok "$bcount $prebuilt_dir binaries -> /usr/local/bin: ${bnames% }"
     fi
 
     # ── Optional features ──────────────────────────────────────
     if [ "$RUN_FEATURES" -eq 1 ]; then
+        fcount=0
+        fnames=""
         for f in features/*; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
@@ -157,17 +167,22 @@ if should_run 2 scripts; then
             if [ -e "$dest" ]; then
                 if confirm "Overwrite existing $dest?" n; then
                     run sudo install -m 755 "$f" "$dest"
+                    log "feature overwritten: $name"
                 else
                     log "Keeping existing $dest"
                 fi
             else
                 run sudo install -m 755 "$f" "$dest"
+                log "feature installed: $name"
             fi
             flag_set "$flag_name"
+            log "feature flag set: $flag_name"
+            fcount=$((fcount + 1))
+            fnames+="${name%.sh} "
         done
-        ok "features installed"
+        ok "$fcount features installed: ${fnames% }"
     fi
-    ok "$count scripts + libs -> /usr/local/bin"
+    ok "$count scripts + $lib_count libs -> /usr/local/bin"
 fi
 
 # ── Phase 3: postinstall ───────────────────────────────────────

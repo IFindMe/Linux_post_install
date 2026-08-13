@@ -54,8 +54,10 @@ done
 # thresholds, silent log cleanup). Ask before copying — only into an empty
 # schedule.d/ (never overwrite existing jobs). Users with legacy event.env
 # rules are pointed at `pos system schedule migrate` instead.
-if [ -d config/schedule.d ] && [ ! -d "$ENT_DIR/schedule.d" ]; then
-    if [ -f "$ENT_DIR/event.env" ] && grep -vE '^[[:space:]]*(#.*)?$' "$ENT_DIR/event.env" >/dev/null 2>&1; then
+if [ -d config/schedule.d ]; then
+    if [ -d "$ENT_DIR/schedule.d" ]; then
+        log "schedule.d already exists, keeping it"
+    elif [ -f "$ENT_DIR/event.env" ] && grep -vE '^[[:space:]]*(#.*)?$' "$ENT_DIR/event.env" >/dev/null 2>&1; then
         log "legacy event.env rules found — convert them with 'pos system schedule migrate'"
     elif confirm "Install the starter schedule jobs (NVMe health, CPU/disk thresholds, log cleanup)?"; then
         if [ "${DRY_RUN:-0}" -eq 1 ]; then
@@ -127,6 +129,8 @@ if [ -f "$KEY_FILE" ]; then
     done < "$KEY_FILE"
     if [ "$added" -gt 0 ]; then
         log "Installed $added SSH key(s)"
+    elif ! grep -qE '^[[:space:]]*[^#[:space:]]' "$KEY_FILE"; then
+        log "config/authorized_keys is empty — nothing to add"
     fi
 else
     warn "config/authorized_keys not found, skipping SSH setup"
@@ -154,6 +158,7 @@ if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
         fi
         run sudo systemctl enable --now "$svc_name" 2>/dev/null || \
             run sudo systemctl enable "$svc_name"
+        log "service enabled: $svc_name"
     done
     log "Systemd services installed and enabled"
 else

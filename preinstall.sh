@@ -41,6 +41,8 @@ PACKAGES=(
 )
 
 spawn "apt update" sudo apt update
+log "Installing ${#PACKAGES[@]} packages (apt install -y):"
+echo "    ${PACKAGES[*]}" | fold -s -w 80
 spawn "Installing packages" sudo apt install -y "${PACKAGES[@]}"
 # ── cpufreq tools ─────────────────────────────────────────────
 # cpufrequtils (Ubuntu) was removed in Debian trixie+; linux-cpupower

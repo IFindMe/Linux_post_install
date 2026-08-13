@@ -560,9 +560,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 206 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
-| `preinstall.sh` | 73 | System packages + hotspot deps + yt-dlp + fail2ban |
-| `postinstall.sh` | 163 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
+| `install.sh` | 223 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
+| `preinstall.sh` | 75 | System packages + hotspot deps + yt-dlp + fail2ban |
+| `postinstall.sh` | 168 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
