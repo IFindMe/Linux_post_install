@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system schedule — Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
+# POS_SUBCMDS: run list config enable disable status migrate
+# POS_FLAGS: --dry-run
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/scheduler-lib.sh" 2>/dev/null || source "$(dirname "$0")/scheduler-lib.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos system schedule <subcommand> [--dry-run]
+
+Scheduled jobs. Each job is a file in $SCHEDULE_DIR/<name>.env:
+
+    INTERVAL=hourly            (5m..59m | 1h..23h | hourly daily weekly | OnCalendar=…)
+    NOTIFY=onchange            (always | onchange | onerror | threshold | never)
+    MSG="NVMe health"          optional label; threshold alert text when NOTIFY=threshold
+    RULE="> 60c"               threshold only: op + threshold (unit suffix fine: 60c, 80%)
+    COMMAND=…                  literal rest of the line — pipes/quotes/sudo fine
+
+NOTIFY policies:
+  always     send the full output on every run
+  onchange   send only when the output differs from the last run (first run sends)
+  onerror    send only when the command fails (non-zero exit or empty output)
+  threshold  compare the command's first numeric output with RULE; alert on
+             false→true plus one recovery message
+  never      run only — no notification (side-effect jobs)
+Default: threshold if RULE is set, otherwise onchange.
+
+Subcommands:
+  run [name|all]      Execute job(s) now (the systemd timers call 'run <name>')
+  list                Jobs + notify policy + interval + last run
+  config              Interactive editor: add / edit / remove / enable / disable
+  enable [name|all]   Install + start the job's user timer (default: all)
+  disable [name|all]  Stop the job, keeping the job file (default: all)
+  status              Per-job timer state + next run
+  migrate             Convert legacy event.env rules into schedule.d jobs (threshold)
+
+Options:
+  --dry-run           Preview what would run / be written / be sent
+  -h, --help          This help
+
+Jobs dir:  $SCHEDULE_DIR  (chmod 600 per file)
+
+Examples:
+  pos system schedule list
+  pos system schedule enable
+  pos system schedule run nvme-health --dry-run
+  pos system schedule migrate
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help|"") usage ;;
+esac
+
+DRY_RUN=0
+args=()
+for a in "$@"; do
+    case "$a" in
+        --dry-run) DRY_RUN=1 ;;
+        *)         args+=("$a") ;;
+    esac
+done
+set -- "${args[@]}"
+
+[ -d "$SCHEDULE_DIR" ] || log "no jobs yet — add one with 'pos system schedule config'"
+
+case "${1:-}" in
+    run)      sched_run "${2:-all}" ;;
+    list)     sched_list ;;
+    config)   sched_config_editor ;;
+    enable)   sched_enable "${2:-all}" ;;
+    disable)  sched_disable "${2:-all}" ;;
+    status)   sched_status ;;
+    migrate)  sched_migrate ;;
+    *)        err "unknown subcommand '${1:-}' (see --help)" ;;
+esac

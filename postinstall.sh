@@ -37,7 +37,7 @@ fi
 # ── system + notify config templates ───────────────────────────
 # Copied only if the user has not already created their own (no clobber).
 run mkdir -p "$ENT_DIR"
-for tpl in system.env notify.env ai.env event.env; do
+for tpl in system.env notify.env ai.env; do
     if [ -f "config/$tpl" ]; then
         if [ -f "$ENT_DIR/$tpl" ]; then
             log "$tpl already exists, keeping it"
@@ -49,23 +49,28 @@ for tpl in system.env notify.env ai.env event.env; do
     fi
 done
 
-# ── event-trigger starter rules (interactive) ──────────────────
-# config/event-rules.template has a ready-made rule set (CPU, memory,
-# disk, NVMe, network, processes). Ask the user before copying — only if
-# event.env has no rules yet (never overwrite existing rules).
-if [ -f config/event-rules.template ] && [ -f "$ENT_DIR/event.env" ]; then
-    if ! grep -vE '^[[:space:]]*(#.*)?$' "$ENT_DIR/event.env" >/dev/null 2>&1; then
-        if confirm "Copy the starter event-trigger rules into event.env?"; then
-            if [ "${DRY_RUN:-0}" -eq 1 ]; then
-                log "(dry-run) would copy config/event-rules.template → $ENT_DIR/event.env"
-            else
-                run cp config/event-rules.template "$ENT_DIR/event.env"
-                run chmod 600 "$ENT_DIR/event.env"
-                log "Installed starter rules — check them with 'pos system event-trigger list'"
-            fi
+# ── schedule starter jobs (interactive) ────────────────────────
+# config/schedule.d has ready-made example jobs (NVMe health, CPU/disk
+# thresholds, silent log cleanup). Ask before copying — only into an empty
+# schedule.d/ (never overwrite existing jobs). Users with legacy event.env
+# rules are pointed at `pos system schedule migrate` instead.
+if [ -d config/schedule.d ] && [ ! -d "$ENT_DIR/schedule.d" ]; then
+    if [ -f "$ENT_DIR/event.env" ] && grep -vE '^[[:space:]]*(#.*)?$' "$ENT_DIR/event.env" >/dev/null 2>&1; then
+        log "legacy event.env rules found — convert them with 'pos system schedule migrate'"
+    elif confirm "Install the starter schedule jobs (NVMe health, CPU/disk thresholds, log cleanup)?"; then
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) would copy config/schedule.d/* → $ENT_DIR/schedule.d/"
         else
-            log "Skipping starter rules"
+            run mkdir -p "$ENT_DIR/schedule.d"
+            for jf in config/schedule.d/*.env; do
+                [ -f "$jf" ] || continue
+                run cp "$jf" "$ENT_DIR/schedule.d/"
+                run chmod 600 "$ENT_DIR/schedule.d/${jf##*/}"
+            done
+            log "Installed starter schedule jobs — check them with 'pos system schedule list'"
         fi
+    else
+        log "Skipping starter schedule jobs"
     fi
 fi
 

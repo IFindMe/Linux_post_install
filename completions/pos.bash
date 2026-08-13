@@ -15,7 +15,7 @@ _pos_flags[network-download]="--dir --out --split --seed --force --upload --gid 
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[share-usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
 _pos_flags[system-backup]="--service"
-_pos_flags[system-event-trigger]="--dry-run"
+_pos_flags[system-schedule]="--dry-run"
 _pos_flags[tree]="--depth"
 # GEN:END posflags
 # GEN:START possubcmds
@@ -25,8 +25,8 @@ _pos_subcmds[communication-matrix-sender]="send test login"
 _pos_subcmds[communication-telegram-sender]="send test"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
-_pos_subcmds[network-download]="start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry"
-_pos_subcmds[system-event-trigger]="run config list enable disable status"
+_pos_subcmds[network-download]="start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace"
+_pos_subcmds[system-schedule]="run list config enable disable status migrate"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment matrix notify system telegram)

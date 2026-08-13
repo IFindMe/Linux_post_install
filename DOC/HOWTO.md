@@ -14,7 +14,7 @@ authoritative one-line reference (every command + flag), see
 | `pos docker` | Compose services, container dashboards, disposable VMs | [docker](howto/docker.md) |
 | `pos media` | Download audio/video via yt-dlp | [media](howto/media.md) |
 | `pos system` | Backups, firewall, health dashboard | [system](howto/system.md) |
-| `pos system event-trigger` | Threshold-rule monitors that alert on crossing | [event-trigger](howto/event-trigger.md) |
+| `pos system schedule` | Scheduled jobs: run a command on a timer, notify on threshold/change/error or silently | [schedule](howto/schedule.md) |
 | `pos ssh` | Load keys into the agent | [ssh](howto/ssh.md) |
 | `pos share` | Share USB devices & filesystems over the network (USB, NFS, SMB) | [share](howto/share.md) |
 | `pos communication` | Send Telegram/Matrix messages & alerts, /command listeners | [communication](howto/communication.md) |
@@ -42,6 +42,7 @@ templates (without overwriting an existing file):
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
 | `entertainment.env` | `pos entertainment *` | plugin keys (`WEATHER_LAT`…), `ENABLED` |
 | `ai.env` | `pos ai gemini` | `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL` |
+| `schedule.d/` | `pos system schedule` | one `<name>.env` per job: `INTERVAL`, `NOTIFY`, `MSG`, `RULE`, `COMMAND` |
 
 ```bash
 pos config telegram                     # set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
@@ -73,6 +74,8 @@ Adding another platform = create `bin/pos-communication-<p>` implementing
   enabled by postinstall once `telegram.env` exists. See [system](howto/system.md).
 - **Entertainment auto-triggers** — per-plugin `pos entertainment enable <plugin> <interval>`,
   uses systemd user timers (or cron fallback). See [entertainment](howto/entertainment.md).
+- **`pos system schedule` jobs** — run any command on a per-job timer and notify
+  on threshold/change/error/always or silently. See [schedule](howto/schedule.md).
 
 ### Gotcha: run from anywhere
 

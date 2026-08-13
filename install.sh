@@ -117,7 +117,7 @@ if should_run 2 scripts; then
     run sudo install -m 644 lib/flags.sh /usr/local/bin/flags.sh
     run sudo install -m 644 lib/notify.sh /usr/local/bin/notify.sh
     run sudo install -m 644 lib/entertainment-lib.sh /usr/local/bin/entertainment-lib.sh
-    run sudo install -m 644 lib/eventer-lib.sh /usr/local/bin/eventer-lib.sh
+    run sudo install -m 644 lib/scheduler-lib.sh /usr/local/bin/scheduler-lib.sh
     run sudo install -m 644 lib/config-ui.sh /usr/local/bin/config-ui.sh
 
     # ── Entertainment plugins ────────────────────────────────

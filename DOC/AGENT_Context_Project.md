@@ -22,7 +22,7 @@
 | ## 11. Coding Conventions | 472–504 |
 | ## 12. Development Workflow | 505–557 |
 | ## 13. Key File Quick Reference | 558–614 |
-| ## 14. Common Tasks for Agents | 615–643 |
+| ## 14. Common Tasks for Agents | 615–644 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -87,9 +87,9 @@ Linux_post_install/
 │   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
-│   ├── pos-system-event-trigger            # State-based rule monitors; alerts via notify when a check crosses a threshold
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
+│   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 <!-- GEN:END tree -->
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
@@ -288,9 +288,9 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| system | event-trigger | `pos-system-event-trigger` | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
+| system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
 <!-- GEN:END dispatch -->
 
@@ -566,13 +566,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
 | `lib/entertainment-lib.sh` | 350 | Entertainment module lib (ENABLED parsing, scheduler sync) |
-| `lib/eventer-lib.sh` | 312 | Eventer lib (rule parsing, float compare, per-rule state, user-timer sync) |
+| `lib/scheduler-lib.sh` | 822 | Scheduler lib (job parsing, notify policies, per-job user timers, legacy migrate) |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 291 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 292 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 565 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
@@ -591,20 +591,20 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 874 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 949 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
 | `bin/pos-share-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-share-smb-client` | 183 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
-| `bin/pos-share-smb-server` | 226 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
+| `bin/pos-share-smb-server` | 253 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 126 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-event-trigger` | 219 | State-based rule monitors; alerts via notify when a check crosses a threshold |
 | `bin/pos-system-firewall` | 291 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
+| `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 291 | Dynamic bash completion |
 <!-- GEN:END filetable -->
@@ -635,6 +635,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify aria2 download daemon / queue logic | Edit `bin/pos-network-download` |
 | Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
 | Modify SMB share logic | Edit `bin/pos-share-smb-server` / `bin/pos-share-smb-client` |
+| Modify the scheduler / scheduled jobs | Edit `bin/pos-system-schedule` / `lib/scheduler-lib.sh` (jobs in `~/.config/linux_post_install/schedule.d/`) |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
