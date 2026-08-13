@@ -264,6 +264,9 @@ screen (nice for watching the phone screen content elsewhere): no `=…` uses th
 main display's size/dpi, or force size/dpi — `1920x1080`, `1920x1080/420`,
 `/240`. Set it persistently with `SCRCPY_NEW_DISPLAY` in `pos config scrcpy`.
 
+Audio is forwarded to the desktop **by default** (scrcpy default); `--no-audio`
+disables it, or set `SCRCPY_AUDIO=false` in `pos config scrcpy`.
+
 The window needs a display — over ssh use `ssh -X` (and a phone already
 reachable over WiFi, see below). `scrcpy --help` lists every flag; the wrapper
 forwards flags verbatim.

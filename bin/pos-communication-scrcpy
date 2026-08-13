@@ -2,7 +2,7 @@
 set -euo pipefail
 # POS: communication scrcpy — Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
 # POS_SUBCMDS: devices record tcpip connect push pull screenshot info
-# POS_CONFIG: scrcpy | scrcpy.env | SCRCPY_SERIAL=:Default adb serial (from 'pos communication scrcpy devices') | SCRCPY_MAX_SIZE=:Limit video size (e.g. 1920) | SCRCPY_MAX_FPS=:Limit frame rate (e.g. 60) | SCRCPY_BIT_RATE=:Video bit rate (e.g. 8M) | SCRCPY_FULLSCREEN=:Start fullscreen (true/false) | SCRCPY_NEW_DISPLAY=:New virtual display (--new-display): true, WxH, WxH/DPI or /DPI | SCRCPY_RECORD_DIR=:Record output dir (default ~/Videos/scrcpy) | SCRCPY_PUSH_TARGET=:adb push destination (default /sdcard/Download) | SCRCPY_EXTRA_FLAGS=:Extra scrcpy flags appended to every mirror
+# POS_CONFIG: scrcpy | scrcpy.env | SCRCPY_SERIAL=:Default adb serial (from 'pos communication scrcpy devices') | SCRCPY_MAX_SIZE=:Limit video size (e.g. 1920) | SCRCPY_MAX_FPS=:Limit frame rate (e.g. 60) | SCRCPY_BIT_RATE=:Video bit rate (e.g. 8M) | SCRCPY_FULLSCREEN=:Start fullscreen (true/false) | SCRCPY_NEW_DISPLAY=:New virtual display (--new-display): true, WxH, WxH/DPI or /DPI | SCRCPY_AUDIO=:Forward device audio to the desktop (true/false, default true) | SCRCPY_RECORD_DIR=:Record output dir (default ~/Videos/scrcpy) | SCRCPY_PUSH_TARGET=:adb push destination (default /sdcard/Download) | SCRCPY_EXTRA_FLAGS=:Extra scrcpy flags appended to every mirror
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -37,6 +37,7 @@ SCRCPY_RECORD_DIR="${SCRCPY_RECORD_DIR:-$HOME/Videos/scrcpy}"
 SCRCPY_PUSH_TARGET="${SCRCPY_PUSH_TARGET:-/sdcard/Download}"
 SCRCPY_EXTRA_FLAGS="${SCRCPY_EXTRA_FLAGS:-}"
 SCRCPY_NEW_DISPLAY="${SCRCPY_NEW_DISPLAY:-}"
+SCRCPY_AUDIO="${SCRCPY_AUDIO:-true}"
 
 usage() {
     cat <<EOF
@@ -131,6 +132,11 @@ _mirror() {  # $@ = pass-through scrcpy flags
         [0-9]*x[0-9]*|/[0-9]*) cmd+=(--new-display="$SCRCPY_NEW_DISPLAY") ;;
         "") : ;;
         *) err "invalid SCRCPY_NEW_DISPLAY '$SCRCPY_NEW_DISPLAY' — use true, <W>x<H>, <W>x<H>/<DPI> or /<DPI> (e.g. 1920x1080, 1920x1080/420, /240)" ;;
+    esac
+    case "${SCRCPY_AUDIO:-true}" in
+        true|yes|1) : ;;
+        false|no|0) cmd+=(--no-audio) ;;
+        *) err "invalid SCRCPY_AUDIO '$SCRCPY_AUDIO' — use true or false" ;;
     esac
     while IFS= read -r f; do [ -n "$f" ] && cmd+=("$f"); done < <(_extra_flags)
     cmd+=("$@")

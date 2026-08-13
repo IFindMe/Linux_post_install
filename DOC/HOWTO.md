@@ -37,7 +37,7 @@ templates (without overwriting an existing file):
 |------|---------|------|
 | `telegram.env` | `pos communication telegram sender` / `listener`, everything that alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | `matrix.env` | `pos communication matrix sender` / `listener` | `MATRIX_HOMESERVER`, `MATRIX_ACCESS_TOKEN`, `MATRIX_USER_ID`, `MATRIX_ROOM_ID` |
-| `scrcpy.env` | `pos communication scrcpy` | `SCRCPY_SERIAL`, `SCRCPY_MAX_SIZE`, `SCRCPY_MAX_FPS`, `SCRCPY_BIT_RATE`, `SCRCPY_FULLSCREEN`, `SCRCPY_NEW_DISPLAY`, `SCRCPY_RECORD_DIR`, `SCRCPY_PUSH_TARGET`, `SCRCPY_EXTRA_FLAGS` |
+| `scrcpy.env` | `pos communication scrcpy` | `SCRCPY_SERIAL`, `SCRCPY_MAX_SIZE`, `SCRCPY_MAX_FPS`, `SCRCPY_BIT_RATE`, `SCRCPY_FULLSCREEN`, `SCRCPY_NEW_DISPLAY`, `SCRCPY_AUDIO`, `SCRCPY_RECORD_DIR`, `SCRCPY_PUSH_TARGET`, `SCRCPY_EXTRA_FLAGS` |
 | `notify.env` | `lib/notify.sh` (all alerting) | `NOTIFY_PLATFORM` (e.g. `telegram,matrix`) |
 | `system.env` | `pos system health`, `pos system backup` | `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS` |
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
