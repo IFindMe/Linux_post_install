@@ -1,0 +1,10 @@
+[Unit]
+Description=Auto-mount USB storage (usb-automount feature)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usb-automount.sh
+
+[Install]
+WantedBy=multi-user.target

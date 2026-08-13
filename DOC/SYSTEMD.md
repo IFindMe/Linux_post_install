@@ -4,6 +4,7 @@ The units installed and enabled by `postinstall.sh`, plus the `pos` bash complet
 
 - [Services](#services)
   - [`autostart.service`](#autostartservice)
+  - [`usb-automount.service`](#usb-automountservice)
   - [`ssh-agent.service`](#ssh-agentservice)
   - [`pos-health.service`](#pos-healthservice)
 - [Per-user units (`pos network download`)](#per-user-units-pos-network-download)
@@ -37,6 +38,25 @@ WantedBy=multi-user.target
 ```
 
 **Configuration:** point `ExecStart` at your boot script. Because the target script is a *feature*, this unit is only **enabled** when the `autostart` flag is set — the file is still copied, but a skipped feature leaves the unit present-but-disabled.
+
+### usb-automount.service
+
+**Purpose:** mount USB storage automatically — at boot (via `WantedBy=multi-user.target`) and on hotplug (a udev rule installed by the feature script triggers this unit). Each run mounts every unmounted removable block device at `/media/<label>`, world-writable (`-o umask=000`), so `pos system backup`'s post-verify USB copy finds the stick and the unprivileged user can write to it.
+
+```ini
+[Unit]
+Description=Auto-mount USB storage (usb-automount feature)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usb-automount.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Configuration:** `Type=oneshot` — each start (boot, hotplug, manual `systemctl start usb-automount`) does one idempotent scan. `features/usb-automount.sh` self-installs its udev rule (`/etc/udev/rules.d/99-usb-automount.rules`, `SYSTEMD_WANTS="usb-automount.service"`) on first root run and reloads udev, so plugging in a stick fires the mount with no extra setup; an edited rule is never overwritten. Because the target script is a *feature*, this unit is only **enabled** when the `usb-automount` flag is set — the file is still copied, but a skipped feature leaves the unit present-but-disabled. Hotplug is restricted to USB (`ENV{ID_BUS}=="usb"`); the boot scan covers all removable media.
 
 ### ssh-agent.service
 
@@ -116,11 +136,15 @@ enable-linger` warning so the user units survive logout.
 
 ## Feature-flag gating
 
-The systemd loop in `postinstall.sh` special-cases two units:
+The systemd loop in `postinstall.sh` special-cases three units:
 
 ```bash
 if [ "$svc_name" = "autostart.service" ] && ! flag_is_set autostart; then
     warn "autostart feature not installed — skipping autostart.service (run ./install.sh --feature)"
+    continue
+fi
+if [ "$svc_name" = "usb-automount.service" ] && ! flag_is_set usb-automount; then
+    warn "usb-automount feature not installed — skipping usb-automount.service (run ./install.sh --feature)"
     continue
 fi
 if [ "$svc_name" = "pos-health.service" ]; then
@@ -129,6 +153,7 @@ fi
 ```
 
 - `autostart.service` is **enabled** only when the `autostart` feature flag is set (`./install.sh --feature` or `flag-set autostart`). See [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libflagssh--feature-flags).
+- `usb-automount.service` is **enabled** only when the `usb-automount` feature flag is set — same mechanism.
 - `pos-health.service` is **not** enabled at all — `postinstall.sh` enables `pos-health.timer` instead, and only when a Telegram config already exists.
 
 ---

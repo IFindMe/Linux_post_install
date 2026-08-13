@@ -13,6 +13,7 @@ Everything that runs during the bootstrap install: `install.sh`, `preinstall.sh`
 - [lib/flags.sh — feature flags](#libflagssh--feature-flags)
 - [lib/notify.sh — multi-platform alerting](#libnotifysh--multi-platform-alerting)
 - [features/autostart.sh — boot-time feature](#featuresautostartsh--boot-time-feature)
+- [features/usb-automount.sh — USB automount feature](#featuresusb-automountsh--usb-automount-feature)
 - [x64_bin/ — precompiled binaries](#x64_bin--precompiled-binaries)
 
 ---
@@ -108,7 +109,7 @@ Add or remove package names here. `nmap` and `fail2ban` are used later by `pos n
 2. **PATH** — appends a `PATH` line to `~/.bashrc` if not already present.
 3. **pos bash completion** — installs `completions/pos.bash` to `/usr/local/share/bash-completion/completions/` and sources it from `~/.bashrc`.
 4. **SSH authorized keys** — if `config/authorized_keys` exists, appends missing keys to `~/.ssh/authorized_keys` (skips comments and duplicates, chmod 600).
-5. **systemd services** — copies `systemd/*.service` to `/etc/systemd/system/`, daemon-reloads, then enables each service. **`autostart.service` is only enabled when the `autostart` feature flag is set** (see [lib/flags.sh](#libflagssh--feature-flags)); otherwise it's skipped with a hint to run `./install.sh --feature`.
+5. **systemd services** — copies `systemd/*.service` to `/etc/systemd/system/`, daemon-reloads, then enables each service. **`autostart.service` is only enabled when the `autostart` feature flag is set**, and **`usb-automount.service` only when the `usb-automount` flag is set** (see [lib/flags.sh](#libflagssh--feature-flags)); otherwise they're skipped with a hint to run `./install.sh --feature`.
 
 ### Configuration
 
@@ -218,6 +219,26 @@ Appends timestamped lines to `~/.autostart.log`:
 
 - Log file: `$HOME/.autostart.log` (edit the `LOG` variable at the top).
 - The script is the one you're *most* likely to customize — this is exactly why it lives in `features/` instead of `bin/`: a plain reinstall never overwrites your edits.
+
+---
+
+## features/usb-automount.sh — USB automount feature
+
+**File:** `features/usb-automount.sh` (installed to `/usr/local/bin/usb-automount.sh` by `./install.sh --feature`)
+**Purpose:** mounts USB storage automatically — at boot and on hotplug — so a plugged-in stick is immediately ready for `pos system backup`'s post-verify USB copy without manual mounting.
+
+### How it works
+
+1. Every run (boot via `usb-automount.service`, hotplug via its self-installed udev rule, or manual `sudo usb-automount.sh`) scans `lsblk -J` for unmounted removable block devices — partitions and raw whole-disk filesystems — and mounts each at `/media/<label>`.
+2. vfat/exfat/ntfs mounts are world-writable (`-o umask=000`) so a non-root user can write; filesystems that reject `umask` fall back to a plain mount.
+3. Idempotent: already-mounted devices are skipped, and repeated runs are no-ops.
+4. First root run installs the hotplug rule `/etc/udev/rules.d/99-usb-automount.rules` (`SYSTEMD_WANTS="usb-automount.service"`) and reloads udev — an edited rule is never overwritten.
+
+### Configuration
+
+- Log file: `$HOME/.usb-automount.log` (edit the `LOG` variable at the top).
+- Mount point: `/media/<label>` (bumps to `-2`, `-3` when the label is already in use as a mountpoint); mount options are tuned in `mount_one`.
+- The script is user-customizable like any feature — a plain reinstall never overwrites your edits.
 
 ---
 

@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–189 |
-| ## 3. Installation Flow | 190–242 |
-| ## 4. The `pos` CLI System | 243–312 |
-| ## 5. Shared Library — `lib/common.sh` | 313–344 |
-| ## 6. Docker Compose / ScaleTail | 345–387 |
-| ## 7. Optional Apps (`apps/`) | 388–417 |
-| ## 8. Entertainment Module | 418–431 |
-| ## 9. Systemd Services | 432–444 |
-| ## 10. Configuration Files | 445–471 |
-| ## 11. Coding Conventions | 472–504 |
-| ## 12. Development Workflow | 505–557 |
-| ## 13. Key File Quick Reference | 558–614 |
-| ## 14. Common Tasks for Agents | 615–644 |
+| ## 2. Directory Structure | 44–190 |
+| ## 3. Installation Flow | 191–243 |
+| ## 4. The `pos` CLI System | 244–313 |
+| ## 5. Shared Library — `lib/common.sh` | 314–345 |
+| ## 6. Docker Compose / ScaleTail | 346–388 |
+| ## 7. Optional Apps (`apps/`) | 389–418 |
+| ## 8. Entertainment Module | 419–432 |
+| ## 9. Systemd Services | 433–445 |
+| ## 10. Configuration Files | 446–472 |
+| ## 11. Coding Conventions | 473–505 |
+| ## 12. Development Workflow | 506–558 |
+| ## 13. Key File Quick Reference | 559–616 |
+| ## 14. Common Tasks for Agents | 617–646 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -100,7 +100,8 @@ Linux_post_install/
 │   └── ssh-load-all        # Legacy wrapper → pos ssh load-keys
 │
 ├── features/               # User-customizable scripts (installed via --feature)
-│   └── autostart.sh        # Boot-time script (via systemd, flag-gated)
+│   ├── autostart.sh        # Boot-time script (via systemd, flag-gated)
+│   └── usb-automount.sh    # USB automount (udev rule + flag-gated service)
 │
 ├── entertainment/          # Public-API plugins for pos entertainment send (→ /usr/local/bin)
 │   ├── weather.sh          # Current weather via Open-Meteo (no API key)
@@ -561,7 +562,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 |------|-------|---------|
 | `install.sh` | 206 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
 | `preinstall.sh` | 73 | System packages + hotspot deps + yt-dlp + fail2ban |
-| `postinstall.sh` | 152 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
+| `postinstall.sh` | 163 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
@@ -571,6 +572,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
 | `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
+| `features/usb-automount.sh` | 134 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 292 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |

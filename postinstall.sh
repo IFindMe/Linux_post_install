@@ -147,6 +147,11 @@ if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
             warn "autostart feature not installed — skipping autostart.service (run ./install.sh --feature)"
             continue
         fi
+        # usb-automount.service runs features/usb-automount.sh — same gating
+        if [ "$svc_name" = "usb-automount.service" ] && ! flag_is_set usb-automount; then
+            warn "usb-automount feature not installed — skipping usb-automount.service (run ./install.sh --feature)"
+            continue
+        fi
         run sudo systemctl enable --now "$svc_name" 2>/dev/null || \
             run sudo systemctl enable "$svc_name"
     done
