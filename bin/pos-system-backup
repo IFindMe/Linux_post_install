@@ -25,10 +25,14 @@ Modes:
   --service       List folders under /srv and ~/srv, pick one, back it up.
 
 The final artifact <name>_<date>.tar.gz.gpg is written to the current directory.
+After it verifies, connected USB storage is offered: the copy lands in
+<usb>/backups/ and is sha256-verified 100% before it is announced.
 
 Environment:
   BACKUP_SERVICE_ROOTS   Space-separated roots for --service
                          (effective: ${EFF_ROOTS})
+  BACKUP_USB_ROOT        USB root to copy finished backups to
+                         (default: auto-detect mounted removable storage)
   (loaded from ~/.config/linux_post_install/system.env unless exported)
 EOF
     exit 0
@@ -36,6 +40,90 @@ EOF
 
 command -v tar &>/dev/null || err "tar not found"
 command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
+
+# ── USB copy (optional post-backup step) ─────────────────────────
+# Detection runs AFTER the backup finished, so a stick plugged in while
+# the archive was being made is found. The copy lands in <usb>/backups/
+# and the transfer is proven 100% (sha256 source vs copy) before any
+# success is announced. BACKUP_USB_ROOT pins the root and skips
+# detection; otherwise mounted removable storage is auto-detected.
+usb_copy_offer() {
+    local archive="$1" pass=0 resp="" i=0 root="" dest_dir="" dest="" src_sum="" dst_sum=""
+    local -a roots=()
+
+    command -v lsblk &>/dev/null || { warn "lsblk not found — USB copy skipped"; return 0; }
+    command -v jq    &>/dev/null || { warn "jq not found — USB copy skipped"; return 0; }
+
+    section "USB copy"
+
+    while :; do
+        pass=$((pass + 1))
+        roots=()
+
+        if [ -n "${BACKUP_USB_ROOT:-}" ]; then
+            roots+=("$BACKUP_USB_ROOT")
+        else
+            while IFS= read -r mp; do
+                [ -n "$mp" ] && roots+=("$mp")
+            done < <(lsblk -J -o MOUNTPOINT,RM,TYPE 2>/dev/null \
+                | jq -r '.. | objects | select(.rm == true and .mountpoint != null and (.type == "part" or .type == "disk")) | .mountpoint')
+        fi
+
+        [ ${#roots[@]} -gt 0 ] && break
+
+        # None found — offer one re-scan before giving up.
+        if [ "$pass" -ge 2 ]; then
+            warn "Still no USB storage detected — backup stays local: $archive"
+            return 0
+        fi
+        warn "No USB storage detected"
+        read -rp "Plug a USB drive in now and press Enter to re-check (or 's' to skip): " resp || return 0
+        case "$resp" in
+            s|S) log "Skipped — backup stays local: $archive"; return 0 ;;
+        esac
+    done
+
+    if [ ${#roots[@]} -eq 1 ]; then
+        root="${roots[0]}"
+        if ! confirm "Copy backup to ${root%/}/backups/?" n; then
+            log "Skipped — backup stays local: $archive"
+            return 0
+        fi
+    else
+        echo "Multiple USB storages found:"
+        for i in "${!roots[@]}"; do
+            printf "%2d) %s\n" "$((i + 1))" "${roots[$i]}"
+        done
+        read -rp "Copy backup to which one? [1-${#roots[@]}] (0 = skip): " resp || return 0
+        if ! [[ "$resp" =~ ^[0-9]+$ ]] || (( resp < 1 || resp > ${#roots[@]} )); then
+            log "Skipped — backup stays local: $archive"
+            return 0
+        fi
+        root="${roots[$((resp - 1))]}"
+    fi
+
+    dest_dir="${root%/}/backups"
+    dest="$dest_dir/$(basename "$archive")"
+
+    mkdir -p "$dest_dir"
+    log "Copying to $dest ..."
+    cp "$archive" "$dest_dir/"
+    chmod 600 "$dest" 2>/dev/null \
+        || warn "Could not chmod 600 the USB copy (vfat filesystem?)"
+
+    log "Verifying transfer (sha256)..."
+    src_sum="$(sha256sum "$archive" | cut -d' ' -f1)"
+    dst_sum="$(sha256sum "$dest" | cut -d' ' -f1)"
+    if [ "$src_sum" != "$dst_sum" ]; then
+        warn "USB copy FAILED verification — checksum mismatch:"
+        warn "  source: $src_sum  $archive"
+        warn "  copy  : $dst_sum  $dest"
+        notify_send "USB copy FAILED for $archive — checksum mismatch on $dest"
+        exit 1
+    fi
+    ok "Transfer verified 100% (sha256 match): $dest"
+    notify_send "Backup copied to USB: $dest (sha256 verified)"
+}
 
 SERVICE=0
 case "${1:-}" in
@@ -124,3 +212,9 @@ unset PASS
 echo
 log "Backup completed: $ARCHIVE"
 notify_send "Backup completed: $ARCHIVE"
+
+# Optional: detect a USB stick connected after the backup finished, offer to
+# copy the archive to <usb>/backups/, and prove the transfer 100%. From here
+# on a failure is a USB-copy problem, not a backup problem.
+trap 'notify_send "USB copy FAILED: ${ARCHIVE:-unknown}"' ERR
+usb_copy_offer "$ARCHIVE"

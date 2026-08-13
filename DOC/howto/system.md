@@ -39,6 +39,7 @@ Environment (effective values):
 ```bash
 # ~/.config/linux_post_install/system.env   (comment-only defaults — uncomment to override)
 BACKUP_SERVICE_ROOTS=/srv $HOME/srv    # roots for backup-age check + backup --service
+BACKUP_USB_ROOT=/mnt/usb               # optional: copy finished backups to <root>/backups/ (auto-detects a mounted USB when unset)
 HEALTH_BACKUP_MAX_AGE_DAYS=3           # WARN if newest backup older (default 2)
 # ~/.config/linux_post_install/notify.env
 NOTIFY_PLATFORM=telegram
@@ -86,6 +87,29 @@ trap) a `notify_send` alert is sent.
 `--service` lists folders under the roots in `BACKUP_SERVICE_ROOTS`
 (default `/srv $HOME/srv`; override via `system.env` or env) and lets you pick.
 
+### Copy to a USB stick
+
+After the archive verifies, connected USB storage is **detected** (so a stick
+plugged in while the backup was running is found — if none is mounted you get
+one chance to plug one in and re-check) and you're asked whether to copy the
+backup there. The copy lands in `<usb>/backups/` and is **verified 100%**
+(sha256 source vs copy) before any success is announced:
+
+```bash
+pos system backup ~/Documents
+# ... after the archive verifies:
+#   [!] No USB storage detected
+#   Plug a USB drive in now and press Enter to re-check (or 's' to skip):
+#   [+] Copying to /media/you/USB-DISK/backups/docs_2026-08-13.tar.gz.gpg ...
+#   OK Transfer verified 100% (sha256 match): .../backups/docs_2026-08-13.tar.gz.gpg
+```
+
+- Multiple sticks mounted → pick by number; `0` skips; `n`/EOF skips silently
+  (cron runs never block).
+- Pin a fixed stick (no detection, no prompt on cron) with
+  `BACKUP_USB_ROOT=/mnt/usb` in `system.env` — the copy still lands in
+  `<root>/backups/` and is still sha256-verified.
+
 ### Recipes
 
 - **Nightly service backup + health check:**
@@ -105,6 +129,9 @@ trap) a `notify_send` alert is sent.
 - Forgot the password → backups are unrecoverable; keep the passphrase in a
   password manager. Nothing is stored anywhere else.
 - `sudo tar` prompt: ensure the user has sudo rights for the source dir.
+- "USB copy FAILED verification — checksum mismatch" → the copy is corrupt
+  (bad stick or transfer); the local archive is untouched — copy it again
+  manually and replace the file on the stick.
 
 ---
 

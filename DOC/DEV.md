@@ -153,7 +153,7 @@ Two kinds of config, don't mix them up:
 
 - **Machine defaults shipped by the installer:** place the file in `config/` and add copy logic to `postinstall.sh`. If it contains secrets, add to `.gitignore` and document in `DOC/`.
 - **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`), `pos-communication-telegram-sender` (`telegram.env`, edited via `pos config telegram` — token masked), and the shared ones below. Never store tokens in the repo.
-  - `system.env` — shared "system" settings loaded by `pos-system-*` tools via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS`). Env already exported wins over the file.
+  - `system.env` — shared "system" settings loaded by `pos-system-*` tools via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `BACKUP_USB_ROOT`, `HEALTH_BACKUP_MAX_AGE_DAYS`). Env already exported wins over the file.
   - `notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`), read by `lib/notify.sh`.
 
 ### 5. Add SSH keys (if needed)
