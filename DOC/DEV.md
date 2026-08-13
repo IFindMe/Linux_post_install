@@ -323,6 +323,17 @@ then listing it in `NOTIFY_PLATFORM`. Platform keys map to tool names via `notif
 
 Check before creating, use `>>` with grep guards, don't overwrite user configs.
 
+### Systemd units
+
+Every unit a tool writes (or `systemd/` ships) sets `TimeoutStopSec=5s` so a
+stuck process can't stall a reboot for the 90s systemd default. Long-polling
+daemons (listeners) also `trap TERM INT` in their loop so a stop returns in
+well under a second — the unit timeout is the backstop. Keep `KillMode=`
+explicit (`control-group`) on the daemons. A oneshot job running at shutdown is
+SIGKILLed 5s after stop begins — fine, `Persistent` timers re-run it next boot.
+Existing installs keep the old unit files until the tool rewrites them (re-run
+the `enable` path), so template changes need a regeneration step on live boxes.
+
 ### Managed Config Blocks
 
 To let a tool own a slice of a user/system config file (e.g. Samba shares in `/etc/samba/smb.conf`) without clobbering hand edits, delimit the tool's section with start/end marker lines and rewrite only that slice:

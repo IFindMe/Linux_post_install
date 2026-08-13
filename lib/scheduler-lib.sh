@@ -408,6 +408,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$SCHED_RUNNER run $name
+TimeoutStopSec=5s
 
 [Install]
 WantedBy=timers.target

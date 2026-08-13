@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–190 |
-| ## 3. Installation Flow | 191–243 |
-| ## 4. The `pos` CLI System | 244–313 |
-| ## 5. Shared Library — `lib/common.sh` | 314–345 |
-| ## 6. Docker Compose / ScaleTail | 346–388 |
-| ## 7. Optional Apps (`apps/`) | 389–418 |
-| ## 8. Entertainment Module | 419–432 |
-| ## 9. Systemd Services | 433–445 |
-| ## 10. Configuration Files | 446–472 |
-| ## 11. Coding Conventions | 473–505 |
-| ## 12. Development Workflow | 506–558 |
-| ## 13. Key File Quick Reference | 559–616 |
-| ## 14. Common Tasks for Agents | 617–646 |
+| ## 2. Directory Structure | 44–189 |
+| ## 3. Installation Flow | 190–241 |
+| ## 4. The `pos` CLI System | 242–311 |
+| ## 5. Shared Library — `lib/common.sh` | 312–343 |
+| ## 6. Docker Compose / ScaleTail | 344–386 |
+| ## 7. Optional Apps (`apps/`) | 387–416 |
+| ## 8. Entertainment Module | 417–430 |
+| ## 9. Systemd Services | 431–442 |
+| ## 10. Configuration Files | 443–469 |
+| ## 11. Coding Conventions | 470–502 |
+| ## 12. Development Workflow | 503–555 |
+| ## 13. Key File Quick Reference | 556–613 |
+| ## 14. Common Tasks for Agents | 614–643 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -160,8 +160,7 @@ Linux_post_install/
 ├── systemd/
 │   ├── autostart.service   # Runs autostart.sh on boot
 │   ├── ssh-agent.service   # System-wide SSH agent socket
-│   ├── pos-health.service  # Runs the health digest as the installing user (triggered by timer)
-│   └── pos-health.timer    # Daily 08:00 trigger for the health digest (enabled when Telegram is configured)
+│   └── usb-automount.service # Auto-mounts USB sticks (usb-automount feature)
 │
 ├── scripts/                # Dev tooling
 │   ├── gen-docs.sh         # Regenerates code-derived doc sections + completion flags
@@ -208,8 +207,7 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--step
 │   └─ PATH export in ~/.bashrc
 │   └─ Bash completion for pos CLI
 │   └─ Copies systemd/*.service + systemd/*.timer → /etc/systemd/system/, enables them
-│      (autostart.service only when the `autostart` flag is set;
-│       pos-health.timer only when the user's Telegram config exists)
+│      (autostart.service and usb-automount.service only when their feature flags are set)
 │
 ├─ Phase 4: ScaleTail clone
 │   └─ Shallow-clones ScaleTail templates to /usr/local/share/linux_post_install/scale-tail
@@ -436,8 +434,7 @@ Public-API "entertainment" plugins (weather, joke, gold) that can auto-send thei
 |---------|------|---------|
 | `ssh-agent.service` | `systemd/ssh-agent.service` | System-wide SSH agent, socket at `/run/ssh-agent/socket` |
 | `autostart.service` | `systemd/autostart.service` | Runs `autostart.sh` on boot |
-| `pos-health.service` | `systemd/pos-health.service` | Runs `pos system health --send --markdown` once (oneshot) as the installing user |
-| `pos-health.timer` | `systemd/pos-health.timer` | Daily 08:00 trigger for the digest (enabled only when `~/.config/linux_post_install/telegram.env` exists) |
+| `usb-automount.service` | `systemd/usb-automount.service` | Auto-mounts USB sticks at `/media/<label>` (usb-automount feature) |
 
 All `.service` files in `systemd/` are automatically copied to `/etc/systemd/system/` and enabled by `postinstall.sh` (timers too, when present).
 
@@ -566,8 +563,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
-| `lib/entertainment-lib.sh` | 350 | Entertainment module lib (ENABLED parsing, scheduler sync) |
-| `lib/scheduler-lib.sh` | 822 | Scheduler lib (job parsing, notify policies, per-job user timers, legacy migrate) |
+| `lib/entertainment-lib.sh` | 354 | Entertainment module lib (ENABLED parsing, scheduler sync) |
+| `lib/scheduler-lib.sh` | 830 | Scheduler lib (job parsing, notify policies, per-job user timers, legacy migrate) |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -576,9 +573,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 <!-- GEN:START filetable -->
 | `bin/pos` | 292 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
-| `bin/pos-communication-matrix-listener` | 565 | Matrix listener: map /command → bash, run them on room messages |
+| `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
-| `bin/pos-communication-telegram-listener` | 563 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
@@ -593,7 +590,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 949 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 952 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |

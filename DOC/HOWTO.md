@@ -70,8 +70,8 @@ Adding another platform = create `bin/pos-communication-<p>` implementing
 
 ### Scheduling
 
-- **Daily health digest** (`pos system health --send` at 08:00) — `systemd/pos-health.{service,timer}`,
-  enabled by postinstall once `telegram.env` exists. See [system](howto/system.md).
+- **Daily health digest** — add a `daily` schedule job `pos system health --send --markdown`
+  via `pos system schedule config` (the old `pos-health.{service,timer}` units are gone). See [system](howto/system.md).
 - **Entertainment auto-triggers** — per-plugin `pos entertainment enable <plugin> <interval>`,
   uses systemd user timers (or cron fallback). See [entertainment](howto/entertainment.md).
 - **`pos system schedule` jobs** — run any command on a per-job timer and notify

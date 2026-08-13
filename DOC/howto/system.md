@@ -47,19 +47,26 @@ NOTIFY_PLATFORM=telegram
 
 ### Daily digest (automated)
 
-`systemd/pos-health.{service,timer}` run `pos system health --send --markdown`
-at 08:00 as the installing user. Enable it (re-run postinstall after Telegram
-is configured):
+Run the health report on a timer with a scheduled job (no systemd unit needed):
 
 ```bash
-./postinstall.sh                      # enables timer once telegram.env exists
-systemctl list-timers | grep pos-health
-systemctl start pos-health.service    # run once now, check status
+pos system schedule config        # add a job: INTERVAL=daily,
+                                  #   COMMAND=pos system health --send --markdown
+systemctl --user list-timers | grep pos-schedule
+pos system schedule run <name>    # run once now
+```
+
+The old `pos-health.{service,timer}` systemd units are gone — a legacy install
+may still have them failed/leftover; disable and remove them:
+
+```bash
+sudo systemctl disable --now pos-health.timer pos-health.service 2>/dev/null
+sudo rm -f /etc/systemd/system/pos-health.{service,timer} && sudo systemctl daemon-reload
 ```
 
 **Recipes:**
-- Watch the backup age without email: enable the digest; if the backup check
-  turns WARN you'll see it in the morning report.
+- Watch the backup age without email: add the daily digest job; if the backup
+  check turns WARN you'll see it in the morning report.
 - Exit code in a cron/scheduled check:
   `pos system health >/dev/null 2>&1 || notify_send "health FAIL"`.
 

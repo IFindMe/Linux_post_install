@@ -370,6 +370,8 @@ Type=simple
 ExecStart=$runner --run
 Restart=always
 RestartSec=5
+KillMode=control-group
+TimeoutStopSec=5s
 # Do NOT pin Environment=HOME here — the systemd user manager already sets the
 # correct HOME for the user; pinning a stale enable-time value made the daemon
 # read ~/.config/... from the wrong home (menu shows commands, daemon says unknown).
@@ -522,6 +524,7 @@ run_daemon() {
 
     local offset=0
     log "listener running (owner chat ${TELEGRAM_CHAT_ID}) — Ctrl+C to stop"
+    trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM INT
     while true; do
         local resp n i
         resp="$(curl -fsS -m 45 "${API}/bot${TELEGRAM_BOT_TOKEN}/getUpdates" \

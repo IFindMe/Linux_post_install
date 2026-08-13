@@ -172,6 +172,8 @@ Type=simple
 ExecStart=/usr/bin/aria2c --enable-rpc --rpc-listen-port=$RPC_PORT --rpc-secret=$RPC_SECRET --rpc-listen-all=false "--dir=$DOWNLOAD_DIR" --continue=true --max-connection-per-server=16 --split=16 --seed-time=0 --console-log-level=warn
 Restart=on-failure
 RestartSec=2
+KillMode=control-group
+TimeoutStopSec=5s
 
 [Install]
 WantedBy=default.target
@@ -641,6 +643,7 @@ Description=pos aria2 retry healer (linux-post-install)
 Type=oneshot
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=$runner retry all --once --quiet
+TimeoutStopSec=5s
 EOF
     chmod 644 "$USER_SYSTEMD_DIR/$HEALER_SERVICE"
     cat > "$USER_SYSTEMD_DIR/$HEALER_TIMER" <<EOF

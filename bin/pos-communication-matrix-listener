@@ -333,6 +333,8 @@ Type=simple
 ExecStart=$runner --run
 Restart=always
 RestartSec=5
+KillMode=control-group
+TimeoutStopSec=5s
 # Do NOT pin Environment=HOME here — the systemd user manager already sets the
 # correct HOME for the user; pinning a stale enable-time value made the Telegram
 # daemon read ~/.config/... from the wrong home.
@@ -523,6 +525,7 @@ run_daemon() {
     local since="" filter_enc resp nb
     filter_enc="$(printf '%s' "$SYNC_FILTER" | jq -sRr @uri)"
     log "listener running (owner ${owner}${room_only:+ — room ${room_only}}) — Ctrl+C to stop"
+    trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM INT
     while true; do
         local args=("$(api_base)/_matrix/client/v3/sync?timeout=30000&filter=${filter_enc}")
         [ -n "$since" ] && args[0]+="&since=${since}"
