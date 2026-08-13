@@ -245,9 +245,10 @@ pos communication scrcpy info             # model / Android version
 pos config scrcpy                         # optional defaults (serial, size, fps, ...)
 ```
 
-Requires `scrcpy` + `adb` (both in preinstall PACKAGES). The apt build is older
-than the latest release — install the current GitHub release (bundles `adb`)
-with the optional app `apps/media/scrcpy.sh` (or `./install.sh --apps`).
+Requires `scrcpy` + `adb`. `adb` is in preinstall PACKAGES; `scrcpy` usually is
+**not** in apt on Debian/Ubuntu (needs contrib/universe and is older there), so
+install the current GitHub release (bundles `adb`) with the optional app
+`apps/media/scrcpy.sh` (or `./install.sh --apps`).
 
 ### Mirror
 

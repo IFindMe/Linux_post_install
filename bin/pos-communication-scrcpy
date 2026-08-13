@@ -8,7 +8,7 @@ source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")
 
 CONFIG_FILE="$HOME/.config/linux_post_install/scrcpy.env"
 
-command -v scrcpy &>/dev/null || err "scrcpy not found — install it: 'sudo apt install scrcpy' (or the latest release via the app installer 'apps/media/scrcpy.sh', see 'pos help communication scrcpy')"
+command -v scrcpy &>/dev/null || err "scrcpy not found — install the latest release with the app installer: 'apps/media/scrcpy.sh' (or 'sudo apt install scrcpy' if your distro ships it; it bundles adb), see 'pos help communication scrcpy'"
 command -v adb &>/dev/null || err "adb not found — install it: 'sudo apt install adb'"
 
 load_config() {
