@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: network download — aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
-# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry
+# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace
 # POS_FLAGS: --dir --out --split --seed --force --upload --gid --tmux
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -69,6 +69,8 @@ Commands:
   retry <gid|all>           Smart retry: waits out internet outages, then re-queues and
                             re-checks; reports real problems (dead source) instead of looping
                             (--once: single check without waiting — used by the healer timer)
+  replace <gid> <url>       Give a dead download a fresh URL: same dir + file name, resumes
+                            the partial file (status flags downloads that need this)
 
 Options (add / torrent / metalink):
   --dir <path>    download directory (default: $DOWNLOAD_DIR)
@@ -93,9 +95,12 @@ Examples:
   pos network download watch
   pos network download restart 2e9dffc4
   pos network download retry all
+  pos network download replace 2e9dffc4 https://mirror.example.com/ubuntu.iso
 
 Failed downloads are auto-retried by the 'retry healer' systemd timer while the
 daemon runs; it arms on download start and disables itself when nothing is left.
+Sources that fail with a real 404/410 are marked permanent — 'status' flags them
+with a fresh-link hint and 'replace <gid> <url>' resumes them with a new URL.
 
 Config: RPC secret in $CONFIG_FILE (chmod 600).
 Env:   RPC_PORT, RPC_SECRET, DOWNLOAD_DIR, NET_PROBE override defaults (test seams).
@@ -212,7 +217,24 @@ cmd_status() {
     if daemon_active; then
         rpc aria2.getGlobalStat | jq -r '"active: \(.result.numActive)   waiting: \(.result.numWaiting)   stopped: \(.result.numStopped)   (history: \(.result.numStoppedTotal))"'
         echo "aria2:      $(rpc aria2.getVersion | jq -r '.result.version')"
+        dead_source_advisory
     fi
+}
+
+dead_source_advisory() {
+    # Stopped errored downloads whose source is marked permanently failing —
+    # they need a fresh link via 'replace <gid> <url>'.
+    local ids
+    ids=$(grep . "$RETRY_STATE" 2>/dev/null || true)
+    [ -n "$ids" ] || return 0
+    rpc aria2.tellStopped 0 200 | jq -r --arg ids "$ids" '
+        .result[] | select(.status == "error") |
+        ((if .bittorrent then "bt:" + .bittorrent.infoHash else "url:" + (.files[0].uris[0].uri // .files[0].path // "?") end)) as $id |
+        select(($ids | split("\n")) | index($id)) |
+        [.gid, (if .bittorrent then (.bittorrent.info.name // "?") else (.files[0].path // "?" | split("/") | last) end)] | @tsv' \
+        | while IFS=$'\t' read -r gid name; do
+            printf '  needs fresh link: %s (%s) — pos network download replace %s <new-url>\n' "$name" "$gid" "$gid"
+        done
 }
 
 ensure_daemon() {
@@ -434,6 +456,53 @@ cmd_restart() {
     if [ "$tmux" -eq 1 ]; then tmux_watch "${newgids[0]}" "$name"; fi
 }
 
+cmd_replace() {  # replace <gid> <url> — fresh link for a dead download, same dir/file (resumes partial)
+    local gid="" url="" dir="" split="" tmux=0 data st nfiles old_uri odir name newgid oa d
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir)   dir="${2:-}"; shift 2 ;;
+            --dir=*) dir="${1#*=}"; shift ;;
+            --split) split="${2:-}"; shift 2 ;;
+            --split=*) split="${1#*=}"; shift ;;
+            --tmux)  tmux=1; shift ;;
+            -h|--help) usage ;;
+            -*) err "replace: unknown option: $1" ;;
+            *) if [ -z "$gid" ]; then gid="$1"; else url="$1"; fi; shift ;;
+        esac
+    done
+    [ -n "$gid" ] && [ -n "$url" ] || err "replace: usage: pos network download replace <gid> <new-url>"
+    [ "$tmux" -eq 1 ] && { command -v tmux &>/dev/null || err "tmux not found (install tmux) — needed for --tmux"; }
+    dir="${dir/#\~/$HOME}"
+    ensure_daemon
+    gid=$(resolve_gid "$gid")
+    data=$(rpc aria2.tellStatus "$(json_str "$gid")")
+    st=$(printf '%s' "$data" | jq -r '.result.status')
+    case "$st" in
+        complete|error|removed) ;;
+        active) err "gid $gid is active — it's already downloading" ;;
+        *) err "gid $gid has status '$st' — cannot replace" ;;
+    esac
+    if [ "$(printf '%s' "$data" | jq -r 'if .result.bittorrent then 1 else 0 end')" = "1" ]; then
+        err "gid $gid is a torrent — a fresh URL can't replace it (use: restart $gid to re-add the same magnet)"
+    fi
+    nfiles=$(printf '%s' "$data" | jq -r '.result.files | length')
+    [ "$nfiles" -eq 1 ] || err "gid $gid has $nfiles files — replace supports single-file downloads only"
+    old_uri=$(printf '%s' "$data" | jq -r '.result.files[0].uris[0].uri // ""')
+    name=$(download_name "$data"); [ -n "$name" ] || name="download"
+    odir=$(printf '%s' "$data" | jq -r '.result.dir // ""')
+    d="${dir:-$odir}"
+    oa=()
+    [ -n "$d" ] && oa+=("dir=$d")
+    oa+=("out=$name")
+    [ -n "$split" ] && oa+=("split=$split")
+    newgid=$(rpc aria2.addUri "$(json_arr "$url")" "$(opts_json "${oa[@]}")" | jq -r '.result')
+    log "replaced $gid → $newgid: $name — re-queued with fresh link (resumes partial file)"
+    [ -n "$old_uri" ] && retry_unmark "url:$old_uri"
+    retry_verify "$newgid" "url:$url" || err "replacement link also failed — see messages above"
+    ensure_healer
+    if [ "$tmux" -eq 1 ]; then tmux_watch "$newgid" "$name"; fi
+}
+
 retry_src_id() {  # stable identity for the permanent-failure list (survives new gids)
     local data
     data=$(rpc aria2.tellStatus "$(json_str "$1")")
@@ -447,6 +516,12 @@ retry_mark_permanent() {
     retry_is_permanent "$1" || printf '%s\n' "$1" >> "$RETRY_STATE"
 }
 
+retry_unmark() {  # retry_unmark <src-id> — drop one source from the permanent list
+    [ -f "$RETRY_STATE" ] || return 0
+    grep -vxF "$1" "$RETRY_STATE" > "$RETRY_STATE.tmp" || true
+    mv "$RETRY_STATE.tmp" "$RETRY_STATE"
+}
+
 retry_verify() {  # retry_verify <newgid> <src-id> → 0 ok / 1 failed (marks real failures permanent)
     local g="$1" src="$2" attempt=0 st ec em data
     while [ "$attempt" -lt 5 ]; do
@@ -455,21 +530,21 @@ retry_verify() {  # retry_verify <newgid> <src-id> → 0 ok / 1 failed (marks re
         data=$(rpc aria2.tellStatus "$(json_str "$g")" 2>/dev/null || true)
         st=$(printf '%s' "$data" | jq -r '.result.status // "?"')
         case "$st" in
-            active|waiting) [ "$quiet" -eq 1 ] || log "retry running — $g (${g:0:8})"; return 0 ;;
-            complete) [ "$quiet" -eq 1 ] || log "retry finished instantly — $g already on disk"; return 0 ;;
+            active|waiting) [ "${quiet:-0}" -eq 1 ] || log "retry running — $g (${g:0:8})"; return 0 ;;
+            complete) [ "${quiet:-0}" -eq 1 ] || log "retry finished instantly — $g already on disk"; return 0 ;;
             error|removed)
                 ec=$(printf '%s' "$data" | jq -r '.result.errorCode // "?"')
                 em=$(printf '%s' "$data" | jq -r '.result.errorMessage // "?"')
                 if [ "$ec" = "3" ]; then
                     retry_mark_permanent "$src"
-                    [ "$quiet" -eq 1 ] || err "real problem — source is gone (aria2 error 3: $em). Marked permanent; manual 'restart' overrides."
+                    [ "${quiet:-0}" -eq 1 ] || err "real problem — source is gone (aria2 error 3: $em). Marked permanent; manual 'restart' overrides."
                     return 1
                 fi
-                [ "$quiet" -eq 1 ] || warn "retry attempt $attempt failed (aria2 error $ec: $em) — will re-check"
+                [ "${quiet:-0}" -eq 1 ] || warn "retry attempt $attempt failed (aria2 error $ec: $em) — will re-check"
                 ;;
         esac
     done
-    [ "$quiet" -eq 1 ] || warn "retry of $g did not stabilize after 5 checks"
+    [ "${quiet:-0}" -eq 1 ] || warn "retry of $g did not stabilize after 5 checks"
     return 1
 }
 
@@ -864,7 +939,7 @@ main() {
         torrent) cmd_torrent "$@" ;;
         metalink) cmd_metalink "$@" ;;
         list)    cmd_list ;;
-        info|files|peers|pause|resume|remove|move|limit|set|watch|restart|retry)
+        info|files|peers|pause|resume|remove|move|limit|set|watch|restart|retry|replace)
             "cmd_$cmd" "$@" ;;
         purge)   cmd_purge ;;
         *) err "unknown command: $cmd (see 'pos network download --help')" ;;

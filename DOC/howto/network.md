@@ -173,6 +173,23 @@ on its own once a download started, so no shell is needed on headless boxes.
 remembered in `~/.config/linux_post_install/download.retry` and skipped by
 `retry all` — `pos network download restart <gid>` re-queues them by hand.
 
+**Recipe: dead link.** When a source is genuinely gone (404/410), `pos network
+download status` flags it:
+
+```
+  needs fresh link: ubuntu.iso (2e9dffc40e6a1b2c) — pos network download replace 2e9dffc40e6a1b2c <new-url>
+```
+
+Give it a working URL — same dir and file name are kept, so the partial file
+resumes instead of restarting from zero:
+
+```bash
+pos network download replace 2e9dffc40e6a1b2c https://mirror.example.com/ubuntu.iso
+```
+
+The old dead source is forgotten, the new link is verified (a dead replacement
+is reported and marked permanent instead of silently looping).
+
 ---
 
 ## Related
