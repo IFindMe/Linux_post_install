@@ -176,6 +176,9 @@ chmod +x bin/your-tool
 bash -n bin/your-tool
 shellcheck bin/your-tool
 ./bin/your-tool --help
+env-seam review: every path the tool writes must be `VAR="${VAR:-default}"`-guarded —
+  grep for config writes without a `:-` guard: `grep -nE '>\s*(\$HOME|/etc)' bin/your-tool lib/your-lib`
+  (each hit needs the seam; prove it with `VAR=/tmp/x bin/your-tool …` + assert the real path is untouched)
 bin/pos help <full command>   # confirm dispatch works
 bin/pos <category> --help     # confirm category listing includes the new tool (first tool in a new category)
 make gen                      # regenerate doc tables + completion flags
@@ -188,11 +191,13 @@ make check                    # full self-consistency gate (syntax, exec bits, d
 
 `make check` only proves syntax, exec bits, doc sync and dispatch — not behaviour. For tools that need `sudo`, systemd, or binaries absent from the dev box (samba, usbsrv, …), test them end-to-end with two patterns:
 
-- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), `SMB_CONF` (`bin/pos-share-smb-server`, default `/etc/samba/smb.conf`), `SMB_CREDS_DIR`/`UNIT_DIR` (`bin/pos-share-smb-client`). Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing.
+- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), `SMB_CONF` (`bin/pos-share-smb-server`, default `/etc/samba/smb.conf`), `SMB_CREDS_DIR`/`UNIT_DIR` (`bin/pos-share-smb-client`), `USER_SYSTEMD_DIR` (`bin/pos-network-download`, `bin/pos-communication-{telegram,matrix}-listener`, `lib/scheduler-lib.sh` — write it as `${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}`), and the scheduler's `SCHEDULE_DIR`/`SCHEDULE_STATE_DIR`/`SCHEDULE_LOG_DIR`/`SCHED_LEGACY_ENV` (`lib/scheduler-lib.sh`). Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing. **Gotcha (session-learned):** a `VAR="${XDG…:-…}"` without the leading `VAR:-` *overrides* the seam — the stub run then silently writes to the real `$HOME` path and every assertion passes while the bug hides. The override must be written first, then tested with `VAR=/tmp/x …` and a check that the real path is untouched.
 - **Stub PATH.** Create a temp dir with fake binaries, then run the tool with `PATH="$stubs:$PATH"`: fake `sudo` → `exec "$@"`; fake `systemctl`/`smbcontrol`/`mount.cifs` → echo their args; fake `testparm` → `cat` the file back (so validation passes); fake `systemd-escape` → print a fixed name. Assert on output **and** exit codes — happy path plus each failure path (`err` sets rc=1).
 - **Interactive prompts** (`read … </dev/tty`): drive them with a PTY — `printf 'answer\n' | script -qec "cmd" /dev/null` — then assert the side effect (e.g. the chmod-600 creds file lands with the right mode).
 
 Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
+
+Stub harnesses are **throwaway by design**: no `tests/` dir and no CI in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo.
 
 ---
 
