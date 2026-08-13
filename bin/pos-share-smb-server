@@ -67,6 +67,31 @@ validate_share_name() {
     esac
 }
 
+# Warn when any ancestor of the share path lacks other:+x — Samba clients
+# traverse as the authenticated user, so a 700 home dir yields
+# NT_STATUS_ACCESS_DENIED no matter what smb.conf says. (Sticky dirs like
+# /tmp show 't' in the other-execute slot — still traversable.)
+check_traversal() {
+    local p="$1" blocked="" m
+    while [ "$p" != "/" ]; do
+        m="$(stat -c '%A' "$p" 2>/dev/null | cut -c10)"
+        [ "$m" = "x" ] || [ "$m" = "t" ] || blocked="${blocked:+$blocked, }$p"
+        p="$(dirname "$p")"
+    done
+    [ -z "$blocked" ] || warn "Samba can't traverse: $blocked (missing other:+x) — clients get NT_STATUS_ACCESS_DENIED. Fix: chmod o+x <dir>"
+}
+
+# Warn for --users entries missing from the Samba passdb (pdbedit/smbpasswd).
+check_samba_users() {
+    local list="$1" sdb u missing=""
+    if sdb="$(sudo pdbedit -L 2>/dev/null | cut -d: -f1)"; then
+        for u in ${list//,/ }; do
+            grep -qxF "$u" <<<"$sdb" || missing="${missing:+$missing, }$u"
+        done
+    fi
+    [ -z "$missing" ] || warn "user(s) not in the Samba passdb: $missing — clients get NT_STATUS_ACCESS_DENIED. Add them: pos share smb-server adduser <user> (needs a system user)"
+}
+
 # Validate smb.conf with testparm, then hot-reload smbd if it is running.
 reload_config() {
     testparm -s "$SMB_CONF" >/dev/null || err "smb.conf is invalid — changes not loaded (fix with 'pos share smb-server reload')"
@@ -110,6 +135,7 @@ case "$cmd" in
             -*) err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]" ;;
         esac
         require_root_dir "$path"
+        check_traversal "$path"
         [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
 
         shift 2
@@ -131,6 +157,7 @@ case "$cmd" in
         elif [ -z "$users" ]; then
             warn "No valid users — any Samba account can access $path. Restrict with --users u1,u2."
         fi
+        [ -n "$users" ] && check_samba_users "$users"
 
         ro_val=no; [ "$ro" -eq 1 ] && ro_val=yes
         guest_val=no; [ "$guest" -eq 1 ] && guest_val=yes

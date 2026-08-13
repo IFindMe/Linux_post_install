@@ -179,6 +179,11 @@ can then access them; print the restricted form with `--users`.
 
 SMB shares need Samba accounts, not just system users: `adduser <user>`
 (prompts for the password via `smbpasswd -a`) after the system user exists.
+`share --users u1,u2` checks the list against the Samba passdb and warns about
+any missing account (pointing at `adduser`) — plus it walks the path's parent
+dirs and warns when one lacks `other:+x` traversal (e.g. a `700` home dir
+blocks Samba clients with `NT_STATUS_ACCESS_DENIED`; fix with `chmod o+x`).
+Both are warnings only — the share is still written.
 
 **Recipes:**
 - **Share the media drive to the tailnet (users bob + alice):**
@@ -196,6 +201,10 @@ SMB shares need Samba accounts, not just system users: `adduser <user>`
 - "smbd not found" → `samba` isn't installed; `sudo apt install samba`
 - Windows can't connect → check the client is in `--users` / has a Samba
   password (`adduser`), and that `smbd` is running (`status`)
+- `NT_STATUS_ACCESS_DENIED` → two causes, `share` warns about both at share
+  time: the user is not in the Samba passdb (`pos share smb-server adduser <user>`),
+  or a parent dir of the share path lacks `other:+x` traversal (`chmod o+x <dir>`
+  — typical for `700` home dirs)
 - `valid users` users can't log in → their Samba password differs from the
   system one; re-run `pos share smb server adduser <user>`
 - After editing `/etc/samba/smb.conf` by hand, run `pos share smb server reload`
