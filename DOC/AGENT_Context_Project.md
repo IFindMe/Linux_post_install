@@ -530,7 +530,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 4. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed); non-apt/manual installers → `command -v` guard in the tool instead
 5. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
 6. Update docs: `DOC/POS.md` (section table + detail — hand-written); `DOC/HOWTO.md` index row + a section in `DOC/howto/<category>.md` (recipes/troubleshooting); `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, self-contained list, line-count table) and completion flags update via `make gen` — never hand-edit between `GEN:START`/`GEN:END` markers, but hand-add a row to the "Common Tasks for Agents" table; `AGENTS.md` Quick facts if a structural fact changed; root `README.md` only if the category list changes; move the task to `AGENT_TODO.md` Done (dated) in the same commit
-7. Test: `make gen && make check` — `make check` (bash -n + doc/code sync + smoke) is the definition of done; also `bin/pos help <full command> && bin/pos <category> --help`. For tools needing root/systemd/absent deps, behaviour-test via env-override paths + stub PATH (see DEV.md "Testing tools that need root / systemd / missing deps")
+7. Test: `make gen && make check && make lint` — `make check` (bash -n + doc/code sync + smoke) and `make lint` (0 FAIL / 0 WARN, `scripts/lint-conventions.sh`) together are the definition of done; also `bin/pos help <full command> && bin/pos <category> --help`. For tools needing root/systemd/absent deps, behaviour-test via env-override paths + stub PATH (see DEV.md "Testing tools that need root / systemd / missing deps")
 
 ### Testing
 

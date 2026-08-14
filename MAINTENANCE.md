@@ -297,8 +297,8 @@ Fix (2026-08-14): the tools were documented by command name but not by filename 
 
 1. Fix P0 → P1 → P2 in order (HIGH first: M-002..M-006, then M-007, then the rest).
 2. M-006 needs a product decision first: restore `--send`/`--markdown` (notify path) or strip the docs.
-3. Re-run `make gen && make check && scripts/lint-conventions.sh` + smoke each changed tool.
-4. Commit `scripts/lint-conventions.sh` + add the `make lint` target (this was on the deliverable list but is not yet wired into the Makefile).
+3. Re-run `make gen && make check && make lint` + smoke each changed tool.
+4. ✅ DONE — `scripts/lint-conventions.sh` committed and `make lint` wired into the Makefile (5ef38dc).
 5. Move audit tasks to AGENT_TODO Done (dated) on completion.
 
 ## Checked & clean

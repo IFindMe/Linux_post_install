@@ -184,9 +184,10 @@ bin/pos help <full command>   # confirm dispatch works
 bin/pos <category> --help     # confirm category listing includes the new tool (first tool in a new category)
 make gen                      # regenerate doc tables + completion flags
 make check                    # full self-consistency gate (syntax, exec bits, doc/code sync, smoke)
+make lint                     # convention gate (scripts/lint-conventions.sh) — must end 0 FAIL, 0 WARN
 ```
 
-`make check` is the definition of done — the same check runs as a pre-commit hook once you've run `make hook`.
+`make check` + `make lint` (0 FAIL / 0 WARN) are the definition of done. `make check` is also run as a pre-commit hook once you've run `make hook`; `make lint` is not part of the hook — run it yourself.
 
 ### Testing tools that need root / systemd / missing deps
 
@@ -301,6 +302,57 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 3. Make the change — keep it idempotent
 4. Update `DOC/POS.md` (or the relevant doc) if behaviour changed
 5. Run `shellcheck` on the modified file
+
+---
+
+## Convention Lint Gate
+
+`scripts/lint-conventions.sh` is the automated convention gate — it encodes the
+rules in this document so drift is caught by the machine, not the next audit.
+Run it with `make lint` (or `./scripts/lint-conventions.sh`). FAIL = definite
+violation (fix it before committing), WARN = manual review needed. Exit code is
+non-zero when any FAIL exists.
+
+Check classes (all heuristic-based; heredocs, `${...}` brace-counting, `while`
+loop stdin, `/dev/tty` reads and `command -v` fallbacks are excluded):
+
+- **Shebang / strict mode** (FAIL) — every shell file (`bin/*`, `install.sh`,
+  `preinstall.sh`, `postinstall.sh`, `features/*`, `apps/*`, `templates/*`,
+  `scripts/*`) starts with `#!/usr/bin/env bash` and has `set -euo pipefail`
+  (libs are sourced, so they're exempt).
+- **Exec bits** (FAIL) — `bin/pos-*` and `entertainment/*.sh` committed as
+  `100755` (`chmod +x`).
+- **`# POS:` header** (FAIL) — every `bin/pos-*` carries it with the em-dash
+  separator (`# POS: <cat> <cmd> — <desc>`); a header past line ~6 is a WARN.
+- **`-h|--help`** (FAIL) — every `bin/pos-*` handles it via `case`.
+- **Deps guards before help** (FAIL) — the first real guard (`command -v X …
+  || err`, `if ! command -v X …`, multi-line `\` continuation) must sit before
+  the `-h|--help` dispatch, so help errors on a box missing the dependency.
+  Graceful-degradation probes (`if command -v X; then …`) are not guards.
+- **Top-level `local`** (WARN) — `local` at brace-depth 0 outside a function is
+  invalid bash.
+- **stdin ⇄ `INTERACTIVE_CMDS`** (FAIL) — a tool that reads stdin must be in
+  `INTERACTIVE_CMDS` in `bin/pos` (else the logging tee swallows/hangs the
+  prompt); every entry must also have a matching `bin/pos-<entry>` tool.
+- **DOC/POS.md coverage** (WARN) — each `bin/pos-*` referenced in `DOC/POS.md`.
+- **Entertainment plugins** (FAIL) — must carry `# POS_PLUGIN:` and must NOT
+  source `lib/common.sh` (stdout is the message).
+- **Apps** (FAIL) — each `apps/*` script has `uninstall_<name>()` and an
+  `uninstall` dispatch case.
+- **Systemd units** (WARN) — `TimeoutStopSec=` and `[Install] WantedBy=`.
+- **Legacy wrappers** (FAIL/WARN) — `bin/wr-*`, `mp3`, `mp4`, `vbox`,
+  `ssh-load-all` must forward to `pos` (FAIL if not); >12 lines or a `case`
+  statement is a WARN (thin forwarder only).
+- **Secrets** (WARN) — literal `…TOKEN=/…SECRET=/…KEY=…` assignments are
+  flagged for manual review (env guards, config reads and runtime generation
+  are excluded).
+- **Env seams** (WARN) — writes to `/etc/`, `$HOME`, `/usr/local` are flagged
+  unless guarded (`command -v` or `|| echo`), i.e. the write needs a
+  `VAR="${VAR:-path}"` test seam.
+
+If a rule is genuinely wrong for a new case (as happened with
+graceful-degradation probes in system-health), refine the heuristic — never
+weaken it — and note the change in `MAINTENANCE.md`'s lint section.
 
 ---
 
