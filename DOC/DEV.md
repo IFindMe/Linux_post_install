@@ -187,7 +187,7 @@ make check                    # full self-consistency gate (syntax, exec bits, d
 make lint                     # convention gate (scripts/lint-conventions.sh) — must end 0 FAIL, 0 WARN
 ```
 
-`make check` + `make lint` (0 FAIL / 0 WARN) are the definition of done. `make check` is also run as a pre-commit hook once you've run `make hook`; `make lint` is not part of the hook — run it yourself.
+`make check` + `make lint` (0 FAIL / 0 WARN) are the definition of done. `make check` is also run as a pre-commit hook once you've run `make hook`; `make lint` is not part of the hook — run it yourself. Pushing to Gitea re-runs all four gates on the live Actions runner (see `CI: Gitea Actions Gate` below) — a red run is a merge-blocker.
 
 ### Testing tools that need root / systemd / missing deps
 
@@ -199,7 +199,7 @@ make lint                     # convention gate (scripts/lint-conventions.sh) �
 
 Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
 
-Stub harnesses are **throwaway by design**: no `tests/` dir in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo. (CI — `.gitea/workflows/lint.yml` — runs the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on push/PR; it does not run behaviour suites.)
+Stub harnesses are **throwaway by design**: no `tests/` dir in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo. (CI — `.gitea/workflows/lint.yml`, live act_runner — runs the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on every push/PR; it does not run behaviour suites.)
 
 ---
 
@@ -353,6 +353,39 @@ loop stdin, `/dev/tty` reads and `command -v` fallbacks are excluded):
 If a rule is genuinely wrong for a new case (as happened with
 graceful-degradation probes in system-health), refine the heuristic — never
 weaken it — and note the change in `MAINTENANCE.md`'s lint section.
+
+---
+
+## CI: Gitea Actions Gate
+
+`.gitea/workflows/lint.yml` re-runs the four gates on every `push` and
+`pull_request`: `make gen`, `git diff --exit-code` (gen drift), `make check`,
+`make lint`. A red run is a merge-blocker; runs are visible under Gitea →
+Actions.
+
+- **Runner** — act_runner v0.6.1 (`linux-post-install`, labels `ubuntu-latest` →
+  job image `node:20-bullseye`) is registered on the Gitea host and always on:
+  compose project `~/srv/gitea/runner/` (`docker compose up -d`,
+  `restart: unless-stopped`), standalone next to the ScaleTail gitea compose.
+- **Gotchas (session-learned):**
+  - act_runner's `run.sh` `cd`s into `/data` and only reads the config when the
+    `CONFIG_FILE` env var is set — the compose service must pass
+    `CONFIG_FILE=/config.yaml`, not just mount the file.
+  - The job container can't resolve `gitea.skink-platy.ts.net` by itself; pin it
+    with `container.options: "--add-host gitea.skink-platy.ts.net:100.111.241.54"`
+    in `config.yaml`.
+  - Registration tokens are one-time use; the token lives in `runner/.env`
+    (chmod 600) and is burned after the first registration.
+  - Inspecting runs via sqlite: Gitea's status enum is runnerv1-consistent —
+    **1 = success, 2 = failure** (not the old 0/1/2/3 scheme).
+- **Deterministic generators** — any script whose output is committed (gen docs,
+  completions) must sort in byte order: plain `sort` collates differently per
+  locale, and the CI container tripped exactly this (category-less tool keys
+  like `pos-config` start with `|`, which collated after letters under that
+  locale, reordering the generated tables). `scripts/gen-docs.sh` sets
+  `export LC_ALL=C`; keep that in mind for any new generator.
+- **Limits** — CI proves the *static* gates only; it never runs behaviour suites
+  (stub harnesses stay throwaway in `/tmp`).
 
 ---
 
