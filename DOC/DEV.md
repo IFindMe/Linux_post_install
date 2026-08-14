@@ -201,6 +201,16 @@ Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos
 
 Stub harnesses are **throwaway by design**: no `tests/` dir in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo. (CI — `.gitea/workflows/lint.yml`, live act_runner — runs the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on every push/PR; it does not run behaviour suites.)
 
+**Stub-harness gotchas (session-learned, `pos system backup` USB-detection suite).** Each red check means exactly one assumption — in the tool *or* the harness — is wrong; keep the diagnosis cheap by copying the run's `out.log` to a per-test file and asserting on artifacts (`fake_state`, `.gpg` on disk, `sends.log`, exit code), then deciding which side lied:
+
+- **Layout: the harness must live *outside* the sandbox it wipes.** If `fresh()` does `rm -rf "$TEST_DIR"`, the runner and the stubs cannot live inside `$TEST_DIR` or they get deleted mid-run. Prefer siblings: `/tmp/opencode/<tool>-run.sh` + `/tmp/opencode/<tool>-stubs/` + `/tmp/opencode/<tool>-test/` (sandbox wiped per test).
+- **Field separators: never `IFS=$'\t'` on JSON-derived data.** `read` treats IFS *whitespace* specially and collapses consecutive delimiters, so an empty JSON field (null `tran`, null `mountpoint`) shifts every following column and detection silently misfires. Emit a non-whitespace separator from jq (`… | join("\u001f")`) and read with `IFS=$'\x1f'`.
+- **`!` is not a command: `check "x" "$@"` with `! grep …` runs `!` as a binary (rc 127).** For "nothing present" prefer `test -z "$(grep … )"` — note `grep -qv` on an *empty* file still exits 1 (zero lines selected), so it fails the "nothing was written" case.
+- **`read -rp` prompts vanish when stdin is a pipe.** Bash suppresses the prompt text when stdin isn't a tty, so never assert on prompt strings in piped runs — assert on the side effect.
+- **Fakes that shell out must call the *real* binary, not the stub on PATH.** A fake `gpg` that ran `cp` picked up the corrupting fake `cp` and broke the tool's encryption step instead of the USB-copy step under test. Resolve the real one: `real() { for d in /usr/bin /bin; do [ -x "$d/$1" ] && { printf '%s' "$d/$1"; return; }; done; }` then `"$(real cp)" …`.
+- **Scope failure-injection fakes, don't make them global.** A "chmod fails" flag hit *every* `chmod` the tool runs (it chmods the archive too) and aborted the run before the section under test. Match the target instead: only fail for args under the seam path (e.g. `[[ "$target" == "$BACKUP_MOUNT_BASE/"* ]]`).
+- **Fixtures must genuinely exercise the branch.** A fixture builder that hardcodes `"tran":"usb"` means the "TRAN empty → cross-check" path never runs and its test passes for the wrong reason. Check the discriminating field actually varies (add a `_notran` builder, a card-reader `sata` fixture, etc.).
+
 ---
 
 ## Adding an Entertainment Plugin
