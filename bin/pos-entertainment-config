@@ -43,7 +43,7 @@ After 'set'/'unset'/'edit', auto-trigger timers are re-synced from ENABLED.
 Config file: $CONFIG_FILE
 
 Keys (declared by the installed plugins' # POS_KEYS: headers):
-$(keys_section "$(plugin_dir)")
+$(keys_section "$(ent_plugin_dir)")
 
 Intervals: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=...
 
@@ -60,7 +60,7 @@ EOF
 }
 
 key_known() {
-    config_key_known "$(plugin_dir)" "$1"
+    config_key_known "$(ent_plugin_dir)" "$1"
 }
 
 case "${1:-}" in
@@ -84,14 +84,14 @@ case "${1:-}" in
         while IFS= read -r line; do
             IFS='|' read -r _plugin key _desc _req <<<"$line"
             [ ${#key} -gt "$maxw" ] && maxw=${#key}
-        done <<< "$(config_keys "$(plugin_dir)")"
+        done <<< "$(config_keys "$(ent_plugin_dir)")"
         printf '  %-*s %s\n' "$maxw" "ENABLED" "\"$(config_value ENABLED)\""
         while IFS= read -r line; do
             [ -n "$line" ] || continue
             IFS='|' read -r plugin key desc req <<<"$line"
             v="$(config_value "$key")"
             printf '  %-*s %s  [%s] %s (%s)\n' "$maxw" "$key" "${v:-<not set>}" "$plugin" "$desc" "$req"
-        done <<< "$(config_keys "$(plugin_dir)")"
+        done <<< "$(config_keys "$(ent_plugin_dir)")"
         ;;
     edit)
         shift
@@ -138,6 +138,6 @@ case "${1:-}" in
         echo "Intervals: 5m 10m 15m 30m 45m hourly 2h 6h 12h daily weekly, or OnCalendar=..."
         echo
         echo "Plugin keys (declared in each plugin's # POS_KEYS: header):"
-        keys_section "$(plugin_dir)"
+        keys_section "$(ent_plugin_dir)"
         ;;
 esac

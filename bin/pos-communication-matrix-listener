@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: communication matrix-listener — Matrix listener: map /command → bash, run them on room messages
 # POS_FLAGS: --enable --disable --status --run
 
-CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/matrix.env"
 MAP_FILE="$CONFIG_DIR/matrix_commands.env"
 SERVICE="pos-matrix-listener.service"

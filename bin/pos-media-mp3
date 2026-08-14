@@ -5,6 +5,19 @@ set -euo pipefail
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
+# --dry-run is parsed before the deps guards (below): it previews the yt-dlp
+# command without requiring yt-dlp/ffmpeg to be installed.
+DRY_RUN=0
+for arg in "$@"; do
+    [ "$arg" = "--dry-run" ] && DRY_RUN=1
+done
+
+# Deps guards sit before -h|--help (help also errors on a box missing the deps).
+if [ "$DRY_RUN" -eq 0 ]; then
+    command -v yt-dlp &>/dev/null || err "yt-dlp not found — install it with: sudo apt install yt-dlp"
+    command -v ffmpeg &>/dev/null || err "ffmpeg not found (needed for MP3 conversion) — install it with: sudo apt install ffmpeg"
+fi
+
 OUT_DIR="$HOME/Music"
 BY_ARTIST=0
 EXTRA_ARGS=()
@@ -31,7 +44,6 @@ EOF
     exit 0
 }
 
-DRY_RUN=0
 URL=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -52,12 +64,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [ -n "$URL" ] || usage
-
-# Dependency checks (skipped under --dry-run: the command is only previewed).
-if [ "$DRY_RUN" -eq 0 ]; then
-    command -v yt-dlp &>/dev/null || err "yt-dlp not found — install it with: sudo apt install yt-dlp"
-    command -v ffmpeg &>/dev/null || err "ffmpeg not found (needed for MP3 conversion) — install it with: sudo apt install ffmpeg"
-fi
 
 if [ "$BY_ARTIST" -eq 1 ]; then
     OUT_TEMPLATE="$OUT_DIR/%(artist,uploader)s/%(title)s.%(ext)s"

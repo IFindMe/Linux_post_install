@@ -19,7 +19,7 @@
 #   cfg_scopes            # list all declared scopes (deduped, sorted)
 #   cfg_ui <scope>        # interactive numbered-menu editor for one scope
 
-CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 
 # common.sh helpers (guarded so the lib is safe if common.sh wasn't loaded)
 declare -F log  >/dev/null || log()  { echo "[+] $*"; }
@@ -124,7 +124,7 @@ _cfg_plugin_keys() {
     }
     declare -F config_keys >/dev/null 2>&1 || return 0
     local pdir line plugin key desc req
-    pdir="$(plugin_dir)"
+    pdir="$(ent_plugin_dir)"
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         IFS='|' read -r plugin key desc req <<<"$line"

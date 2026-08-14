@@ -108,6 +108,7 @@ esac
 - Strict mode: `set -euo pipefail`
 - `--help` flag: accept `-h` / `--help` via `case` pattern
 - **Deps guards run before `--help`:** `command -v <bin> &>/dev/null || err "… (install <pkg>)"` lines sit at the top of the script, **before** the `-h|--help` case — so `--help` also errors when a dependency is missing. This matches every existing deps-gated tool; keep it that way.
+  - Exception — tools with **no required deps** (every check degrades gracefully): `pos system health` probes binaries at runtime (`if command -v systemctl; then …`) and needs no guard. The lint (`scripts/lint-conventions.sh`) only enforces guard-before-help for lines that are actual guards (`command -v … ||`, `if ! command -v`, `command -v … \` continuation), never for graceful-degradation probes. If you add a tool like this, keep all checks optional and note it in `usage()`.
 - Shared library: always source `common.sh` for colors, logging, spinners
 - Exit codes: `0` success, `1` error
 - No shared lib? Inline fallbacks:

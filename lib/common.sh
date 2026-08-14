@@ -6,10 +6,17 @@ if [ -t 1 ]; then
     RED=$(tput setaf 1)
     BLUE=$(tput setaf 4)
     BOLD=$(tput bold)
+    DIM=$(tput dim)
     RESET=$(tput sgr0)
 else
-    CYAN=""; GREEN=""; YELLOW=""; RED=""; BLUE=""; BOLD=""; RESET=""
+    CYAN=""; GREEN=""; YELLOW=""; RED=""; BLUE=""; BOLD=""; DIM=""; RESET=""
 fi
+
+# ── Config dir (env seam, XDG-aware) ───────────────────────────
+# Canonical definition. Standalone-sourced files (notify.sh,
+# config-ui.sh, the matrix/telegram tools) keep an identical guarded
+# copy — see DEV.md "no shared lib? inline fallbacks".
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 
 # ── Core helpers ───────────────────────────────────────────────
 log()   { echo "${GREEN}[+]${RESET} $*"; }

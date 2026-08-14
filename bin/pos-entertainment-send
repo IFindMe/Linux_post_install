@@ -9,7 +9,7 @@ source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")
 
 usage() {
     local dir plugins
-    dir="$(plugin_dir 2>/dev/null)" || dir=""
+    dir="$(ent_plugin_dir 2>/dev/null)" || dir=""
     if [ -n "$dir" ]; then
         plugins="$(list_plugins "$dir" | sed 's/^/  /')"
     else
@@ -67,7 +67,7 @@ plugin="${plugin_args[0]}"
 unset 'plugin_args[0]'
 
 # ── Run the plugin ──────────────────────────────────────────────
-dir="$(plugin_dir)"
+dir="$(ent_plugin_dir)"
 script="$(resolve_plugin "$dir" "$plugin")"
 
 rc=0

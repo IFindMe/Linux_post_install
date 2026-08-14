@@ -1,8 +1,8 @@
 # Shared library for the entertainment module (pos entertainment *).
-# Sourced by the bin/pos-entertainment-* tools AFTER lib/common.sh.
-# NOTE: plugins themselves must NOT source this — their stdout is the message.
+# Sourced by the bin/pos-entertainment-* tools AFTER lib/common.sh
+# (which defines CONFIG_DIR). NOTE: plugins themselves must NOT source
+# this — their stdout is the message.
 
-CONFIG_DIR="$HOME/.config/linux_post_install"
 CONFIG_FILE="$CONFIG_DIR/entertainment.env"
 TIMER_PREFIX="pos-entertainment"
 DEFAULT_INTERVAL="daily"
@@ -54,7 +54,7 @@ write_config_key() {
 }
 
 # ── Plugin lookup ──────────────────────────────────────────────────
-plugin_dir() {
+ent_plugin_dir() {
     if [ -n "${ENTERTAINMENT_DIR:-}" ]; then
         echo "$ENTERTAINMENT_DIR"
     elif [ -d "$(dirname "$0")/../entertainment" ]; then
@@ -64,7 +64,7 @@ plugin_dir() {
     fi
 }
 
-plugin_marker() {
+ent_plugin_marker() {
     grep -m1 '^# POS_PLUGIN:' "$1" 2>/dev/null | sed 's/^# POS_PLUGIN:[[:space:]]*//;s/[[:space:]]*$//' || true
 }
 
@@ -72,15 +72,15 @@ list_plugins() {
     local dir="$1" f name
     for f in "$dir"/*.sh; do
         [ -f "$f" ] || continue
-        name="$(plugin_marker "$f")"
+        name="$(ent_plugin_marker "$f")"
         [ -n "$name" ] && echo "$name"
     done
 }
 
-plugin_exists() {
+ent_plugin_exists() {
     local dir="$1" name="$2" f
     for f in "$dir/$name" "$dir/$name.sh"; do
-        [ -f "$f" ] && [ -x "$f" ] && [ -n "$(plugin_marker "$f")" ] && return 0
+        [ -f "$f" ] && [ -x "$f" ] && [ -n "$(ent_plugin_marker "$f")" ] && return 0
     done
     return 1
 }
@@ -90,7 +90,7 @@ resolve_plugin() {
     [ -n "$name" ] || err "No plugin given"
     for f in "$dir/$name" "$dir/$name.sh"; do
         if [ -f "$f" ] && [ -x "$f" ]; then
-            [ -n "$(plugin_marker "$f")" ] || err "'$f' is not an entertainment plugin (missing '# POS_PLUGIN:' header)"
+            [ -n "$(ent_plugin_marker "$f")" ] || err "'$f' is not an entertainment plugin (missing '# POS_PLUGIN:' header)"
             echo "$f"
             return 0
         fi
@@ -105,8 +105,8 @@ resolve_plugin() {
 # config' prints them in its Keys section; config set warns when a key is
 # not declared by any installed plugin.
 
-plugin_keys() {
-    # Usage: plugin_keys <plugin-file>  → "KEY|description|required|optional"
+ent_plugin_keys() {
+    # Usage: ent_plugin_keys <plugin-file>  → "KEY|description|required|optional"
     local file="$1" line key desc req
     grep '^# POS_KEYS:' "$file" 2>/dev/null | sed 's/^# POS_KEYS:[[:space:]]*//' | while IFS= read -r line; do
         key="${line%% *}"
@@ -125,12 +125,12 @@ config_keys() {
     local dir="$1" f name line
     for f in "$dir"/*.sh; do
         [ -f "$f" ] || continue
-        name="$(plugin_marker "$f")"
+        name="$(ent_plugin_marker "$f")"
         [ -n "$name" ] || continue
         while IFS= read -r line; do
             [ -n "$line" ] || continue
             printf '%s|%s\n' "$name" "$line"
-        done <<< "$(plugin_keys "$f")"
+        done <<< "$(ent_plugin_keys "$f")"
     done
 }
 
@@ -160,7 +160,7 @@ parse_enabled() {
     IFS=' ' read -ra toks <<<"$(printf '%s' "$raw" | tr ',' ' ')"
     for token in "${toks[@]}"; do
         [ -n "$token" ] || continue
-        if plugin_exists "$(plugin_dir)" "$token"; then
+        if ent_plugin_exists "$(ent_plugin_dir)" "$token"; then
             [ -n "$cur" ] && ENABLED_ENTRIES+=("$cur")
             cur="$token"
         elif [ -n "$cur" ]; then
@@ -240,7 +240,7 @@ sync_systemd() {
     for entry in "${ENABLED_ENTRIES[@]}"; do
         plugin="${entry%%,*}"; interval="${entry##*,}"
         [ "$interval" = "$plugin" ] && interval="$DEFAULT_INTERVAL"
-        if ! plugin_exists "$(plugin_dir)" "$plugin"; then
+        if ! ent_plugin_exists "$(ent_plugin_dir)" "$plugin"; then
             warn "plugin '$plugin' not installed — skipping"
             continue
         fi

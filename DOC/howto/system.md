@@ -15,19 +15,17 @@ Host care: encrypted backups, firewall, and the health dashboard. Tools:
 
 ```bash
 pos system health                 # console report; exits 1 if any check FAILs
-pos system health --send          # also send the summary via notify platforms
-pos system health --markdown      # same, markdown parse mode (implies --send)
 ```
 
 Checks: disk per mount (>90% = FAIL), RAM/swap, failed systemd units, backup
 age, fail2ban, docker containers. Header shows hostname, uptime, load, public IP.
 
-`--help` prints the **effective** config values (env > `system.env` > default),
-e.g.:
+Health is a **console-only reporter — it never sends notifications**; deliver
+its output with a wrapper or a scheduled job (below). `--help` prints the
+**effective** config values (env > `system.env` > default), e.g.:
 
 ```
 Environment (effective values):
-  NOTIFY_PLATFORM             telegram
   HEALTH_BACKUP_MAX_AGE_DAYS  2
   BACKUP_SERVICE_ROOTS        /srv $HOME/srv
 ```
@@ -41,8 +39,6 @@ Environment (effective values):
 BACKUP_SERVICE_ROOTS=/srv $HOME/srv    # roots for backup-age check + backup --service
 BACKUP_USB_ROOT=/mnt/usb               # optional: copy finished backups to <root>/backups/ (auto-detects a mounted USB when unset)
 HEALTH_BACKUP_MAX_AGE_DAYS=3           # WARN if newest backup older (default 2)
-# ~/.config/linux_post_install/notify.env
-NOTIFY_PLATFORM=telegram
 ```
 
 ### Daily digest (automated)
@@ -50,14 +46,15 @@ NOTIFY_PLATFORM=telegram
 Run the health report on a timer with a scheduled job (no systemd unit needed):
 
 ```bash
-pos system schedule config        # add a job: INTERVAL=daily,
-                                  #   COMMAND=pos system health --send --markdown
+pos system schedule config        # add a job: INTERVAL=daily, NOTIFY=always,
+                                  #   COMMAND=pos system health
 systemctl --user list-timers | grep pos-schedule
 pos system schedule run <name>    # run once now
 ```
 
-The old `pos-health.{service,timer}` systemd units are gone — a legacy install
-may still have them failed/leftover; disable and remove them:
+The `NOTIFY=always` policy sends the job's full output — i.e. the dashboard —
+as the alert. The old `pos-health.{service,timer}` systemd units are gone — a
+legacy install may still have them failed/leftover; disable and remove them:
 
 ```bash
 sudo systemctl disable --now pos-health.timer pos-health.service 2>/dev/null
@@ -75,8 +72,6 @@ sudo rm -f /etc/systemd/system/pos-health.{service,timer} && sudo systemctl daem
   active; start it (`sudo systemctl enable --now fail2ban`) or ignore.
 - `[FAIL] services: nbd-server.service …` → a failed unit; inspect with
   `systemctl status <unit>`.
-- `--send` prints a warn and exits 0 when no platform is configured — by design
-  (see [communication](communication.md)).
 
 ---
 

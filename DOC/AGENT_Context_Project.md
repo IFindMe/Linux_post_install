@@ -562,12 +562,12 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 223 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
-| `preinstall.sh` | 75 | System packages + hotspot deps + yt-dlp + fail2ban |
+| `install.sh` | 248 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
+| `preinstall.sh` | 76 | System packages + hotspot deps + yt-dlp + fail2ban |
 | `postinstall.sh` | 168 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
-| `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
+| `lib/common.sh` | 151 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`, CONFIG_DIR) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
-| `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
+| `lib/notify.sh` | 87 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
 | `lib/entertainment-lib.sh` | 311 | Entertainment module lib (ENABLED parsing, last-run state, scheduler sync via user-timers-lib) |
 | `lib/entertainment-plugin-lib.sh` | 67 | Message-safe helpers for plugins (config load, require, fetch+retry) — plugins MAY source it |
 | `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
@@ -575,8 +575,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
-| `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `features/usb-automount.sh` | 134 | USB automount feature (udev rule + flag-gated service) |
+| `features/autostart.sh` | 50 | Boot-time feature (moved from `bin/`, flag-gated service) |
+| `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 292 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
@@ -587,21 +587,21 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
-| `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
-| `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
+| `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
+| `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 95 | Run a public-API plugin and send its output via the configured notify platforms |
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
-| `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
-| `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
+| `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
+| `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 952 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 951 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
-| `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
+| `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
 | `bin/pos-share-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
 | `bin/pos-share-smb-client` | 217 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
@@ -609,7 +609,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 220 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-firewall` | 291 | Interactive UFW management |
+| `bin/pos-system-firewall` | 308 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |

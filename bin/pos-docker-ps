@@ -13,14 +13,11 @@ EOF
     exit 0
 }
 
+command -v docker &>/dev/null || err "docker not found — install it with: sudo apt install docker.io"
+
 case "${1:-}" in
     -h|--help) usage ;;
 esac
-
-if ! command -v docker &>/dev/null; then
-    echo "docker not found"
-    exit 1
-fi
 
 if ! container_ids=$(docker ps -q 2>/dev/null) || [[ -z "$container_ids" ]]; then
     echo "No running containers."
