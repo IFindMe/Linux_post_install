@@ -67,7 +67,6 @@ Linux_post_install/
 │   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
-│   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps                       # Enhanced container overview (health, IPs, ports, uptime)
@@ -94,6 +93,7 @@ Linux_post_install/
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
+│   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 <!-- GEN:END tree -->
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
@@ -268,7 +268,6 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
-|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
@@ -295,6 +294,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
 <!-- GEN:END dispatch -->
 
@@ -585,7 +585,6 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
-| `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
@@ -612,6 +611,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 308 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+| `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 292 | Dynamic bash completion |
 <!-- GEN:END filetable -->

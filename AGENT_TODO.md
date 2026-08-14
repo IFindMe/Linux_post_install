@@ -16,9 +16,13 @@ summary (newest last).
 
 ## Next
 
-- Register a Gitea **act_runner** on `gitea.skink-platy.ts.net` (Docker: `gitea/act_runner` with a `ubuntu-latest` label) so `.gitea/workflows/lint.yml` actually runs — until a runner connects, the gate stays queued and local `make lint` remains the only enforcement.
+- (None queued.)
 
 ## Done
+
+- **2026-08-14** — Gitea Actions gate is now **live and green end-to-end**: act_runner (v0.6.1, labels `ubuntu-latest`) registered on `100.100.1.2` (`~/srv/gitea/runner/`, standalone compose next to the ScaleTail gitea; `CONFIG_FILE=/config.yaml` env required or `run.sh` never reads the config; `--add-host gitea.skink-platy.ts.net:100.111.241.54` so the job container reaches gitea). First real runs **caught a deterministic gen-drift**: plain `sort` in `scripts/gen-docs.sh` is locale-dependent (category-less tool keys start with `|`, which collates after letters under the CI container's locale → `pos-config`/`pos-tree` reordered), so the `git diff --exit-code` step failed. Fixed with `export LC_ALL=C` in gen-docs.sh (byte-order sort) + regenerated `DOC/AGENT_Context_Project.md` (config/tree now sort after the letter categories); `make check` OK, `make lint` 0 FAIL / 0 WARN. Also two intentionally-empty verification commits on main (`e0b5b11` parent tests): `98a767c` (empty trigger).
+
+- **2026-08-14** — Gitea Actions gate added: `.gitea/workflows/lint.yml` runs `make gen` + `git diff --exit-code` (gen-drift) + `make check` + `make lint` on every push/PR. Verified locally the exact four steps pass (gen idempotent, check OK, lint 0 FAIL / 0 WARN). "no CI" lines updated in AGENTS.md (Quick facts → CI bullet, notes a registered act_runner is required) and DEV.md (stub harnesses note: CI runs static gates only, not behaviour suites). Gitea 1.26.4 confirmed reachable; runner setup still pending (see Next).
 
 - **2026-08-14** — Gitea Actions gate added: `.gitea/workflows/lint.yml` runs `make gen` + `git diff --exit-code` (gen-drift) + `make check` + `make lint` on every push/PR. Verified locally the exact four steps pass (gen idempotent, check OK, lint 0 FAIL / 0 WARN). "no CI" lines updated in AGENTS.md (Quick facts → CI bullet, notes a registered act_runner is required) and DEV.md (stub harnesses note: CI runs static gates only, not behaviour suites). Gitea 1.26.4 confirmed reachable; runner setup still pending (see Next).
 
