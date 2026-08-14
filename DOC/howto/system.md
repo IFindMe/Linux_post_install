@@ -78,13 +78,21 @@ sudo rm -f /etc/systemd/system/pos-health.{service,timer} && sudo systemctl daem
 ## `pos system backup` — encrypted folder snapshots
 
 ```bash
-pos system backup <folder-path>       # encrypt to ./<name>_<date>.tar.gz.gpg
-pos system backup --service           # pick a folder from /srv + ~/srv
+pos system backup <folder-path>                 # encrypt to ./<name>_<date>.tar.gz.gpg
+pos system backup <folder-path> --no-encrypt    # plain ./<name>_<date>.tar.gz, no password
+pos system backup --service                     # pick a folder from /srv + ~/srv
 ```
 
 Uses `sudo tar` + gpg AES-256. The password is prompted **twice and never
 stored**; the artifact is `chmod 600`. On success (and on failure, via ERR
 trap) a `notify_send` alert is sent.
+
+**Skip encryption** with `--no-encrypt` (or `BACKUP_ENCRYPT=0` in
+`system.env`): the archive stays a plain `.tar.gz`, no password is prompted,
+and the file is still `chmod 600` + USB-copy verified. This is the
+**headless/cron-safe** mode — the encrypted path prompts for a password, so
+under cron it needs `--no-encrypt` with a fixed folder
+(`pos system backup ~/Documents --no-encrypt`).
 
 `--service` lists folders under the roots in `BACKUP_SERVICE_ROOTS`
 (default `/srv $HOME/srv`; override via `system.env` or env) and lets you pick.

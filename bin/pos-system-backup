@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: system backup — Encrypted (AES-256) folder snapshots (tar + gpg)
-# POS_FLAGS: --service
+# POS_FLAGS: --service --no-encrypt
 # POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram) — shared by backup, firewall, share nfs client/server
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -15,22 +15,28 @@ trap 'notify_send "Backup FAILED: ${FOLDER:-unknown}"' ERR
 usage() {
     cat <<EOF
 Usage: pos system backup <folder-path>
+       pos system backup <folder-path> --no-encrypt
        pos system backup --service
 
 Create a gpg-encrypted (AES-256) tar.gz snapshot of a folder and verify it.
-The archive password is prompted twice and never stored.
+The archive password is prompted twice and never stored. With --no-encrypt
+(or BACKUP_ENCRYPT=0) the backup is kept as a plain .tar.gz — no password,
+headless/cron safe.
 
 Modes:
   <folder-path>   Back up that folder directly.
+  --no-encrypt    Skip encryption (no password prompt, artifact stays .tar.gz).
   --service       List folders under /srv and ~/srv, pick one, back it up.
 
-The final artifact <name>_<date>.tar.gz.gpg is written to the current directory.
+The final artifact <name>_<date>.tar.gz[.gpg] is written to the current directory.
 After it verifies, connected USB storage is offered: the copy lands in
 <usb>/backups/ and is sha256-verified 100% before it is announced. A stick
 that is plugged in but not mounted is offered a mount first (sudo, mirrors
 the usb-automount scheme) before the copy.
 
 Environment:
+  BACKUP_ENCRYPT       Set to 0 to skip encryption (same as --no-encrypt)
+                       (default: 1)
   BACKUP_SERVICE_ROOTS   Space-separated roots for --service
                          (effective: ${EFF_ROOTS})
   BACKUP_USB_ROOT        USB root to copy finished backups to
@@ -43,7 +49,6 @@ EOF
 }
 
 command -v tar &>/dev/null || err "tar not found"
-command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
 
 # ── USB copy (optional post-backup step) ─────────────────────────
 # Detection runs AFTER the backup finished, so a stick plugged in while
@@ -253,12 +258,17 @@ mount_offer() {
 }
 
 SERVICE=0
-case "${1:-}" in
-    -h|--help) usage ;;
-    --service) SERVICE=1 ;;
-    "")        err "Missing folder path (or use --service)" ;;
-    *)         FOLDER="$1" ;;
-esac
+ENCRYPT=1
+[ "${BACKUP_ENCRYPT:-1}" = "0" ] && ENCRYPT=0
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+        --service) SERVICE=1 ;;
+        --no-encrypt) ENCRYPT=0 ;;
+        *) FOLDER="$arg" ;;
+    esac
+done
+{ [ "$SERVICE" -eq 1 ] || [ -n "${FOLDER:-}" ]; } || err "Missing folder path (or use --service)"
 
 if [ "$SERVICE" -eq 1 ]; then
     if [ -n "${BACKUP_SERVICE_ROOTS:-}" ]; then
@@ -313,29 +323,36 @@ log "Verifying archive..."
 tar -tzf "$ARCHIVE" > /dev/null
 log "Archive verified"
 
-while true; do
-    read -s -rp "Enter backup password: " PASS
-    echo
-    read -s -rp "Confirm backup password: " CONFIRM
-    echo
-    if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
-        break
-    fi
-    warn "Passwords are empty or do not match — try again"
-done
-unset CONFIRM
+if [ "$ENCRYPT" -eq 1 ]; then
+    command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
 
-log "Encrypting backup..."
-gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
+    while true; do
+        read -s -rp "Enter backup password: " PASS
+        echo
+        read -s -rp "Confirm backup password: " CONFIRM
+        echo
+        if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
+            break
+        fi
+        warn "Passwords are empty or do not match — try again"
+    done
+    unset CONFIRM
 
-rm -f "$ARCHIVE"
-ARCHIVE="${ARCHIVE}.gpg"
-chmod 600 "$ARCHIVE"
+    log "Encrypting backup..."
+    gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
 
-log "Verifying encrypted backup..."
-gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+    rm -f "$ARCHIVE"
+    ARCHIVE="${ARCHIVE}.gpg"
+    chmod 600 "$ARCHIVE"
 
-unset PASS
+    log "Verifying encrypted backup..."
+    gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+
+    unset PASS
+else
+    chmod 600 "$ARCHIVE"
+    log "No encryption requested — keeping $ARCHIVE"
+fi
 echo
 log "Backup completed: $ARCHIVE"
 notify_send "Backup completed: $ARCHIVE"

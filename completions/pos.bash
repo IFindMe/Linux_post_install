@@ -14,7 +14,7 @@ _pos_flags[network-checkport]="--tcp --udp --ping --no-banner --versions --timeo
 _pos_flags[network-download]="--dir --out --split --seed --force --upload --gid --tmux"
 _pos_flags[network-hotspot]="--foreground"
 _pos_flags[share-usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version"
-_pos_flags[system-backup]="--service"
+_pos_flags[system-backup]="--service --no-encrypt"
 _pos_flags[system-schedule]="--dry-run"
 _pos_flags[tree]="--depth"
 # GEN:END posflags
