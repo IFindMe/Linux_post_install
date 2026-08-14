@@ -10,6 +10,7 @@ _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-pr
 _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[media-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
 _pos_flags[media-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
+_pos_flags[media-sync]="--mp3 --mp4 --source --dry-run"
 _pos_flags[network-checkport]="--tcp --udp --ping --no-banner --versions --timeout"
 _pos_flags[network-download]="--dir --out --split --seed --force --upload --gid --tmux"
 _pos_flags[network-hotspot]="--foreground"

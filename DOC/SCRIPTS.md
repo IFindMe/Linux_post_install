@@ -38,7 +38,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -204,6 +204,13 @@ Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib
 
 **File:** `lib/user-timers-lib.sh` (installed to `/usr/local/bin/user-timers-lib.sh`)
 **Purpose:** the one copy of the systemd **user** timer machinery used by both the entertainment module and the system scheduler — `ut_interval_to_oncalendar` (interval→`OnCalendar`, incl. raw `OnCalendar=…` passthrough), `ut_interval_label`, `ut_unit_name`, `ut_write_unit_pair` (oneshot service + `Persistent=true` timer, `TimeoutStopSec=5s`, `network-online` deps), and `ut_ensure_linger`. Sourced by `lib/entertainment-lib.sh` and `lib/scheduler-lib.sh`; defines only `ut_*` so it never collides with either.
+
+---
+
+## lib/usb-lib.sh — shared USB-storage detection
+
+**File:** `lib/usb-lib.sh` (installed to `/usr/local/bin/usb-lib.sh`)
+**Purpose:** the one copy of the USB-storage machinery shared by `pos system backup`'s post-verify USB copy and `pos media sync` — `usb_detect` (lsblk JSON, TRAN + lsusb/by-id cross-check → `USB_MOUNTED`/`USB_UNMOUNTED`), `usb_related_present`, `usb_mount_offer` (mount an unmounted stick at `/media/<label>`, `usb-automount` scheme), and `usb_pick_root` (detect → mount-offer → single/multi picker → `USB_ROOT`). Defines only `usb_*`; seams `USB_MOUNT_BASE` (default `/media`, alias `BACKUP_MOUNT_BASE`) and `USB_BYID` (default `/dev/disk/by-id`, alias `BACKUP_USB_BYID`) keep existing config lines working.
 
 ---
 

@@ -206,6 +206,7 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 |---------|------|---------|---------------|
 | `pos media mp3 <url>` | `bin/pos-media-mp3` | Download audio as MP3 via yt-dlp, with thumbnail + metadata | Output to `~/Music/%(title)s.%(ext)s`, `--audio-quality 0` |
 | `pos media mp4 <url>` | `bin/pos-media-mp4` | Download video via yt-dlp with **interactive format selection** | Lists formats (`yt-dlp -F`), asks for a format ID, saves to `~/Videos/` |
+| `pos media sync [--mp3\|--mp4]` | `bin/pos-media-sync` | Incremental Music → USB sync (add/update only — never deletes) | Copies mp3/mp4 from `$HOME/Music` (or `--source <dir>`) into `<usb>/Music/`, preserving the tree; missing or changed (size/mtime) files are copied, identical ones skipped. Same USB detection as `pos system backup` (lsblk TRAN + lsusb/by-id, mount offer for unmounted sticks, multi-stick picker). `--mp3`/`--mp4` filter by extension, neither = both; `--dry-run` previews. Config: `MEDIA_SYNC_SOURCE`, `MEDIA_SYNC_DEST`, shared `USB_MOUNT_BASE`/`USB_BYID` from `~/.config/linux_post_install/system.env`. Result notified via `lib/notify.sh` |
 
 ### system
 

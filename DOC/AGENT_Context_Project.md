@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–193 |
-| ## 3. Installation Flow | 194–245 |
-| ## 4. The `pos` CLI System | 246–316 |
-| ## 5. Shared Library — `lib/common.sh` | 317–348 |
-| ## 6. Docker Compose / ScaleTail | 349–391 |
-| ## 7. Optional Apps (`apps/`) | 392–421 |
-| ## 8. Entertainment Module | 422–435 |
-| ## 9. Systemd Services | 436–447 |
-| ## 10. Configuration Files | 448–474 |
-| ## 11. Coding Conventions | 475–507 |
-| ## 12. Development Workflow | 508–560 |
-| ## 13. Key File Quick Reference | 561–621 |
-| ## 14. Common Tasks for Agents | 622–652 |
+| ## 2. Directory Structure | 44–194 |
+| ## 3. Installation Flow | 195–246 |
+| ## 4. The `pos` CLI System | 247–318 |
+| ## 5. Shared Library — `lib/common.sh` | 319–350 |
+| ## 6. Docker Compose / ScaleTail | 351–393 |
+| ## 7. Optional Apps (`apps/`) | 394–423 |
+| ## 8. Entertainment Module | 424–437 |
+| ## 9. Systemd Services | 438–449 |
+| ## 10. Configuration Files | 450–476 |
+| ## 11. Coding Conventions | 477–509 |
+| ## 12. Development Workflow | 510–562 |
+| ## 13. Key File Quick Reference | 563–625 |
+| ## 14. Common Tasks for Agents | 626–657 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -78,6 +78,7 @@ Linux_post_install/
 │   ├── pos-entertainment-status            # Show enabled plugins and scheduler state
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
+│   ├── pos-media-sync                      # Incremental Music → USB sync (mp3/mp4, add/update only)
 │   ├── pos-network-checkport               # Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
 │   ├── pos-network-download                # aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
@@ -279,6 +280,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
+| media | sync | `pos-media-sync` | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | network | download | `pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
@@ -572,6 +574,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/entertainment-plugin-lib.sh` | 67 | Message-safe helpers for plugins (config load, require, fetch+retry) — plugins MAY source it |
 | `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
 | `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
+| `lib/usb-lib.sh` | 194 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`) — used by `pos system backup` + `pos media sync` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -596,6 +599,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
+| `bin/pos-media-sync` | 138 | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | `bin/pos-network-download` | 951 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
@@ -607,13 +611,13 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-smb-server` | 253 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 364 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-backup` | 216 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 308 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 292 | Dynamic bash completion |
+| `completions/pos.bash` | 293 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -643,6 +647,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
 | Modify SMB share logic | Edit `bin/pos-share-smb-server` / `bin/pos-share-smb-client` |
 | Modify scrcpy mirroring logic | Edit `bin/pos-communication-scrcpy` (config scope `scrcpy` via `pos config scrcpy`; `SCRCPY_*` keys in `~/.config/linux_post_install/scrcpy.env`) |
+| Modify Music→USB sync logic | Edit `bin/pos-media-sync` / shared USB layer `lib/usb-lib.sh` (seams `MEDIA_SYNC_SOURCE`/`MEDIA_SYNC_DEST`/`USB_MOUNT_BASE`/`USB_BYID` in `~/.config/linux_post_install/system.env`) |
 | Modify the scheduler / scheduled jobs | Edit `bin/pos-system-schedule` / `lib/scheduler-lib.sh` (jobs in `~/.config/linux_post_install/schedule.d/`) |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
