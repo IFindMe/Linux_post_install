@@ -20,9 +20,9 @@ Commands:
   mount <//server/share> <local-dir> [user]   One-shot mount (creates local-dir if needed)
   unmount <local-dir>                          Unmount the share
   list                                         Show active + persistent SMB mounts
-  persist <//server/share> <local-dir> [user]  Persistent mount via a systemd .mount unit
-                                               (automount — never blocks boot)
-  unpersist <local-dir>                        Stop, disable and remove the mount unit
+  persist <//server/share> <local-dir> [user]  Persistent mount via systemd .mount + .automount
+                                               units (mounts on first access — never blocks boot)
+  unpersist <local-dir>                        Stop, disable and remove the mount/automount units
 
 With no user, guest access is attempted. With a user, you are prompted for
 the Samba password — one-shot mounts use a throwaway chmod-600 credentials
@@ -143,8 +143,10 @@ case "$cmd" in
         validate_dir "$where"
 
         unit="$(systemd-escape --path --suffix=mount "$where")"
+        auto_unit="${unit%.mount}.automount"
         unit_file="${UNIT_DIR}/${unit}"
-        opts="$(mount_opts "$user"),_netdev,noexec,x-systemd.automount"
+        auto_file="${UNIT_DIR}/${auto_unit}"
+        opts="$(mount_opts "$user"),_netdev,noexec"
         if [ -n "$user" ]; then
             creds_file="$SMB_CREDS_DIR/$(basename "$where")"
             sudo mkdir -p "$SMB_CREDS_DIR"
@@ -170,9 +172,19 @@ Where=${where}
 Type=cifs
 Options=${opts}
 UNIT
+        cat <<UNIT | sudo tee "$auto_file" >/dev/null
+[Unit]
+Description=Automount of SMB share ${what} at ${where}
+
+[Automount]
+Where=${where}
+
+[Install]
+WantedBy=multi-user.target
+UNIT
         sudo systemctl daemon-reload
-        sudo systemctl enable --now "$unit"
-        log "Persistent SMB mount: ${what} → ${where} (${unit})"
+        sudo systemctl enable --now "$auto_unit"
+        log "Persistent SMB mount (automount): ${what} → ${where} (${auto_unit})"
         notify_send "SMB mount persisted: ${what} → ${where}"
         ;;
 
@@ -182,17 +194,20 @@ UNIT
         validate_dir "$where"
 
         unit="$(systemd-escape --path --suffix=mount "$where")"
+        auto_unit="${unit%.mount}.automount"
         unit_file="${UNIT_DIR}/${unit}"
+        auto_file="${UNIT_DIR}/${auto_unit}"
 
-        if [ ! -f "$unit_file" ]; then
+        if [ ! -f "$unit_file" ] && [ ! -f "$auto_file" ]; then
             warn "No systemd mount unit for $where (${unit})"
             exit 0
         fi
 
+        sudo systemctl disable "$auto_unit" 2>/dev/null || true
+        sudo systemctl stop "$auto_unit" 2>/dev/null || true
         sudo systemctl disable "$unit" 2>/dev/null || true
         sudo systemctl stop "$unit" 2>/dev/null || true
-        sudo systemctl stop "${unit%.mount}.automount" 2>/dev/null || true
-        sudo rm -f "$unit_file"
+        sudo rm -f "$unit_file" "$auto_file"
         sudo rm -f "$SMB_CREDS_DIR/$(basename "$where")"
         sudo rmdir "$SMB_CREDS_DIR" 2>/dev/null || true
         sudo systemctl daemon-reload

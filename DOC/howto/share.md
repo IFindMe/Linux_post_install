@@ -231,8 +231,9 @@ mounts use a throwaway chmod-600 credentials file, `persist` keeps one at
 `/etc/samba/credentials/<name>` (chmod 600) and references it from the unit.
 
 **Persistent mounts use systemd, not fstab.** `persist` writes a
-`/etc/systemd/system/<mnt-name>.mount` unit (`systemd-escape`) with
-`x-systemd.automount` + `_netdev`: the share is mounted **on first access**
+`/etc/systemd/system/<mnt-name>.mount` unit (**and** a matching
+`<mnt-name>.automount` unit, both `systemd-escape`d) with `_netdev`: the
+automount is enabled and armed, and the share is mounted **on first access**
 instead of at boot, so an unreachable SMB server can never hang boot (with
 fstab it could). `enable --now` arms the automount immediately.
 
