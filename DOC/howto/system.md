@@ -106,11 +106,37 @@ pos system backup ~/Documents
 #   OK Transfer verified 100% (sha256 match): .../backups/docs_2026-08-13.tar.gz.gpg
 ```
 
+Detection reads `lsblk` and treats a device as USB when `TRAN == usb` (the
+per-device deciding signal). Removable-but-not-USB slots (e.g. a SATA card
+reader) are skipped. If a device shows no `TRAN` at all, `lsblk`'s answer is
+cross-checked against `/dev/disk/by-id/usb-*` symlinks and `lsusb` before it is
+offered.
+
+**Unmounted stick?** If the USB stick is plugged in but only shows as `sdax`
+with no mountpoint (common on CLI boxes with no automounter), you're offered a
+**mount first**, then it copies there:
+
+```bash
+#   [!] Found USB storage not mounted: /dev/sda1 (7.5G, DataTraveler)
+#   Mount it at /media/usb-sda1 (world-writable) so the backup can go there? [y/N]
+#   (y)  OK Mounted /dev/sda1 at /media/usb-sda1
+#   [+] Copying to /media/usb-sda1/backups/docs_2026-08-13.tar.gz.gpg ...
+#   OK Transfer verified 100% (sha256 match): .../backups/docs_2026-08-13.tar.gz.gpg
+```
+
+The mount mirrors `usb-automount` (`/media/<label>`, fallback
+`/media/usb-<devname>`, `-o umask=000` world-writable so the copy works without
+root). Decline it and you get the exact `sudo mkdir -p` / `sudo mount` commands
+to run yourself, then `Enter` re-checks. `s` or EOF (cron) skips silently and
+the backup stays local — it never blocks.
+
 - Multiple sticks mounted → pick by number; `0` skips; `n`/EOF skips silently
   (cron runs never block).
 - Pin a fixed stick (no detection, no prompt on cron) with
   `BACKUP_USB_ROOT=/mnt/usb` in `system.env` — the copy still lands in
   `<root>/backups/` and is still sha256-verified.
+- Mount base and by-id dir are configurable: `BACKUP_MOUNT_BASE` (default
+  `/media`) and `BACKUP_USB_BYID` (default `/dev/disk/by-id`).
 
 ### Recipes
 

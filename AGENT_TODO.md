@@ -42,6 +42,7 @@ summary (newest last).
 
 ## Done
 
+- **2026-08-14** — `pos system backup` — smart USB detection: lsblk TRAN (lsusb/by-id cross-check), mount offer for plugged-in-but-unmounted sticks, sha256-verified copy (stub-suite 54/54).
 - **2026-08-05** — `pos communication telegram` — `--parse-mode` (plain/markdown/html).
 - **2026-08-05** — doc/code sync gate — `make gen` + `make check` + pre-commit hook.
 - **2026-08-05** — `pos usb server` — USB Redirector control tool (494eae2).
