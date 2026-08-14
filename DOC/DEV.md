@@ -199,7 +199,7 @@ make lint                     # convention gate (scripts/lint-conventions.sh) �
 
 Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
 
-Stub harnesses are **throwaway by design**: no `tests/` dir and no CI in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo.
+Stub harnesses are **throwaway by design**: no `tests/` dir in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo. (CI — `.gitea/workflows/lint.yml` — runs the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on push/PR; it does not run behaviour suites.)
 
 ---
 
