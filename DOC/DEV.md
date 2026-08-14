@@ -394,6 +394,13 @@ Actions.
   like `pos-config` start with `|`, which collated after letters under that
   locale, reordering the generated tables). `scripts/gen-docs.sh` sets
   `export LC_ALL=C`; keep that in mind for any new generator.
+- **Checking green without SSH** — the workflow reports its own outcome as a
+  lightweight git tag: `ci-ok/<sha>` on success, `ci-fail/<sha>` on failure
+  (pushed with the job's automatic `GITEA_TOKEN`; the workflow only triggers on
+  `push` to `main`, so tag pushes don't re-trigger it). Check from the dev box
+  with plain git — `scripts/ci-status.sh [--wait] [<sha>]` (reads the tags via
+  `git ls-remote`, exit 0/1/2 = green/red/pending). No SSH to the runner, no API
+  tokens.
 - **Limits** — CI proves the *static* gates only; it never runs behaviour suites
   (stub harnesses stay throwaway in `/tmp`).
 
