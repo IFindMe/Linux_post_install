@@ -220,7 +220,7 @@ Requires `cifs-utils` (in `preinstall.sh` PACKAGES).
 pos share smb client mount //100.100.100.1/media /mnt/smb/media        # guest
 pos share smb client mount //100.100.100.1/media /mnt/smb/media bob    # prompts for password
 pos share smb client persist //100.100.100.1/media /mnt/smb/media bob  # persistent (systemd)
-pos share smb client list                                              # active SMB mounts
+pos share smb client list                                              # active + persistent SMB mounts
 pos share smb client unmount /mnt/smb/media
 pos share smb client unpersist /mnt/smb/media                          # remove the unit
 ```
@@ -253,9 +253,10 @@ fstab it could). `enable --now` arms the automount immediately.
   server and re-run with the right user
 - Mount fails with `NT_STATUS_ACCESS_DENIED` on a guest mount → the server
   share has no `guest ok`; use a user or add `--guest` on the server
-- Persistent mount doesn't appear until accessed → intended (`x-systemd.automount`);
-  `pos share smb client list` only shows actively mounted shares, access the
-  directory to trigger the mount
+- Persistent mount doesn't appear under "Active mounts" until accessed →
+  intended (`x-systemd.automount`); `pos share smb client list` now also lists
+  persistent units under "Persistent (automount)", so the configured shares are
+  visible even before their first access
 
 ---
 

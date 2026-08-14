@@ -19,7 +19,7 @@ Mount and manage SMB/CIFS shares from remote servers (cifs-utils).
 Commands:
   mount <//server/share> <local-dir> [user]   One-shot mount (creates local-dir if needed)
   unmount <local-dir>                          Unmount the share
-  list                                         Show active SMB mounts
+  list                                         Show active + persistent SMB mounts
   persist <//server/share> <local-dir> [user]  Persistent mount via a systemd .mount unit
                                                (automount — never blocks boot)
   unpersist <local-dir>                        Stop, disable and remove the mount unit
@@ -108,11 +108,30 @@ case "$cmd" in
         ;;
 
     list)
-        if findmnt -t cifs >/dev/null 2>&1; then
-            findmnt -t cifs
-        else
-            echo "No SMB mounts"
+        found=0
+        active_mounts="$(findmnt -t cifs 2>/dev/null || true)"
+        if [ -n "$active_mounts" ]; then
+            printf 'Active mounts:\n'
+            printf '%s\n' "$active_mounts"
+            found=1
         fi
+        persistent=()
+        for unit in "${UNIT_DIR}"/*.mount; do
+            [ -e "$unit" ] || continue
+            grep -q '^Type=cifs$' "$unit" || continue
+            what="$(sed -n 's/^What=//p' "$unit")"
+            where="$(sed -n 's/^Where=//p' "$unit")"
+            [ -n "$what" ] && [ -n "$where" ] || continue
+            persistent+=("$where|$what")
+        done
+        if [ "${#persistent[@]}" -gt 0 ]; then
+            found=1
+            printf 'Persistent (automount):\n'
+            for entry in "${persistent[@]}"; do
+                printf '  %-44s %s\n' "${entry%%|*}" "${entry#*|}"
+            done
+        fi
+        [ "$found" -eq 1 ] || echo "No SMB mounts"
         ;;
 
     persist)
