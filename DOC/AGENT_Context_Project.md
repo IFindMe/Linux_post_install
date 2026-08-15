@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–194 |
-| ## 3. Installation Flow | 195–246 |
-| ## 4. The `pos` CLI System | 247–318 |
-| ## 5. Shared Library — `lib/common.sh` | 319–350 |
-| ## 6. Docker Compose / ScaleTail | 351–393 |
-| ## 7. Optional Apps (`apps/`) | 394–423 |
-| ## 8. Entertainment Module | 424–437 |
-| ## 9. Systemd Services | 438–449 |
-| ## 10. Configuration Files | 450–476 |
-| ## 11. Coding Conventions | 477–509 |
-| ## 12. Development Workflow | 510–562 |
-| ## 13. Key File Quick Reference | 563–625 |
-| ## 14. Common Tasks for Agents | 626–657 |
+| ## 2. Directory Structure | 44–195 |
+| ## 3. Installation Flow | 196–247 |
+| ## 4. The `pos` CLI System | 248–320 |
+| ## 5. Shared Library — `lib/common.sh` | 321–352 |
+| ## 6. Docker Compose / ScaleTail | 353–395 |
+| ## 7. Optional Apps (`apps/`) | 396–425 |
+| ## 8. Entertainment Module | 426–439 |
+| ## 9. Systemd Services | 440–451 |
+| ## 10. Configuration Files | 452–478 |
+| ## 11. Coding Conventions | 479–511 |
+| ## 12. Development Workflow | 512–564 |
+| ## 13. Key File Quick Reference | 565–628 |
+| ## 14. Common Tasks for Agents | 629–661 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -70,6 +70,7 @@ Linux_post_install/
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps                       # Enhanced container overview (health, IPs, ports, uptime)
+│   ├── pos-docker-stack                    # Containers grouped by compose stack (project); standalone group; -a/--all includes stopped
 │   ├── pos-docker-vbox                     # Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
 │   ├── pos-entertainment-config            # Show or edit the entertainment config (ENABLED auto-trigger list, weather location)
 │   ├── pos-entertainment-disable           # Disable a plugin's auto-trigger (remove it from ENABLED)
@@ -272,6 +273,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
+| docker | stack | `pos-docker-stack` | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |
 | docker | vbox | `pos-docker-vbox` | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | entertainment | config | `pos-entertainment-config` | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | entertainment | disable | `pos-entertainment-disable` | Disable a plugin's auto-trigger (remove it from ENABLED) |
@@ -581,7 +583,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 50 | Boot-time feature (moved from `bin/`, flag-gated service) |
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 292 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 294 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
@@ -591,6 +593,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
+| `bin/pos-docker-stack` | 101 | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |
 | `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
@@ -617,7 +620,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 293 | Dynamic bash completion |
+| `completions/pos.bash` | 294 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -641,6 +644,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Add bash completion | Edit `completions/pos.bash` |
 | Modify Docker Compose logic | Edit `bin/pos-docker-compose` |
 | Modify Docker health check | Edit `bin/pos-docker-health` |
+| Modify Docker stack (grouped container) view | Edit `bin/pos-docker-stack` |
 | Modify vbox (Docker VM) logic | Edit `bin/pos-docker-vbox` |
 | Modify USB forwarding logic | Edit `bin/pos-share-usb-server` |
 | Modify aria2 download daemon / queue logic | Edit `bin/pos-network-download` |

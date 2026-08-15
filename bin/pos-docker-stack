@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: docker stack — Containers grouped by compose stack (project); standalone group; -a/--all includes stopped
+# POS_FLAGS: -a --all
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<EOF
+Usage: pos docker stack [-a|--all]
+
+Show running containers grouped by their Docker Compose stack (project).
+Non-compose containers (no stack) are listed under a "Standalone" group
+at the end.
+
+Flags:
+  -a, --all    Include stopped/exited containers too (like docker ps -a)
+  -h, --help   Show this help
+
+Exit codes:
+  0   Success (also when no containers are found)
+
+Examples:
+  pos docker stack          Grouped view of running containers
+  pos docker stack -a       Include stopped/exited containers
+EOF
+    exit 0
+}
+
+command -v docker &>/dev/null || err "docker not found — run 'install.sh --apps' and install Docker first"
+
+ALL=0
+case "${1:-}" in
+    -h|--help) usage ;;
+    -a|--all) ALL=1 ;;
+esac
+
+ps_args=()
+[ "$ALL" -eq 1 ] && ps_args+=(-a)
+ps_args+=(--format '{{.Names}}{{"\u001f"}}{{.Label "com.docker.compose.project"}}{{"\u001f"}}{{.Status}}{{"\u001f"}}{{.Ports}}')
+
+if ! data="$(docker ps "${ps_args[@]}" 2>/dev/null)"; then
+    err "docker daemon not reachable — is it running?"
+fi
+
+if [ -z "$data" ]; then
+    echo "No containers."
+    exit 0
+fi
+
+# Compose projects (stack names), sorted; empty project label = standalone.
+projects="$(printf '%s\n' "$data" | awk -F'\x1f' 'NF>=2 && $2!="" {print $2}' | LC_ALL=C sort -u)"
+standalone_rows="$(printf '%s\n' "$data" | awk -F'\x1f' 'NF>=2 && $2==""')"
+
+# Column width for aligned output (global so all stacks line up).
+width=0
+while IFS=$'\x1f' read -r name _proj _status _ports; do
+    [ "${#name}" -gt "$width" ] && width="${#name}"
+done <<< "$data"
+
+show_rows() {
+    local rows="$1"
+    [ -z "$rows" ] && return 0
+    while IFS=$'\x1f' read -r name _proj status ports; do
+        [ -z "$name" ] && continue
+        case "$status" in
+            Up*)                 sdisp="${GREEN}${status}${RESET}" ;;
+            Exited*|Dead*|Created*) sdisp="${RED}${status}${RESET}" ;;
+            Paused*|Restarting*) sdisp="${YELLOW}${status}${RESET}" ;;
+            *)                   sdisp="$status" ;;
+        esac
+        printf "  %-*s  %b  %s\n" "$width" "$name" "$sdisp" "${ports:--}"
+    done <<< "$rows"
+}
+
+stack_header() {
+    local label="$1"
+    local pad=$((46 - ${#label}))
+    [ "$pad" -lt 1 ] && pad=1
+    printf -- "── %s%s%s %s\n" "$CYAN" "$label" "$RESET" "$(printf '%*s' "$pad" '' | sed 's/ /─/g')"
+}
+
+stacks=0
+while IFS= read -r proj; do
+    [ -z "$proj" ] && continue
+    stacks=$((stacks + 1))
+    rows="$(printf '%s\n' "$data" | awk -F'\x1f' -v p="$proj" '$2==p')"
+    stack_header "$proj"
+    show_rows "$rows"
+    echo
+done <<< "$projects"
+
+if [ -n "$standalone_rows" ]; then
+    stack_header "Standalone"
+    show_rows "$standalone_rows"
+    echo
+fi
+
+containers="$(printf '%s\n' "$data" | grep -c . || true)"
+standalone="$(printf '%s\n' "$standalone_rows" | grep -c . || true)"
+printf '%*s\n' 60 '' | sed 's/ /─/g'
+echo "Stacks: $stacks   containers: $containers   standalone: $standalone"

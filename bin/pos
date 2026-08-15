@@ -148,6 +148,8 @@ EXAMPLES
   pos docker compose ls                   List available ScaleTail services
   pos docker compose up jellyfin          Deploy a service with Tailscale
   pos docker health                       One-glance health dashboard
+  pos docker stack                        Containers grouped by compose stack
+  pos docker stack -a                     Include stopped/exited containers
 
   pos media mp3 <url>                     Download audio as MP3
   pos media mp4 <url>                     Download video as MP4

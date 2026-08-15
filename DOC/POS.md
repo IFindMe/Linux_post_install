@@ -143,7 +143,10 @@ Runs a persistent `aria2c` JSON-RPC daemon (`localhost:6800`) as a **systemd use
 |---------|------|---------|---------------|
 | `pos docker ps` | `bin/pos-docker-ps` | Enhanced container list: name, image, health, uptime, IPs, ports, ID, plus a healthy/unhealthy summary | None. Requires Docker + Python 3 |
 | `pos docker health` | `bin/pos-docker-health` | One-glance health dashboard; **exits 1** if any container is unhealthy | None. Checks all containers including stopped ones |
+| `pos docker stack [-a]` | `bin/pos-docker-stack` | Containers grouped by compose stack (project); `-a` includes stopped; non-compose containers under `Standalone` | None. Requires Docker |
 | `pos docker compose …` | `bin/pos-docker-compose` | ScaleTail service manager | See [Docker Compose / ScaleTail](#docker-compose--scaletail) below |
+
+**`pos docker stack [-a|--all]`** — containers grouped by their Docker Compose project (stack). Each stack is a section (project name, sorted) whose lines show container name, status, and port mappings (`-` when none — e.g. ScaleTail sidecar containers). Containers with no compose project land in a `Standalone` section at the end. Default shows running containers; `-a|--all` includes stopped/exited (like `docker ps -a`). Status is colored when output goes to a terminal: `Up*` green, `Exited*`/`Dead*`/`Created*` red, `Paused*`/`Restarting*` yellow. Ends with a summary line (`Stacks: N  containers: N  standalone: N`); exit 0 even when no containers exist.
 
 #### Docker Compose / ScaleTail
 

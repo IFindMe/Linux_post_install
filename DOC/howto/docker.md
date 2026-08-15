@@ -1,13 +1,14 @@
 # How-To: `pos docker`
 
 Manage self-hosted services, watch containers, and spin up disposable VMs.
-Tools: `compose`, `ps`, `health`, `vbox`.
+Tools: `compose`, `ps`, `health`, `stack`, `vbox`.
 
 | Tool | What it does |
 |------|--------------|
 | `pos docker compose` | ScaleTail service manager (deploy/stop/logs/update) |
 | `pos docker ps` | Enhanced container overview (health, IPs, ports, uptime) |
 | `pos docker health` | One-glance health dashboard (exits 1 if unhealthy) |
+| `pos docker stack` | Containers grouped by compose stack (`-a` includes stopped) |
 | `pos docker vbox` | Disposable Docker containers as lightweight VMs |
 
 ---
@@ -97,6 +98,31 @@ pos docker health >/dev/null || notify_send "Docker unhealthy"
 **Troubleshooting:** a container shows no health status if its image has no
 `HEALTHCHECK` — that's fine, it counts as "no healthcheck configured" (exit 0),
 not unhealthy.
+
+---
+
+## `pos docker stack` — containers by compose stack
+
+```bash
+pos docker stack          # running containers grouped by compose project
+pos docker stack -a       # include stopped/exited containers
+```
+
+Grouped view of your compose deployments: every stack is a section with its
+services (container name, status, ports); containers started outside compose
+land in a `Standalone` group at the end. `-a` behaves like `docker ps -a` and
+also shows exited services (e.g. one-shot migration jobs that `docker ps`
+hides).
+
+**Recipe:** after `pos docker compose up <svc>`, confirm it joined the right
+stack:
+
+```bash
+pos docker stack | grep -A5 <svc>
+```
+
+**Recipe:** spot what's restarting across all stacks at a glance (yellow
+`Restarting` / red `Exited` statuses stand out on a terminal).
 
 ---
 
