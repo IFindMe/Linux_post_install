@@ -42,6 +42,7 @@ summary (newest last).
 
 ## Done
 
+- **2026-08-15** — Fix `pos media sync` reporting success with 0 files when the source is a symlink: it enumerated with plain `find "$SRC"`, and GNU find (default `-P`) does not descend a command-line symlink to a directory — `~/Music -> /mnt/hdd/…/music` therefore yielded zero matches, the loop never ran, and the tool printed `0 added, 0 updated, 0 unchanged` without creating the target dir (live-box report). Switched to `find -H "$SRC"` (follows only command-line symlinks; inner-symlink semantics unchanged). howto/media.md sync section notes symlinked sources are followed. Caught live, not by the 46-case stub suite (which used a real temp dir source — lesson: add a symlink-root fixture). Verified: `printf 'y\n' | bash bin/pos-media-sync --mp3 --dry-run` now lists all 31 mp3s as "would copy"; `make gen && make check` green.
 - **2026-08-14** — `pos system backup` — smart USB detection: lsblk TRAN (lsusb/by-id cross-check), mount offer for plugged-in-but-unmounted sticks, sha256-verified copy (stub-suite 54/54).
 - **2026-08-05** — `pos communication telegram` — `--parse-mode` (plain/markdown/html).
 - **2026-08-05** — doc/code sync gate — `make gen` + `make check` + pre-commit hook.

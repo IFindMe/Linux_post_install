@@ -112,6 +112,10 @@ a no-op. Preview before copying with `--dry-run`:
 pos media sync --mp4 --dry-run   # shows "would copy" list + counts, copies nothing
 ```
 
+The source folder may be a symlink to a library elsewhere
+(`~/Music -> /mnt/data/music`) — it is followed, the artist/album tree is
+mirrored under the symlink's target.
+
 | Flag | Meaning |
 |------|---------|
 | `--mp3` | Sync only `*.mp3` (neither flag = both) |
