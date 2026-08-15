@@ -37,7 +37,7 @@ templates (without overwriting an existing file):
 |------|---------|------|
 | `telegram.env` | `pos communication telegram sender` / `listener`, everything that alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | `matrix.env` | `pos communication matrix sender` / `listener` | `MATRIX_HOMESERVER`, `MATRIX_ACCESS_TOKEN`, `MATRIX_USER_ID`, `MATRIX_ROOM_ID` |
-| `scrcpy.env` | `pos communication scrcpy` | `SCRCPY_SERIAL`, `SCRCPY_MAX_SIZE`, `SCRCPY_MAX_FPS`, `SCRCPY_BIT_RATE`, `SCRCPY_FULLSCREEN`, `SCRCPY_RECORD_DIR`, `SCRCPY_PUSH_TARGET`, `SCRCPY_EXTRA_FLAGS` |
+| `scrcpy.env` | `pos communication scrcpy` | `SCRCPY_SERIAL`, `SCRCPY_MAX_SIZE`, `SCRCPY_MAX_FPS`, `SCRCPY_BIT_RATE`, `SCRCPY_FULLSCREEN`, `SCRCPY_NEW_DISPLAY`, `SCRCPY_AUDIO`, `SCRCPY_RECORD_DIR`, `SCRCPY_PUSH_TARGET`, `SCRCPY_EXTRA_FLAGS` |
 | `notify.env` | `lib/notify.sh` (all alerting) | `NOTIFY_PLATFORM` (e.g. `telegram,matrix`) |
 | `system.env` | `pos system health`, `pos system backup` | `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS` |
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
@@ -71,8 +71,8 @@ Adding another platform = create `bin/pos-communication-<p>` implementing
 
 ### Scheduling
 
-- **Daily health digest** — add a `daily` schedule job `pos system health --send --markdown`
-  via `pos system schedule config` (the old `pos-health.{service,timer}` units are gone). See [system](howto/system.md).
+- **Daily health digest** — add a `daily` schedule job `COMMAND=pos system health` with
+  `NOTIFY=always` via `pos system schedule config` (the old `pos-health.{service,timer}` units are gone). See [system](howto/system.md).
 - **Entertainment auto-triggers** — per-plugin `pos entertainment enable <plugin> <interval>`,
   uses systemd user timers (or cron fallback). See [entertainment](howto/entertainment.md).
 - **`pos system schedule` jobs** — run any command on a per-job timer and notify

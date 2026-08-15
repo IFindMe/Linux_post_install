@@ -36,7 +36,7 @@ for entry in "${ENABLED_ENTRIES[@]}"; do
 done
 
 not_enabled=()
-for name in $(list_plugins "$(plugin_dir)"); do
+for name in $(list_plugins "$(ent_plugin_dir)"); do
     found=0
     for entry in "${ENABLED_ENTRIES[@]}"; do
         [ "${entry%%,*}" = "$name" ] && found=1 && break

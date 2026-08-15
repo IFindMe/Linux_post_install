@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: media sync — Incremental Music → USB sync (mp3/mp4, add/update only)
+# POS_FLAGS: --mp3 --mp4 --source --dry-run
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/usb-lib.sh" 2>/dev/null || source "$(dirname "$0")/usb-lib.sh"
+
+load_system_env
+
+# Deps guards sit before -h|--help (help also errors on a box missing the deps).
+command -v lsblk &>/dev/null || err "lsblk not found (util-linux) — needed to detect USB storage"
+command -v jq    &>/dev/null || err "jq not found — needed to detect USB storage (sudo apt install jq)"
+
+SRC="${MEDIA_SYNC_SOURCE:-$HOME/Music}"
+DEST_DIR="${MEDIA_SYNC_DEST:-Music}"
+MP3=0
+MP4=0
+DRY_RUN=0
+
+usage() {
+    cat <<EOF
+Usage: pos media sync [options]
+
+Incrementally copy your music onto a USB stick. Add/update only — files on
+the stick that are no longer in the source are left alone, never deleted.
+USB storage is detected like \`pos system backup\` (lsblk TRAN + lsusb/by-id
+corroboration; unmounted sticks get a mount offer first) and you pick which
+one to sync to. The source tree is mirrored under <usb>/$DEST_DIR.
+
+Options:
+  --mp3               Sync only *.mp3 files
+  --mp4               Sync only *.mp4 files
+  --source <dir>      Source folder (default: $SRC)
+  --dry-run           Preview what would be copied (copies nothing)
+  -h, --help          This help
+
+Examples:
+  pos media sync
+  pos media sync --mp3
+  pos media sync --mp4 --dry-run
+  pos media sync --source /data/Music
+
+Environment:
+  MEDIA_SYNC_SOURCE   Source folder (default: \$HOME/Music)
+  MEDIA_SYNC_DEST     Subfolder on the USB stick (default: Music)
+  USB_MOUNT_BASE      Where to mount an unmounted stick (default: /media)
+  USB_BYID            by-id dir used to corroborate USB detection
+                      (default: /dev/disk/by-id)
+  (loaded from ~/.config/linux_post_install/system.env unless exported)
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --mp3) MP3=1; shift ;;
+        --mp4) MP4=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
+        --source)
+            [ $# -ge 2 ] || err "--source needs a value: pos media sync --source <dir>"
+            SRC="$2"; shift 2 ;;
+        --source=*) SRC="${1#--source=}"; shift ;;
+        -*) err "Unknown option: $1 (see --help)" ;;
+        *) err "Unexpected argument: $1 (see --help)" ;;
+    esac
+done
+[ "$MP3" -eq 1 ] || [ "$MP4" -eq 1 ] || { MP3=1; MP4=1; }
+
+[ -d "$SRC" ] || err "Source not found: $SRC"
+
+trap 'notify_send "Music sync FAILED"' ERR
+
+section "Music sync"
+echo "Source : $SRC"
+if [ "$MP3" -eq 1 ] && [ "$MP4" -eq 1 ]; then
+    echo "Filter : mp3 + mp4"
+    find_expr=(-type f \( -iname '*.mp3' -o -iname '*.mp4' \))
+elif [ "$MP3" -eq 1 ]; then
+    echo "Filter : mp3 only"
+    find_expr=(-type f -iname '*.mp3')
+else
+    echo "Filter : mp4 only"
+    find_expr=(-type f -iname '*.mp4')
+fi
+
+usb_pick_root "Sync to" "$DEST_DIR" "no sync performed" || {
+    log "Skipped — no sync performed"
+    exit 0
+}
+dest_root="${USB_ROOT%/}/$DEST_DIR"
+echo "Target : $dest_root"
+
+# Does the destination need this file copied? Missing, or size/mtime differs.
+needs_copy() {
+    local src="$1" dst="$2" ss="" ds="" sm="" dm=""
+    [ -f "$dst" ] || return 0
+    ss="$(stat -c %s "$src" 2>/dev/null || printf 0)"
+    ds="$(stat -c %s "$dst" 2>/dev/null || printf 0)"
+    sm="$(stat -c %Y "$src" 2>/dev/null || printf 0)"
+    dm="$(stat -c %Y "$dst" 2>/dev/null || printf 0)"
+    [ "$ss" = "$ds" ] && [ "$sm" -le "$dm" ] && return 1
+    return 0
+}
+
+added=0
+updated=0
+unchanged=0
+while IFS= read -r f; do
+    rel="${f#"$SRC/"}"
+    dest="$dest_root/$rel"
+
+    if needs_copy "$f" "$dest"; then
+        if [ -f "$dest" ]; then
+            updated=$((updated + 1))
+        else
+            added=$((added + 1))
+        fi
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "would copy  $rel"
+        else
+            mkdir -p "$(dirname "$dest")"
+            cp --preserve=timestamps "$f" "$dest"
+            echo "  + $rel"
+        fi
+    else
+        unchanged=$((unchanged + 1))
+    fi
+done < <(find "$SRC" "${find_expr[@]}" | sort)
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "DRY RUN — nothing copied. Would sync: ${added} new, ${updated} updated, ${unchanged} unchanged → $dest_root"
+else
+    ok "Sync complete: ${added} added, ${updated} updated, ${unchanged} unchanged → $dest_root"
+    notify_send "Music sync completed: ${added} added, ${updated} updated → $dest_root"
+fi

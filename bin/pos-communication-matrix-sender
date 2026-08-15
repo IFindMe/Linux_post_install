@@ -4,7 +4,7 @@ set -euo pipefail
 # POS_SUBCMDS: send test login
 # POS_CONFIG: matrix | matrix.env | MATRIX_HOMESERVER=:Homeserver URL (https://matrix.example.org)::https://matrix.example.org | MATRIX_ACCESS_TOKEN=secret:Access token (from 'pos communication matrix sender login' or a Matrix client) | MATRIX_USER_ID=:Your Matrix user id (set by login)::@you:example.org | MATRIX_ROOM_ID=:Room id or alias::#pos:example.org
 
-CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/matrix.env"
 
 usage() {

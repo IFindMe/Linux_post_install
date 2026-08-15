@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: system backup — Encrypted (AES-256) folder snapshots (tar + gpg)
-# POS_FLAGS: --service
+# POS_FLAGS: --service --no-encrypt
 # POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram) — shared by backup, firewall, share nfs client/server
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/usb-lib.sh" 2>/dev/null || source "$(dirname "$0")/usb-lib.sh"
 
 load_system_env
 EFF_ROOTS="${BACKUP_SERVICE_ROOTS:-/srv $HOME/srv}"
@@ -15,91 +16,71 @@ trap 'notify_send "Backup FAILED: ${FOLDER:-unknown}"' ERR
 usage() {
     cat <<EOF
 Usage: pos system backup <folder-path>
+       pos system backup <folder-path> --no-encrypt
        pos system backup --service
 
 Create a gpg-encrypted (AES-256) tar.gz snapshot of a folder and verify it.
-The archive password is prompted twice and never stored.
+The archive password is prompted twice and never stored. With --no-encrypt
+(or BACKUP_ENCRYPT=0) the backup is kept as a plain .tar.gz — no password,
+headless/cron safe.
 
 Modes:
   <folder-path>   Back up that folder directly.
+  --no-encrypt    Skip encryption (no password prompt, artifact stays .tar.gz).
   --service       List folders under /srv and ~/srv, pick one, back it up.
 
-The final artifact <name>_<date>.tar.gz.gpg is written to the current directory.
+The final artifact <name>_<date>.tar.gz[.gpg] is written to the current directory.
 After it verifies, connected USB storage is offered: the copy lands in
-<usb>/backups/ and is sha256-verified 100% before it is announced.
+<usb>/backups/ and is sha256-verified 100% before it is announced. A stick
+that is plugged in but not mounted is offered a mount first (sudo, mirrors
+the usb-automount scheme) before the copy.
 
 Environment:
+  BACKUP_ENCRYPT       Set to 0 to skip encryption (same as --no-encrypt)
+                       (default: 1)
   BACKUP_SERVICE_ROOTS   Space-separated roots for --service
                          (effective: ${EFF_ROOTS})
   BACKUP_USB_ROOT        USB root to copy finished backups to
-                         (default: auto-detect mounted removable storage)
+                         (default: auto-detect mounted USB storage)
+  BACKUP_MOUNT_BASE      Where to mount an unmounted USB stick offered
+                         during the copy (default: /media; alias of
+                         USB_MOUNT_BASE)
+  BACKUP_USB_BYID        by-id dir used to corroborate USB detection
+                         (default: /dev/disk/by-id; alias of USB_BYID)
   (loaded from ~/.config/linux_post_install/system.env unless exported)
 EOF
     exit 0
 }
 
 command -v tar &>/dev/null || err "tar not found"
-command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
 
 # ── USB copy (optional post-backup step) ─────────────────────────
 # Detection runs AFTER the backup finished, so a stick plugged in while
 # the archive was being made is found. The copy lands in <usb>/backups/
 # and the transfer is proven 100% (sha256 source vs copy) before any
 # success is announced. BACKUP_USB_ROOT pins the root and skips
-# detection; otherwise mounted removable storage is auto-detected.
+# detection; otherwise usb_pick_root (lib/usb-lib.sh) auto-detects,
+# offers to mount unmounted sticks, and picks the target.
 usb_copy_offer() {
-    local archive="$1" pass=0 resp="" i=0 root="" dest_dir="" dest="" src_sum="" dst_sum=""
-    local -a roots=()
+    local archive="$1" root="" dest_dir="" dest="" src_sum="" dst_sum=""
 
     command -v lsblk &>/dev/null || { warn "lsblk not found — USB copy skipped"; return 0; }
     command -v jq    &>/dev/null || { warn "jq not found — USB copy skipped"; return 0; }
 
     section "USB copy"
 
-    while :; do
-        pass=$((pass + 1))
-        roots=()
-
-        if [ -n "${BACKUP_USB_ROOT:-}" ]; then
-            roots+=("$BACKUP_USB_ROOT")
-        else
-            while IFS= read -r mp; do
-                [ -n "$mp" ] && roots+=("$mp")
-            done < <(lsblk -J -o MOUNTPOINT,RM,TYPE 2>/dev/null \
-                | jq -r '.. | objects | select(.rm == true and .mountpoint != null and (.type == "part" or .type == "disk")) | .mountpoint')
-        fi
-
-        [ ${#roots[@]} -gt 0 ] && break
-
-        # None found — offer one re-scan before giving up.
-        if [ "$pass" -ge 2 ]; then
-            warn "Still no USB storage detected — backup stays local: $archive"
-            return 0
-        fi
-        warn "No USB storage detected"
-        read -rp "Plug a USB drive in now and press Enter to re-check (or 's' to skip): " resp || return 0
-        case "$resp" in
-            s|S) log "Skipped — backup stays local: $archive"; return 0 ;;
-        esac
-    done
-
-    if [ ${#roots[@]} -eq 1 ]; then
-        root="${roots[0]}"
+    if [ -n "${BACKUP_USB_ROOT:-}" ]; then
+        root="$BACKUP_USB_ROOT"
         if ! confirm "Copy backup to ${root%/}/backups/?" n; then
             log "Skipped — backup stays local: $archive"
             return 0
         fi
     else
-        echo "Multiple USB storages found:"
-        for i in "${!roots[@]}"; do
-            printf "%2d) %s\n" "$((i + 1))" "${roots[$i]}"
-        done
-        read -rp "Copy backup to which one? [1-${#roots[@]}] (0 = skip): " resp || return 0
-        if ! [[ "$resp" =~ ^[0-9]+$ ]] || (( resp < 1 || resp > ${#roots[@]} )); then
+        usb_pick_root "Copy backup to" "backups" "backup stays local: $archive" || {
             log "Skipped — backup stays local: $archive"
             return 0
-        fi
-        root="${roots[$((resp - 1))]}"
+        }
+        root="$USB_ROOT"
     fi
 
     dest_dir="${root%/}/backups"
@@ -125,13 +106,21 @@ usb_copy_offer() {
     notify_send "Backup copied to USB: $dest (sha256 verified)"
 }
 
+# ── USB detection / mount offer / pick flow ─────────────────────
+# Shared with pos-media-sync: lib/usb-lib.sh (usb_detect /
+# usb_related_present / usb_mount_offer / usb_pick_root).
 SERVICE=0
-case "${1:-}" in
-    -h|--help) usage ;;
-    --service) SERVICE=1 ;;
-    "")        err "Missing folder path (or use --service)" ;;
-    *)         FOLDER="$1" ;;
-esac
+ENCRYPT=1
+[ "${BACKUP_ENCRYPT:-1}" = "0" ] && ENCRYPT=0
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+        --service) SERVICE=1 ;;
+        --no-encrypt) ENCRYPT=0 ;;
+        *) FOLDER="$arg" ;;
+    esac
+done
+{ [ "$SERVICE" -eq 1 ] || [ -n "${FOLDER:-}" ]; } || err "Missing folder path (or use --service)"
 
 if [ "$SERVICE" -eq 1 ]; then
     if [ -n "${BACKUP_SERVICE_ROOTS:-}" ]; then
@@ -186,29 +175,36 @@ log "Verifying archive..."
 tar -tzf "$ARCHIVE" > /dev/null
 log "Archive verified"
 
-while true; do
-    read -s -rp "Enter backup password: " PASS
-    echo
-    read -s -rp "Confirm backup password: " CONFIRM
-    echo
-    if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
-        break
-    fi
-    warn "Passwords are empty or do not match — try again"
-done
-unset CONFIRM
+if [ "$ENCRYPT" -eq 1 ]; then
+    command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
 
-log "Encrypting backup..."
-gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
+    while true; do
+        read -s -rp "Enter backup password: " PASS
+        echo
+        read -s -rp "Confirm backup password: " CONFIRM
+        echo
+        if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
+            break
+        fi
+        warn "Passwords are empty or do not match — try again"
+    done
+    unset CONFIRM
 
-rm -f "$ARCHIVE"
-ARCHIVE="${ARCHIVE}.gpg"
-chmod 600 "$ARCHIVE"
+    log "Encrypting backup..."
+    gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
 
-log "Verifying encrypted backup..."
-gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+    rm -f "$ARCHIVE"
+    ARCHIVE="${ARCHIVE}.gpg"
+    chmod 600 "$ARCHIVE"
 
-unset PASS
+    log "Verifying encrypted backup..."
+    gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+
+    unset PASS
+else
+    chmod 600 "$ARCHIVE"
+    log "No encryption requested — keeping $ARCHIVE"
+fi
 echo
 log "Backup completed: $ARCHIVE"
 notify_send "Backup completed: $ARCHIVE"

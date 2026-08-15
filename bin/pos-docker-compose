@@ -5,8 +5,8 @@ set -euo pipefail
 # POS_CONFIG: compose | compose.env | TS_AUTHKEY=secret:Tailscale auth key for the sidecar | TZ=:Service timezone (default Europe/Amsterdam) | DNS_SERVER=:Custom DNS server (default 9.9.9.9) | SERVICES_BASE=:Deployment root (default /srv)
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
-SCALE_DIR="/usr/local/share/linux_post_install/scale-tail/services"
-CONFIG_ENV="${HOME}/.config/linux_post_install/compose.env"
+SCALE_DIR="${SCALE_DIR:-/usr/local/share/linux_post_install/scale-tail/services}"
+CONFIG_ENV="${CONFIG_ENV:-${HOME}/.config/linux_post_install/compose.env}"
 
 usage() {
     cat <<EOF

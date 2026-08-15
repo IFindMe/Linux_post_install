@@ -24,7 +24,7 @@
 # Silent-fails per platform: a missing sender or a failed send only warns and
 # never changes the caller's exit code.
 
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install"
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 
 # Platform key → sender tool name (bin/pos-communication-<name>).
 notify_sender_name() {
@@ -54,7 +54,7 @@ notify_send() {
     done
 
     if [ -z "$msg" ]; then
-        warn "notify_send: empty message, skipped" 2>/dev/null || echo "notify_send: empty message, skipped"
+        warn "notify_send: empty message, skipped" 2>/dev/null || echo "notify_send: empty message, skipped" >&2
         return 0
     fi
 

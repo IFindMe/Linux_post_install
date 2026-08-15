@@ -5,7 +5,7 @@ set -euo pipefail
 # POS_SUBCMDS: send test
 # POS_CONFIG: telegram | telegram.env | TELEGRAM_BOT_TOKEN=secret:Bot token from @BotFather | TELEGRAM_CHAT_ID=digits:Numeric chat id from @userinfobot
 
-CONFIG_DIR="$HOME/.config/linux_post_install"
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
 API="https://api.telegram.org"
 

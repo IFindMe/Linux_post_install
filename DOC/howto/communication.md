@@ -80,7 +80,7 @@ pos communication telegram listener --disable   # remove it
   one `/cmd=bash command` per line — re-read on every message, so edits apply
   instantly. Example:
   ```
-  /status=@quiet pos system health --send
+  /status=pos system health
   /temp=sensors | grep -i 'Tctl\|package id 0'
   /update=cd /path/to/repo && git pull
   ```
@@ -88,7 +88,7 @@ pos communication telegram listener --disable   # remove it
   (`setMyCommands`) after every map edit, on `--enable`, and at daemon start
   (force it anytime with `--sync-commands`). Add a short description with the
   `/cmd::description=bash command` syntax — e.g.
-  `/backup::Encrypted nightly backup=@quiet pos system backup --send` — or it
+  `/backup::Encrypted nightly backup=@quiet pos system backup $HOME/Documents` — or it
   falls back to the bash command. Telegram only registers lowercase `[a-z0-9_]`
   names (1–32 chars); `/Status` or `/my-cmd` are skipped from the menu but still
   work when typed. An empty map clears the menu.
@@ -99,8 +99,10 @@ pos communication telegram listener --disable   # remove it
   `sudo` inside a command needs a NOPASSWD rule.
 - **`@quiet` prefix:** a map value starting with `@quiet ` runs the command but
   does NOT reply — for commands that already send their own notification, so
-  you don't get it twice. `/status=@quiet pos system health --send` delivers
-  one digest via the notify system and nothing else.
+  you don't get it twice. `pos system backup` self-notifies, so
+  `/backup=@quiet pos system backup $HOME/Documents` sends the backup notification
+  and nothing else. `pos system health` is console-only (it never sends), so map
+  it WITHOUT `@quiet` — `/status=pos system health` replies with the dashboard.
 - **Daemon lifecycle:** the service is a systemd **user** unit; it stops at
   logout unless you enable linger: `sudo loginctl enable-linger $(whoami)`.
   `--enable` prints this warning if linger is off.
@@ -197,7 +199,7 @@ pos communication matrix listener --disable   # remove it
   one `/cmd=bash command` per line — re-read on every message, so edits apply
   instantly. Example:
   ```
-  /status=@quiet pos system health --send
+  /status=pos system health
   /temp=sensors | grep -i 'Tctl\|package id 0'
   /update=cd /path/to/repo && git pull
   ```
@@ -212,7 +214,9 @@ pos communication matrix listener --disable   # remove it
   (truncated ~3800 chars; empty → `OK`). `sudo` inside a command needs a
   NOPASSWD rule.
 - **`@quiet` prefix:** a map value starting with `@quiet ` runs the command but
-  does NOT reply — for commands that already send their own notification.
+  does NOT reply — for commands that already send their own notification
+  (`pos system backup` self-notifies, e.g. `/backup=@quiet pos system backup $HOME/Documents`).
+  `pos system health` is console-only (never sends), so map it WITHOUT `@quiet`.
 - **`ai …` bridge:** non-command messages starting with `ai ` are answered by
   `pos ai gemini` (per-room memory session; `ai /reset` clears it) — replying
   with the model's answer, markdown stripped.
@@ -256,7 +260,16 @@ install the current GitHub release (bundles `adb`) with the optional app
 pos communication scrcpy                          # USB device, config defaults
 pos communication scrcpy --turn-screen-off        # pass any scrcpy flag through
 pos communication scrcpy --no-audio --always-on-top
+pos communication scrcpy --new-display=1920x1080  # mirror to a NEW phone display
 ```
+
+`--new-display` mirrors a fresh virtual display instead of the phone's real
+screen (nice for watching the phone screen content elsewhere): no `=…` uses the
+main display's size/dpi, or force size/dpi — `1920x1080`, `1920x1080/420`,
+`/240`. Set it persistently with `SCRCPY_NEW_DISPLAY` in `pos config scrcpy`.
+
+Audio is forwarded to the desktop **by default** (scrcpy default); `--no-audio`
+disables it, or set `SCRCPY_AUDIO=false` in `pos config scrcpy`.
 
 The window needs a display — over ssh use `ssh -X` (and a phone already
 reachable over WiFi, see below). `scrcpy --help` lists every flag; the wrapper
@@ -305,4 +318,4 @@ screen/file without a desktop.
 
 - Reference + config file details: [DOC/POS.md → communication](../POS.md)
 - Alerting contract: [DOC/DEV.md → Alerting](../DEV.md)
-- Health digest (uses `--send --markdown`): [system.md](system.md)
+- Health dashboard + scheduled digest: [system.md](system.md)

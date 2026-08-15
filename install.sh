@@ -22,6 +22,31 @@ RUN_FEATURES=0
 SKIP_PHASES=""
 STEPS_SPEC=""
 
+# Expand range syntax in a --steps spec ("1-3" → "1,2,3"; also "1,3-4,6").
+normalize_steps_spec() {
+    local spec="$1" out="" part from to p
+    local oldIFS="$IFS"
+    IFS=','
+    for part in $spec; do
+        if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+            from="${BASH_REMATCH[1]}"
+            to="${BASH_REMATCH[2]}"
+            if [ "$to" -lt "$from" ]; then
+                err "Invalid --steps range '$part' (end < start)"
+            fi
+            for ((p = from; p <= to; p++)); do
+                out="${out:+$out,}$p"
+            done
+        elif [[ "$part" =~ ^[0-9]+$ ]]; then
+            out="${out:+$out,}$part"
+        else
+            err "Invalid --steps value '$part' (expected 1-4, comma list, or N-M range)"
+        fi
+    done
+    IFS="$oldIFS"
+    printf '%s' "$out"
+}
+
 usage() {
     cat <<EOF
 Usage: ./install.sh [OPTIONS]
@@ -61,7 +86,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --steps)
             [ -z "${2:-}" ] && err "Missing value for --steps"
-            STEPS_SPEC="$2"
+            STEPS_SPEC="$(normalize_steps_spec "$2")"
             shift 2
             ;;
         --no-color) shift ;;
@@ -115,7 +140,7 @@ if should_run 2 scripts; then
     done
     lib_count=0
     lib_names=""
-    for lf in common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh user-timers-lib.sh entertainment-plugin-lib.sh; do
+    for lf in common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh user-timers-lib.sh entertainment-plugin-lib.sh usb-lib.sh; do
         run sudo install -m 644 "lib/$lf" "/usr/local/bin/$lf"
         lib_count=$((lib_count + 1))
         lib_names+="$lf "

@@ -37,6 +37,7 @@ PACKAGES=(
     lm-sensors smartmontools nvme-cli hdparm
     sysstat iotop atop vnstat
     python3 python3-pip rclone
+    ffmpeg
     libqrencode4 libgtk-3-0 adb
 )
 

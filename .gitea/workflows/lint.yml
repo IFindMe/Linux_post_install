@@ -1,0 +1,36 @@
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  consistency-and-conventions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the repo gates (gen drift, check, lint)
+        id: gates
+        run: |
+          set -e
+          make gen
+          git diff --exit-code
+          make check
+          make lint
+      - name: Report gate result as a git tag (ci-ok/<sha> / ci-fail/<sha>)
+        if: always() && github.event_name == 'push'
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          if [ "${{ steps.gates.conclusion }}" = "success" ]; then
+            tag="ci-ok/$GITHUB_SHA"
+          else
+            tag="ci-fail/$GITHUB_SHA"
+          fi
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "tag already present: $tag"
+          else
+            git tag "$tag" "$GITHUB_SHA"
+            git push "http://oauth2:${GITEA_TOKEN}@gitea.skink-platy.ts.net:3000/admin/Linux_post_install.git" "refs/tags/$tag"
+          fi

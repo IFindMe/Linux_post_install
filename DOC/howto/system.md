@@ -15,19 +15,17 @@ Host care: encrypted backups, firewall, and the health dashboard. Tools:
 
 ```bash
 pos system health                 # console report; exits 1 if any check FAILs
-pos system health --send          # also send the summary via notify platforms
-pos system health --markdown      # same, markdown parse mode (implies --send)
 ```
 
 Checks: disk per mount (>90% = FAIL), RAM/swap, failed systemd units, backup
 age, fail2ban, docker containers. Header shows hostname, uptime, load, public IP.
 
-`--help` prints the **effective** config values (env > `system.env` > default),
-e.g.:
+Health is a **console-only reporter — it never sends notifications**; deliver
+its output with a wrapper or a scheduled job (below). `--help` prints the
+**effective** config values (env > `system.env` > default), e.g.:
 
 ```
 Environment (effective values):
-  NOTIFY_PLATFORM             telegram
   HEALTH_BACKUP_MAX_AGE_DAYS  2
   BACKUP_SERVICE_ROOTS        /srv $HOME/srv
 ```
@@ -41,8 +39,6 @@ Environment (effective values):
 BACKUP_SERVICE_ROOTS=/srv $HOME/srv    # roots for backup-age check + backup --service
 BACKUP_USB_ROOT=/mnt/usb               # optional: copy finished backups to <root>/backups/ (auto-detects a mounted USB when unset)
 HEALTH_BACKUP_MAX_AGE_DAYS=3           # WARN if newest backup older (default 2)
-# ~/.config/linux_post_install/notify.env
-NOTIFY_PLATFORM=telegram
 ```
 
 ### Daily digest (automated)
@@ -50,14 +46,15 @@ NOTIFY_PLATFORM=telegram
 Run the health report on a timer with a scheduled job (no systemd unit needed):
 
 ```bash
-pos system schedule config        # add a job: INTERVAL=daily,
-                                  #   COMMAND=pos system health --send --markdown
+pos system schedule config        # add a job: INTERVAL=daily, NOTIFY=always,
+                                  #   COMMAND=pos system health
 systemctl --user list-timers | grep pos-schedule
 pos system schedule run <name>    # run once now
 ```
 
-The old `pos-health.{service,timer}` systemd units are gone — a legacy install
-may still have them failed/leftover; disable and remove them:
+The `NOTIFY=always` policy sends the job's full output — i.e. the dashboard —
+as the alert. The old `pos-health.{service,timer}` systemd units are gone — a
+legacy install may still have them failed/leftover; disable and remove them:
 
 ```bash
 sudo systemctl disable --now pos-health.timer pos-health.service 2>/dev/null
@@ -75,21 +72,27 @@ sudo rm -f /etc/systemd/system/pos-health.{service,timer} && sudo systemctl daem
   active; start it (`sudo systemctl enable --now fail2ban`) or ignore.
 - `[FAIL] services: nbd-server.service …` → a failed unit; inspect with
   `systemctl status <unit>`.
-- `--send` prints a warn and exits 0 when no platform is configured — by design
-  (see [communication](communication.md)).
 
 ---
 
 ## `pos system backup` — encrypted folder snapshots
 
 ```bash
-pos system backup <folder-path>       # encrypt to ./<name>_<date>.tar.gz.gpg
-pos system backup --service           # pick a folder from /srv + ~/srv
+pos system backup <folder-path>                 # encrypt to ./<name>_<date>.tar.gz.gpg
+pos system backup <folder-path> --no-encrypt    # plain ./<name>_<date>.tar.gz, no password
+pos system backup --service                     # pick a folder from /srv + ~/srv
 ```
 
 Uses `sudo tar` + gpg AES-256. The password is prompted **twice and never
 stored**; the artifact is `chmod 600`. On success (and on failure, via ERR
 trap) a `notify_send` alert is sent.
+
+**Skip encryption** with `--no-encrypt` (or `BACKUP_ENCRYPT=0` in
+`system.env`): the archive stays a plain `.tar.gz`, no password is prompted,
+and the file is still `chmod 600` + USB-copy verified. This is the
+**headless/cron-safe** mode — the encrypted path prompts for a password, so
+under cron it needs `--no-encrypt` with a fixed folder
+(`pos system backup ~/Documents --no-encrypt`).
 
 `--service` lists folders under the roots in `BACKUP_SERVICE_ROOTS`
 (default `/srv $HOME/srv`; override via `system.env` or env) and lets you pick.
@@ -111,11 +114,37 @@ pos system backup ~/Documents
 #   OK Transfer verified 100% (sha256 match): .../backups/docs_2026-08-13.tar.gz.gpg
 ```
 
+Detection reads `lsblk` and treats a device as USB when `TRAN == usb` (the
+per-device deciding signal). Removable-but-not-USB slots (e.g. a SATA card
+reader) are skipped. If a device shows no `TRAN` at all, `lsblk`'s answer is
+cross-checked against `/dev/disk/by-id/usb-*` symlinks and `lsusb` before it is
+offered.
+
+**Unmounted stick?** If the USB stick is plugged in but only shows as `sdax`
+with no mountpoint (common on CLI boxes with no automounter), you're offered a
+**mount first**, then it copies there:
+
+```bash
+#   [!] Found USB storage not mounted: /dev/sda1 (7.5G, DataTraveler)
+#   Mount it at /media/usb-sda1 (world-writable) so the backup can go there? [y/N]
+#   (y)  OK Mounted /dev/sda1 at /media/usb-sda1
+#   [+] Copying to /media/usb-sda1/backups/docs_2026-08-13.tar.gz.gpg ...
+#   OK Transfer verified 100% (sha256 match): .../backups/docs_2026-08-13.tar.gz.gpg
+```
+
+The mount mirrors `usb-automount` (`/media/<label>`, fallback
+`/media/usb-<devname>`, `-o umask=000` world-writable so the copy works without
+root). Decline it and you get the exact `sudo mkdir -p` / `sudo mount` commands
+to run yourself, then `Enter` re-checks. `s` or EOF (cron) skips silently and
+the backup stays local — it never blocks.
+
 - Multiple sticks mounted → pick by number; `0` skips; `n`/EOF skips silently
   (cron runs never block).
 - Pin a fixed stick (no detection, no prompt on cron) with
   `BACKUP_USB_ROOT=/mnt/usb` in `system.env` — the copy still lands in
   `<root>/backups/` and is still sha256-verified.
+- Mount base and by-id dir are configurable: `BACKUP_MOUNT_BASE` (default
+  `/media`) and `BACKUP_USB_BYID` (default `/dev/disk/by-id`).
 
 ### Recipes
 

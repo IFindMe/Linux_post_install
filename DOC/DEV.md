@@ -108,6 +108,7 @@ esac
 - Strict mode: `set -euo pipefail`
 - `--help` flag: accept `-h` / `--help` via `case` pattern
 - **Deps guards run before `--help`:** `command -v <bin> &>/dev/null || err "… (install <pkg>)"` lines sit at the top of the script, **before** the `-h|--help` case — so `--help` also errors when a dependency is missing. This matches every existing deps-gated tool; keep it that way.
+  - Exception — tools with **no required deps** (every check degrades gracefully): `pos system health` probes binaries at runtime (`if command -v systemctl; then …`) and needs no guard. The lint (`scripts/lint-conventions.sh`) only enforces guard-before-help for lines that are actual guards (`command -v … ||`, `if ! command -v`, `command -v … \` continuation), never for graceful-degradation probes. If you add a tool like this, keep all checks optional and note it in `usage()`.
 - Shared library: always source `common.sh` for colors, logging, spinners
 - Exit codes: `0` success, `1` error
 - No shared lib? Inline fallbacks:
@@ -153,7 +154,7 @@ Two kinds of config, don't mix them up:
 
 - **Machine defaults shipped by the installer:** place the file in `config/` and add copy logic to `postinstall.sh`. If it contains secrets, add to `.gitignore` and document in `DOC/`.
 - **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`), `pos-communication-telegram-sender` (`telegram.env`, edited via `pos config telegram` — token masked), and the shared ones below. Never store tokens in the repo.
-  - `system.env` — shared "system" settings loaded by `pos-system-*` tools via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `BACKUP_USB_ROOT`, `HEALTH_BACKUP_MAX_AGE_DAYS`). Env already exported wins over the file.
+  - `system.env` — shared "system" settings loaded via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `BACKUP_USB_ROOT`, `BACKUP_MOUNT_BASE`, `BACKUP_USB_BYID`, `HEALTH_BACKUP_MAX_AGE_DAYS`, plus `USB_MOUNT_BASE`/`USB_BYID`/`MEDIA_SYNC_SOURCE`/`MEDIA_SYNC_DEST` for `pos media sync`). Env already exported wins over the file.
   - `notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`), read by `lib/notify.sh`.
 
 ### 5. Add SSH keys (if needed)
@@ -183,21 +184,32 @@ bin/pos help <full command>   # confirm dispatch works
 bin/pos <category> --help     # confirm category listing includes the new tool (first tool in a new category)
 make gen                      # regenerate doc tables + completion flags
 make check                    # full self-consistency gate (syntax, exec bits, doc/code sync, smoke)
+make lint                     # convention gate (scripts/lint-conventions.sh) — must end 0 FAIL, 0 WARN
 ```
 
-`make check` is the definition of done — the same check runs as a pre-commit hook once you've run `make hook`.
+`make check` + `make lint` (0 FAIL / 0 WARN) are the definition of done. `make check` is also run as a pre-commit hook once you've run `make hook`; `make lint` is not part of the hook — run it yourself. Pushing to Gitea re-runs all four gates on the live Actions runner (see `CI: Gitea Actions Gate` below) — a red run is a merge-blocker.
 
 ### Testing tools that need root / systemd / missing deps
 
 `make check` only proves syntax, exec bits, doc sync and dispatch — not behaviour. For tools that need `sudo`, systemd, or binaries absent from the dev box (samba, usbsrv, …), test them end-to-end with two patterns:
 
-- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), `SMB_CONF` (`bin/pos-share-smb-server`, default `/etc/samba/smb.conf`), `SMB_CREDS_DIR`/`UNIT_DIR` (`bin/pos-share-smb-client`), `USER_SYSTEMD_DIR` (`bin/pos-network-download`, `bin/pos-communication-{telegram,matrix}-listener`, `lib/scheduler-lib.sh` — write it as `${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}`), and the scheduler's `SCHEDULE_DIR`/`SCHEDULE_STATE_DIR`/`SCHEDULE_LOG_DIR`/`SCHED_LEGACY_ENV` (`lib/scheduler-lib.sh`). Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing. **Gotcha (session-learned):** a `VAR="${XDG…:-…}"` without the leading `VAR:-` *overrides* the seam — the stub run then silently writes to the real `$HOME` path and every assertion passes while the bug hides. The override must be written first, then tested with `VAR=/tmp/x …` and a check that the real path is untouched.
+- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), `SMB_CONF` (`bin/pos-share-smb-server`, default `/etc/samba/smb.conf`), `SMB_CREDS_DIR`/`UNIT_DIR` (`bin/pos-share-smb-client`), `USER_SYSTEMD_DIR` (`bin/pos-network-download`, `bin/pos-communication-{telegram,matrix}-listener`, `lib/scheduler-lib.sh` — write it as `${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}`), the scheduler's `SCHEDULE_DIR`/`SCHEDULE_STATE_DIR`/`SCHEDULE_LOG_DIR`/`SCHED_LEGACY_ENV` (`lib/scheduler-lib.sh`), and the USB layer shared by `pos system backup` + `pos media sync`: `USB_MOUNT_BASE` (default `/media`, keeps `BACKUP_MOUNT_BASE` as an alias) and `USB_BYID` (default `/dev/disk/by-id`, keeps `BACKUP_USB_BYID` as an alias) — both guarded as `VAR="${VAR:-${BACKUP_…:-default}}"` in `lib/usb-lib.sh` so existing config lines keep working. Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing. **Gotcha (session-learned):** a `VAR="${XDG…:-…}"` without the leading `VAR:-` *overrides* the seam — the stub run then silently writes to the real `$HOME` path and every assertion passes while the bug hides. The override must be written first, then tested with `VAR=/tmp/x …` and a check that the real path is untouched.
 - **Stub PATH.** Create a temp dir with fake binaries, then run the tool with `PATH="$stubs:$PATH"`: fake `sudo` → `exec "$@"`; fake `systemctl`/`smbcontrol`/`mount.cifs` → echo their args; fake `testparm` → `cat` the file back (so validation passes); fake `systemd-escape` → print a fixed name. Assert on output **and** exit codes — happy path plus each failure path (`err` sets rc=1).
 - **Interactive prompts** (`read … </dev/tty`): drive them with a PTY — `printf 'answer\n' | script -qec "cmd" /dev/null` — then assert the side effect (e.g. the chmod-600 creds file lands with the right mode).
 
 Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
 
-Stub harnesses are **throwaway by design**: no `tests/` dir and no CI in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo.
+Stub harnesses are **throwaway by design**: no `tests/` dir in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo. (CI — `.gitea/workflows/lint.yml`, live act_runner — runs the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on every push/PR; it does not run behaviour suites.)
+
+**Stub-harness gotchas (session-learned, `pos system backup` USB-detection suite).** Each red check means exactly one assumption — in the tool *or* the harness — is wrong; keep the diagnosis cheap by copying the run's `out.log` to a per-test file and asserting on artifacts (`fake_state`, `.gpg` on disk, `sends.log`, exit code), then deciding which side lied:
+
+- **Layout: the harness must live *outside* the sandbox it wipes.** If `fresh()` does `rm -rf "$TEST_DIR"`, the runner and the stubs cannot live inside `$TEST_DIR` or they get deleted mid-run. Prefer siblings: `/tmp/opencode/<tool>-run.sh` + `/tmp/opencode/<tool>-stubs/` + `/tmp/opencode/<tool>-test/` (sandbox wiped per test).
+- **Field separators: never `IFS=$'\t'` on JSON-derived data.** `read` treats IFS *whitespace* specially and collapses consecutive delimiters, so an empty JSON field (null `tran`, null `mountpoint`) shifts every following column and detection silently misfires. Emit a non-whitespace separator from jq (`… | join("\u001f")`) and read with `IFS=$'\x1f'`.
+- **`!` is not a command: `check "x" "$@"` with `! grep …` runs `!` as a binary (rc 127).** For "nothing present" prefer `test -z "$(grep … )"` — note `grep -qv` on an *empty* file still exits 1 (zero lines selected), so it fails the "nothing was written" case.
+- **`read -rp` prompts vanish when stdin is a pipe.** Bash suppresses the prompt text when stdin isn't a tty, so never assert on prompt strings in piped runs — assert on the side effect.
+- **Fakes that shell out must call the *real* binary, not the stub on PATH.** A fake `gpg` that ran `cp` picked up the corrupting fake `cp` and broke the tool's encryption step instead of the USB-copy step under test. Resolve the real one: `real() { for d in /usr/bin /bin; do [ -x "$d/$1" ] && { printf '%s' "$d/$1"; return; }; done; }` then `"$(real cp)" …`.
+- **Scope failure-injection fakes, don't make them global.** A "chmod fails" flag hit *every* `chmod` the tool runs (it chmods the archive too) and aborted the run before the section under test. Match the target instead: only fail for args under the seam path (e.g. `[[ "$target" == "$BACKUP_MOUNT_BASE/"* ]]`).
+- **Fixtures must genuinely exercise the branch.** A fixture builder that hardcodes `"tran":"usb"` means the "TRAN empty → cross-check" path never runs and its test passes for the wrong reason. Check the discriminating field actually varies (add a `_notran` builder, a card-reader `sata` fixture, etc.).
 
 ---
 
@@ -300,6 +312,97 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 3. Make the change — keep it idempotent
 4. Update `DOC/POS.md` (or the relevant doc) if behaviour changed
 5. Run `shellcheck` on the modified file
+
+---
+
+## Convention Lint Gate
+
+`scripts/lint-conventions.sh` is the automated convention gate — it encodes the
+rules in this document so drift is caught by the machine, not the next audit.
+Run it with `make lint` (or `./scripts/lint-conventions.sh`). FAIL = definite
+violation (fix it before committing), WARN = manual review needed. Exit code is
+non-zero when any FAIL exists.
+
+Check classes (all heuristic-based; heredocs, `${...}` brace-counting, `while`
+loop stdin, `/dev/tty` reads and `command -v` fallbacks are excluded):
+
+- **Shebang / strict mode** (FAIL) — every shell file (`bin/*`, `install.sh`,
+  `preinstall.sh`, `postinstall.sh`, `features/*`, `apps/*`, `templates/*`,
+  `scripts/*`) starts with `#!/usr/bin/env bash` and has `set -euo pipefail`
+  (libs are sourced, so they're exempt).
+- **Exec bits** (FAIL) — `bin/pos-*` and `entertainment/*.sh` committed as
+  `100755` (`chmod +x`).
+- **`# POS:` header** (FAIL) — every `bin/pos-*` carries it with the em-dash
+  separator (`# POS: <cat> <cmd> — <desc>`); a header past line ~6 is a WARN.
+- **`-h|--help`** (FAIL) — every `bin/pos-*` handles it via `case`.
+- **Deps guards before help** (FAIL) — the first real guard (`command -v X …
+  || err`, `if ! command -v X …`, multi-line `\` continuation) must sit before
+  the `-h|--help` dispatch, so help errors on a box missing the dependency.
+  Graceful-degradation probes (`if command -v X; then …`) are not guards.
+- **Top-level `local`** (WARN) — `local` at brace-depth 0 outside a function is
+  invalid bash.
+- **stdin ⇄ `INTERACTIVE_CMDS`** (FAIL) — a tool that reads stdin must be in
+  `INTERACTIVE_CMDS` in `bin/pos` (else the logging tee swallows/hangs the
+  prompt); every entry must also have a matching `bin/pos-<entry>` tool.
+- **DOC/POS.md coverage** (WARN) — each `bin/pos-*` referenced in `DOC/POS.md`.
+- **Entertainment plugins** (FAIL) — must carry `# POS_PLUGIN:` and must NOT
+  source `lib/common.sh` (stdout is the message).
+- **Apps** (FAIL) — each `apps/*` script has `uninstall_<name>()` and an
+  `uninstall` dispatch case.
+- **Systemd units** (WARN) — `TimeoutStopSec=` and `[Install] WantedBy=`.
+- **Legacy wrappers** (FAIL/WARN) — `bin/wr-*`, `mp3`, `mp4`, `vbox`,
+  `ssh-load-all` must forward to `pos` (FAIL if not); >12 lines or a `case`
+  statement is a WARN (thin forwarder only).
+- **Secrets** (WARN) — literal `…TOKEN=/…SECRET=/…KEY=…` assignments are
+  flagged for manual review (env guards, config reads and runtime generation
+  are excluded).
+- **Env seams** (WARN) — writes to `/etc/`, `$HOME`, `/usr/local` are flagged
+  unless guarded (`command -v` or `|| echo`), i.e. the write needs a
+  `VAR="${VAR:-path}"` test seam.
+
+If a rule is genuinely wrong for a new case (as happened with
+graceful-degradation probes in system-health), refine the heuristic — never
+weaken it — and note the change in `MAINTENANCE.md`'s lint section.
+
+---
+
+## CI: Gitea Actions Gate
+
+`.gitea/workflows/lint.yml` re-runs the four gates on every `push` and
+`pull_request`: `make gen`, `git diff --exit-code` (gen drift), `make check`,
+`make lint`. A red run is a merge-blocker; runs are visible under Gitea →
+Actions.
+
+- **Runner** — act_runner v0.6.1 (`linux-post-install`, labels `ubuntu-latest` →
+  job image `node:20-bullseye`) is registered on the Gitea host and always on:
+  compose project `~/srv/gitea/runner/` (`docker compose up -d`,
+  `restart: unless-stopped`), standalone next to the ScaleTail gitea compose.
+- **Gotchas (session-learned):**
+  - act_runner's `run.sh` `cd`s into `/data` and only reads the config when the
+    `CONFIG_FILE` env var is set — the compose service must pass
+    `CONFIG_FILE=/config.yaml`, not just mount the file.
+  - The job container can't resolve `gitea.skink-platy.ts.net` by itself; pin it
+    with `container.options: "--add-host gitea.skink-platy.ts.net:100.111.241.54"`
+    in `config.yaml`.
+  - Registration tokens are one-time use; the token lives in `runner/.env`
+    (chmod 600) and is burned after the first registration.
+  - Inspecting runs via sqlite: Gitea's status enum is runnerv1-consistent —
+    **1 = success, 2 = failure** (not the old 0/1/2/3 scheme).
+- **Deterministic generators** — any script whose output is committed (gen docs,
+  completions) must sort in byte order: plain `sort` collates differently per
+  locale, and the CI container tripped exactly this (category-less tool keys
+  like `pos-config` start with `|`, which collated after letters under that
+  locale, reordering the generated tables). `scripts/gen-docs.sh` sets
+  `export LC_ALL=C`; keep that in mind for any new generator.
+- **Checking green without SSH** — the workflow reports its own outcome as a
+  lightweight git tag: `ci-ok/<sha>` on success, `ci-fail/<sha>` on failure
+  (pushed with the job's automatic `GITEA_TOKEN`; the workflow only triggers on
+  `push` to `main`, so tag pushes don't re-trigger it). Check from the dev box
+  with plain git — `scripts/ci-status.sh [--wait] [<sha>]` (reads the tags via
+  `git ls-remote`, exit 0/1/2 = green/red/pending). No SSH to the runner, no API
+  tokens.
+- **Limits** — CI proves the *static* gates only; it never runs behaviour suites
+  (stub harnesses stay throwaway in `/tmp`).
 
 ---
 

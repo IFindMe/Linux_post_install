@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Robust flags.sh load — works from the repo checkout AND from
+# /usr/local/bin after install.sh (which copies lib/flags.sh there).
+source "$(dirname "$0")/../lib/flags.sh" 2>/dev/null || source "$(dirname "$0")/flags.sh"
+
 # ────────────────────────────────────────────────────────────────
 # USB automount feature — auto-mounts removable USB storage.
 #

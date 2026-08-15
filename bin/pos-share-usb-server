@@ -185,6 +185,9 @@ cmd_port() {
     warn "Restart your server for port changes to take effect."
 }
 
+command -v usbsrv &>/dev/null \
+    || err "usbsrv not found — install the USB Redirector server (https://www.incentivespro.com/usb-server.html)"
+
 cmd="${1:-}"
 
 case "$cmd" in
@@ -195,9 +198,6 @@ case "$cmd" in
     --ls|--ls-shared|--share|--unshare|--auto-share|--callback|--close-callback|--auto-connect|--disconnect|--nickname|--timeout|--port|--info|--version) ;;
     *) err "Unknown flag '$cmd'" ;;
 esac
-
-command -v usbsrv &>/dev/null \
-    || err "usbsrv not found — install the USB Redirector server (https://www.incentivespro.com/usb-server.html)"
 
 case "$cmd" in
     --ls)           cmd_ls ;;

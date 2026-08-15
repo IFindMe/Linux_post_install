@@ -15,6 +15,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 mode="write"
 [ "${1:-}" = "--check" ] && mode="check"
 
+# Deterministic byte-order sorting regardless of host/CI locale (category-less
+# tool keys start with "|", which collates differently per-locale).
+export LC_ALL=C
+
 ctx="$root/DOC/AGENT_Context_Project.md"
 comp="$root/completions/pos.bash"
 

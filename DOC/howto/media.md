@@ -1,11 +1,13 @@
 # How-To: `pos media`
 
-Download audio and video from the web via `yt-dlp`. Tools: `mp3`, `mp4`.
+Download audio and video from the web via `yt-dlp`, and sync your library to a
+USB stick. Tools: `mp3`, `mp4`, `sync`.
 
 | Tool | What it does |
 |------|--------------|
 | `pos media mp3` | Download audio, convert to MP3 |
 | `pos media mp4` | Download video with smart/interactive format selection |
+| `pos media sync` | Incrementally copy `~/Music` onto a USB stick (mp3/mp4) |
 
 Requires `yt-dlp` and `ffmpeg` (`sudo apt install yt-dlp ffmpeg`); the tools
 fail with a clean error message instead of a raw `command not found` if either
@@ -81,6 +83,55 @@ thumbnail embedded (`--embed-metadata --embed-chapters --embed-subs
 
 **Recipe:** grab a 4K stream for later — `--best` already picks the best
 video+audio and merges them.
+
+---
+
+## `pos media sync` — music onto a USB stick
+
+```bash
+pos media sync          # copy everything (mp3 + mp4) from ~/Music to the stick
+pos media sync --mp3    # only the .mp3 files
+pos media sync --mp4    # only the .mp4 files
+```
+
+Detects connected USB storage exactly like `pos system backup` (same shared
+`lib/usb-lib.sh`): a plugged-in but unmounted stick is offered a mount first
+(`/media/<label>`, world-writable, mirrors `usb-automount`), multiple sticks
+are listed for you to pick, and if nothing is plugged in it re-scans after you
+press Enter. Files are mirrored into `<usb>/Music/` (change with
+`MEDIA_SYNC_DEST`) preserving the artist/album tree.
+
+**Sync semantics — add/update only, never delete.** Files missing on the stick
+are copied; files whose size or mtime changed are overwritten; everything
+identical is skipped. Files on the stick that are no longer in the source are
+**left alone** — a playback stick can never lose files to a mirror mistake.
+Copies keep the source timestamps (`cp --preserve=timestamps`), so a re-run is
+a no-op. Preview before copying with `--dry-run`:
+
+```bash
+pos media sync --mp4 --dry-run   # shows "would copy" list + counts, copies nothing
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--mp3` | Sync only `*.mp3` (neither flag = both) |
+| `--mp4` | Sync only `*.mp4` (neither flag = both) |
+| `--source <dir>` | Source folder (default `~/Music`) |
+| `--dry-run` | Preview what would be copied, copy nothing |
+
+When it finishes it announces the result via `lib/notify.sh`
+(`Music sync completed: N added, M updated → <usb>/Music`).
+
+**Recipes:**
+```bash
+pos media sync                    # keep the car stick up to date (both formats)
+pos media sync --mp3 --dry-run    # check what a new batch will bring first
+pos media sync --source /data/Music   # sync a library that lives elsewhere
+```
+
+Config (all in `~/.config/linux_post_install/system.env` or exported):
+`MEDIA_SYNC_SOURCE` (default `$HOME/Music`), `MEDIA_SYNC_DEST` (default
+`Music`), plus the shared `USB_MOUNT_BASE` / `USB_BYID` seams.
 
 ---
 

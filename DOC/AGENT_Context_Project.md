@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–193 |
-| ## 3. Installation Flow | 194–245 |
-| ## 4. The `pos` CLI System | 246–316 |
-| ## 5. Shared Library — `lib/common.sh` | 317–348 |
-| ## 6. Docker Compose / ScaleTail | 349–391 |
-| ## 7. Optional Apps (`apps/`) | 392–421 |
-| ## 8. Entertainment Module | 422–435 |
-| ## 9. Systemd Services | 436–447 |
-| ## 10. Configuration Files | 448–474 |
-| ## 11. Coding Conventions | 475–507 |
-| ## 12. Development Workflow | 508–560 |
-| ## 13. Key File Quick Reference | 561–621 |
-| ## 14. Common Tasks for Agents | 622–652 |
+| ## 2. Directory Structure | 44–194 |
+| ## 3. Installation Flow | 195–246 |
+| ## 4. The `pos` CLI System | 247–318 |
+| ## 5. Shared Library — `lib/common.sh` | 319–350 |
+| ## 6. Docker Compose / ScaleTail | 351–393 |
+| ## 7. Optional Apps (`apps/`) | 394–423 |
+| ## 8. Entertainment Module | 424–437 |
+| ## 9. Systemd Services | 438–449 |
+| ## 10. Configuration Files | 450–476 |
+| ## 11. Coding Conventions | 477–509 |
+| ## 12. Development Workflow | 510–562 |
+| ## 13. Key File Quick Reference | 563–625 |
+| ## 14. Common Tasks for Agents | 626–657 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -67,7 +67,6 @@ Linux_post_install/
 │   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
 │   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
-│   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps                       # Enhanced container overview (health, IPs, ports, uptime)
@@ -79,6 +78,7 @@ Linux_post_install/
 │   ├── pos-entertainment-status            # Show enabled plugins and scheduler state
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
+│   ├── pos-media-sync                      # Incremental Music → USB sync (mp3/mp4, add/update only)
 │   ├── pos-network-checkport               # Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
 │   ├── pos-network-download                # aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
@@ -94,6 +94,7 @@ Linux_post_install/
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
+│   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 <!-- GEN:END tree -->
 │   ├── flag-reader         # Inspect feature flags (list/status/--raw)
@@ -268,7 +269,6 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
-|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
 | docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
@@ -280,6 +280,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
+| media | sync | `pos-media-sync` | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | network | download | `pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
@@ -295,6 +296,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
 <!-- GEN:END dispatch -->
 
@@ -530,7 +532,7 @@ System-wide flag store at `/usr/local/share/linux_post_install/flags/`:
 4. Add system deps to `PACKAGES` array in `preinstall.sh` (if needed); non-apt/manual installers → `command -v` guard in the tool instead
 5. Add config logic to `postinstall.sh` (if needed, with `.gitignore` for secrets); runtime tool config → `~/.config/linux_post_install/<tool>.env` (600)
 6. Update docs: `DOC/POS.md` (section table + detail — hand-written); `DOC/HOWTO.md` index row + a section in `DOC/howto/<category>.md` (recipes/troubleshooting); `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, self-contained list, line-count table) and completion flags update via `make gen` — never hand-edit between `GEN:START`/`GEN:END` markers, but hand-add a row to the "Common Tasks for Agents" table; `AGENTS.md` Quick facts if a structural fact changed; root `README.md` only if the category list changes; move the task to `AGENT_TODO.md` Done (dated) in the same commit
-7. Test: `make gen && make check` — `make check` (bash -n + doc/code sync + smoke) is the definition of done; also `bin/pos help <full command> && bin/pos <category> --help`. For tools needing root/systemd/absent deps, behaviour-test via env-override paths + stub PATH (see DEV.md "Testing tools that need root / systemd / missing deps")
+7. Test: `make gen && make check && make lint` — `make check` (bash -n + doc/code sync + smoke) and `make lint` (0 FAIL / 0 WARN, `scripts/lint-conventions.sh`) together are the definition of done; also `bin/pos help <full command> && bin/pos <category> --help`. For tools needing root/systemd/absent deps, behaviour-test via env-override paths + stub PATH (see DEV.md "Testing tools that need root / systemd / missing deps"). Pushing to Gitea re-runs the same four gates on the live Actions runner (`.gitea/workflows/lint.yml`) — a red run is a merge-blocker.
 
 ### Testing
 
@@ -562,58 +564,60 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 223 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
-| `preinstall.sh` | 75 | System packages + hotspot deps + yt-dlp + fail2ban |
+| `install.sh` | 248 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
+| `preinstall.sh` | 76 | System packages + hotspot deps + yt-dlp + fail2ban |
 | `postinstall.sh` | 168 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
-| `lib/common.sh` | 144 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`) |
+| `lib/common.sh` | 151 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`, CONFIG_DIR) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
-| `lib/notify.sh` | 76 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
+| `lib/notify.sh` | 87 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
 | `lib/entertainment-lib.sh` | 311 | Entertainment module lib (ENABLED parsing, last-run state, scheduler sync via user-timers-lib) |
 | `lib/entertainment-plugin-lib.sh` | 67 | Message-safe helpers for plugins (config load, require, fetch+retry) — plugins MAY source it |
 | `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
 | `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
+| `lib/usb-lib.sh` | 194 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`) — used by `pos system backup` + `pos media sync` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
-| `features/autostart.sh` | 14 | Boot-time feature (moved from `bin/`, flag-gated service) |
-| `features/usb-automount.sh` | 134 | USB automount feature (udev rule + flag-gated service) |
+| `features/autostart.sh` | 50 | Boot-time feature (moved from `bin/`, flag-gated service) |
+| `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 292 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
-| `bin/pos-communication-scrcpy` | 239 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
+| `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
-| `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
-| `bin/pos-docker-health` | 110 | One-glance container health dashboard (exits 1 if unhealthy) |
-| `bin/pos-docker-ps` | 128 | Enhanced container overview (health, IPs, ports, uptime) |
+| `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
+| `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 95 | Run a public-API plugin and send its output via the configured notify platforms |
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
-| `bin/pos-media-mp3` | 80 | Download audio as MP3 (yt-dlp) |
-| `bin/pos-media-mp4` | 126 | Download video as MP4 (smart/interactive format select) |
+| `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
+| `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
+| `bin/pos-media-sync` | 138 | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 952 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 951 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
-| `bin/pos-network-scan` | 271 | Parallel ping sweep of CIDR |
+| `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
 | `bin/pos-share-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
-| `bin/pos-share-smb-client` | 183 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-smb-client` | 217 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-smb-server` | 253 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 220 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-firewall` | 291 | Interactive UFW management |
+| `bin/pos-system-backup` | 216 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-firewall` | 308 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+| `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 292 | Dynamic bash completion |
+| `completions/pos.bash` | 293 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
@@ -643,6 +647,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify NFS share logic | Edit `bin/pos-share-nfs-server` / `bin/pos-share-nfs-client` |
 | Modify SMB share logic | Edit `bin/pos-share-smb-server` / `bin/pos-share-smb-client` |
 | Modify scrcpy mirroring logic | Edit `bin/pos-communication-scrcpy` (config scope `scrcpy` via `pos config scrcpy`; `SCRCPY_*` keys in `~/.config/linux_post_install/scrcpy.env`) |
+| Modify Music→USB sync logic | Edit `bin/pos-media-sync` / shared USB layer `lib/usb-lib.sh` (seams `MEDIA_SYNC_SOURCE`/`MEDIA_SYNC_DEST`/`USB_MOUNT_BASE`/`USB_BYID` in `~/.config/linux_post_install/system.env`) |
 | Modify the scheduler / scheduled jobs | Edit `bin/pos-system-schedule` / `lib/scheduler-lib.sh` (jobs in `~/.config/linux_post_install/schedule.d/`) |
 | Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
