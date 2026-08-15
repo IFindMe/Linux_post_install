@@ -210,7 +210,7 @@ Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib
 ## lib/usb-lib.sh — shared USB-storage detection
 
 **File:** `lib/usb-lib.sh` (installed to `/usr/local/bin/usb-lib.sh`)
-**Purpose:** the one copy of the USB-storage machinery shared by `pos system backup`'s post-verify USB copy and `pos media sync` — `usb_detect` (lsblk JSON, TRAN + lsusb/by-id cross-check → `USB_MOUNTED`/`USB_UNMOUNTED`), `usb_related_present`, `usb_mount_offer` (mount an unmounted stick at `/media/<label>`, `usb-automount` scheme), and `usb_pick_root` (detect → mount-offer → single/multi picker → `USB_ROOT`). Defines only `usb_*`; seams `USB_MOUNT_BASE` (default `/media`, alias `BACKUP_MOUNT_BASE`) and `USB_BYID` (default `/dev/disk/by-id`, alias `BACKUP_USB_BYID`) keep existing config lines working.
+**Purpose:** the one copy of the USB-storage machinery shared by `pos system backup`'s post-verify USB copy and `pos media sync` — `usb_detect` (lsblk JSON, TRAN + lsusb/by-id cross-check → `USB_MOUNTED` as `mp|label|size|model|fs` entries and `USB_UNMOUNTED` as `path|label|size|model`; EFI system partitions — Ventoy `VTOYEFI`, `/boot/efi` — are excluded from both), `usb_related_present`, `usb_mount_offer` (mount an unmounted stick at `/media/<label>`, `usb-automount` scheme), and `usb_pick_root` (detect → mount-offer → single-confirm or multi-picker, rows showing size/label/fs → `USB_ROOT` set to the bare mountpoint). Defines only `usb_*`; seams `USB_MOUNT_BASE` (default `/media`, alias `BACKUP_MOUNT_BASE`) and `USB_BYID` (default `/dev/disk/by-id`, alias `BACKUP_USB_BYID`) keep existing config lines working.
 
 ---
 

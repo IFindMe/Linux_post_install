@@ -574,7 +574,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/entertainment-plugin-lib.sh` | 67 | Message-safe helpers for plugins (config load, require, fetch+retry) — plugins MAY source it |
 | `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
 | `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
-| `lib/usb-lib.sh` | 194 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`) — used by `pos system backup` + `pos media sync` |
+| `lib/usb-lib.sh` | 205 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`; EFI system partitions excluded; picker shows size/label/fs) — used by `pos system backup` + `pos media sync` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -599,7 +599,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
-| `bin/pos-media-sync` | 138 | Incremental Music → USB sync (mp3/mp4, add/update only) |
+| `bin/pos-media-sync` | 164 | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | `bin/pos-network-download` | 951 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |

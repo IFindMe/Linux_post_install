@@ -116,6 +116,14 @@ The source folder may be a symlink to a library elsewhere
 (`~/Music -> /mnt/data/music`) — it is followed, the artist/album tree is
 mirrored under the symlink's target.
 
+**Target picking.** Mounted USB partitions are listed with size, label and
+filesystem (single candidate → confirm prompt; several → numbered picker, one
+row per partition). EFI system partitions (e.g. a Ventoy stick's `VTOYEFI`,
+32 MB) are **never** offered as a target — they are boot machinery, not
+storage. Before any copy the tool verifies the payload fits (`df` vs the
+exact bytes to copy) and fails fast with `Not enough free space on …` instead
+of dying mid-copy with `No space left on device`.
+
 | Flag | Meaning |
 |------|---------|
 | `--mp3` | Sync only `*.mp3` (neither flag = both) |

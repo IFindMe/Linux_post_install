@@ -105,6 +105,32 @@ needs_copy() {
     return 0
 }
 
+# Pre-flight: fail early on "won't fit" instead of a mid-copy ENOSPC that
+# leaves a half-written target. Measures exactly what needs_copy would copy.
+space_path="$USB_ROOT"
+if [ "$DRY_RUN" -eq 0 ]; then
+    mkdir -p "$dest_root"
+    space_path="$dest_root"
+fi
+need_kb=0
+while IFS= read -r f; do
+    rel="${f#"$SRC/"}"
+    if needs_copy "$f" "$dest_root/$rel"; then
+        sz="$(stat -c %s "$f" 2>/dev/null || printf 0)"
+        need_kb=$((need_kb + (sz + 1023) / 1024))
+    fi
+done < <(find -H "$SRC" "${find_expr[@]}")
+have_kb="$(df -Pk "$space_path" 2>/dev/null | awk 'NR==2 {print $4}')"
+have_kb="${have_kb:-0}"
+if [ "$need_kb" -gt "$have_kb" ]; then
+    msg="Not enough free space on ${USB_ROOT%/}: need ~${need_kb}K, have ${have_kb}K"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        warn "$msg"
+    else
+        err "$msg"
+    fi
+fi
+
 added=0
 updated=0
 unchanged=0

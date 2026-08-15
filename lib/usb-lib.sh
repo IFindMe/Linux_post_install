@@ -9,9 +9,10 @@
 #   USB_BYID         /dev/disk/by-id dir consulted by usb_related_present
 #
 # API:
-#   usb_detect                    fill USB_MOUNTED (mountpoints, one per
-#                                 removable USB storage) and USB_UNMOUNTED
-#                                 ("path|label|size|model" entries)
+#   usb_detect                    fill USB_MOUNTED ("mp|label|size|model|fs",
+#                                 one per removable USB storage partition;
+#                                 EFI system partitions are excluded) and
+#                                 USB_UNMOUNTED ("path|label|size|model")
 #   usb_related_present           whole-system "is any USB storage attached?"
 #   usb_mount_offer <devs...>     offer to mount detected-but-unmounted sticks
 #                                 (sudo, mirrors usb-automount: /media/<label>,
@@ -32,13 +33,13 @@ USB_BYID="${USB_BYID:-${BACKUP_USB_BYID:-/dev/disk/by-id}}"
 # usb_related_present() corroborates. Non-USB removables are skipped. The
 # "TRAN unavailable" warning fires once per scan, not per device.
 usb_detect() {
-    local out path="" mp="" label="" size="" model="" tran="" type="" children=""
+    local out path="" mp="" label="" size="" model="" tran="" type="" fs="" parttype="" children=""
     local warned=0
     USB_MOUNTED=()
     USB_UNMOUNTED=()
-    out="$(lsblk -J -o NAME,PATH,LABEL,MOUNTPOINT,RM,TYPE,TRAN,SIZE,MODEL 2>/dev/null)" || return 0
+    out="$(lsblk -J -o NAME,PATH,LABEL,MOUNTPOINT,RM,TYPE,TRAN,SIZE,MODEL,FSTYPE,PARTTYPENAME 2>/dev/null)" || return 0
 
-    while IFS=$'\x1f' read -r path mp label size model tran type children; do
+    while IFS=$'\x1f' read -r path mp label size model tran type fs parttype children; do
         [ -n "$path" ] || continue
         if [ "$tran" = "usb" ]; then
             :
@@ -50,8 +51,14 @@ usb_detect() {
         else
             continue
         fi
+        # EFI system partitions (Ventoy VTOYEFI, /boot/efi) are boot
+        # machinery, never a storage target — skip them entirely, mounted or
+        # not (else a 32M ESP can be offered as a sync/backup target).
+        if [[ "${parttype^^}" == *EFI* ]] || [[ "${label^^}" == *EFI* ]] || [[ "${mp^^}" == */EFI ]]; then
+            continue
+        fi
         if [ -n "$mp" ]; then
-            USB_MOUNTED+=("$mp")
+            USB_MOUNTED+=("$mp|$label|$size|$model|$fs")
         elif [ "$children" = "0" ]; then
             USB_UNMOUNTED+=("$path|$label|$size|$model")
         fi
@@ -60,6 +67,7 @@ usb_detect() {
         | select(.rm == true and (.type == "part" or .type == "disk"))
         | [.path, (.mountpoint // ""), (.label // ""), (.size // ""),
            (.model // ""), (.tran // ""), (.type // ""),
+           (.fstype // ""), (.parttypename // ""),
            ((.children // []) | length)]
         | join("\u001f")')
 }
@@ -174,21 +182,24 @@ usb_pick_root() {
 
     if [ ${#roots[@]} -eq 1 ]; then
         root="${roots[0]}"
-        if ! confirm "${confirm_prefix} ${root%/}/${subfolder}?" n; then
+        IFS='|' read -r mp label size model fs <<< "$root"
+        if ! confirm "${confirm_prefix} ${mp%/}/${subfolder}? (${size}, ${label:-no label}, ${fs})" n; then
             return 1
         fi
     else
         echo "Multiple USB storages found:"
         for i in "${!roots[@]}"; do
-            printf "%2d) %s\n" "$((i + 1))" "${roots[$i]}"
+            IFS='|' read -r mp label size model fs <<< "${roots[$i]}"
+            printf "%2d) %s  (%s, %s, %s)\n" "$((i + 1))" "$mp" "$size" "${label:-no label}" "$fs"
         done
         read -rp "Use which one? [1-${#roots[@]}] (0 = skip): " resp || return 1
         if ! [[ "$resp" =~ ^[0-9]+$ ]] || (( resp < 1 || resp > ${#roots[@]} )); then
             return 1
         fi
         root="${roots[$((resp - 1))]}"
+        IFS='|' read -r mp label size model fs <<< "$root"
     fi
 
-    USB_ROOT="$root"
+    USB_ROOT="$mp"
     return 0
 }
