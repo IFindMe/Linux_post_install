@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share smb-server — Manage the Samba server (status, share/unshare exports, users, enable/disable)
+# POS_SUBCMDS: status share unshare list adduser deluser reload enable disable
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
@@ -103,6 +104,33 @@ reload_config() {
     fi
 }
 
+# rc 0 = Samba reachable through the firewall (or nothing to check),
+# rc 1 = ufw active but no Samba rule → clients can't reach 139/445.
+ufw_blocks_samba() {
+    command -v ufw >/dev/null 2>&1 || return 1
+    local st
+    st="$(sudo ufw status 2>/dev/null)" || return 1
+    grep -q "^Status: active" <<<"$st" || return 1
+    if grep -qiE 'samba|(^|[^0-9])(137|138|139|445)([^0-9]|$)' <<<"$st"; then
+        return 1
+    fi
+    return 0
+}
+
+# Warn when another managed share already exports the same path under a
+# different name (two names for one folder = confusing debug sessions).
+dup_path_share() {
+    local path="$1" name="$2" dup
+    dup="$(awk -v want="$path" -v cur="$name" '
+        $1 == "#" && $2 == ">>>" { n = $5; inb = 1 }
+        $0 == "# <<< end pos-managed share" { inb = 0 }
+        inb && $1 == "path" && $3 == want && n != cur { print n; exit }
+    ' "$SMB_CONF")"
+    [ -n "$dup" ] && warn "Path already shared as [$dup] — creating a second export of the same folder.
+  Prefer updating that one: pos share smb-server share $path $dup"
+    return 0
+}
+
 list_shares() {
     local out
     out="$(testparm -s "$SMB_CONF" 2>/dev/null | grep -F '[' || true)"
@@ -126,6 +154,22 @@ case "$cmd" in
         echo
         section "Users"
         sudo pdbedit -L 2>/dev/null | cut -d: -f1 | sed 's/^/  /' || echo " (none)"
+        echo
+        section "Ports"
+        if ss -tln 2>/dev/null | awk '$4 ~ /:(139|445)$/ { f = 1 } END { exit !f }'; then
+            ok "smbd listening on :139/:445"
+        else
+            warn "nothing listening on :139/:445 locally (smbd down or bound elsewhere)"
+        fi
+        if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "^Status: active"; then
+            if ufw_blocks_samba; then
+                warn "firewall: ufw active, NO Samba rule — clients can't connect. Fix: sudo ufw allow Samba"
+            else
+                ok "firewall: ufw active, Samba allowed"
+            fi
+        else
+            ok "firewall: no active ufw — nothing blocking SMB ports"
+        fi
         ;;
 
     share)
@@ -151,6 +195,7 @@ case "$cmd" in
         done
         name="${name:-$(basename "$path")}"
         validate_share_name "$name"
+        dup_path_share "$path" "$name"
 
         if [ "$guest" -eq 1 ]; then
             warn "guest access on — ANY network user can access $path. Restrict with --users."
@@ -158,6 +203,10 @@ case "$cmd" in
             warn "No valid users — any Samba account can access $path. Restrict with --users u1,u2."
         fi
         [ -n "$users" ] && check_samba_users "$users"
+        if ufw_blocks_samba; then
+            warn "ufw is active but allows no Samba traffic — clients can't reach ports 139/445.
+  Fix on this machine: sudo ufw allow Samba"
+        fi
 
         ro_val=no; [ "$ro" -eq 1 ] && ro_val=yes
         guest_val=no; [ "$guest" -eq 1 ] && guest_val=yes
@@ -222,6 +271,11 @@ case "$cmd" in
         user="${2:-}"
         [ -n "$user" ] || err "Usage: pos share smb-server adduser <user>"
         id -u "$user" >/dev/null 2>&1 || err "No system user '$user' — create it first (e.g. sudo adduser $user)"
+        if sudo pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qxF "$user"; then
+            warn "'$user' already has a Samba account — nothing to do."
+            log "Reset the password with: sudo smbpasswd $user"
+            exit 0
+        fi
         sudo smbpasswd -a "$user"
         log "Samba user added: $user"
         notify_send "SMB user added: $user"
@@ -230,6 +284,10 @@ case "$cmd" in
     deluser)
         user="${2:-}"
         [ -n "$user" ] || err "Usage: pos share smb-server deluser <user>"
+        if ! sudo pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qxF "$user"; then
+            log "'$user' is not a Samba user — nothing to remove"
+            exit 0
+        fi
         sudo smbpasswd -x "$user"
         log "Samba user removed: $user"
         notify_send "SMB user removed: $user"

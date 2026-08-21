@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share smb-client — Mount SMB/CIFS shares (ephemeral or persistent systemd mount units)
+# POS_SUBCMDS: mount unmount list persist unpersist
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 
 SMB_CREDS_DIR="${SMB_CREDS_DIR:-/etc/samba/credentials}"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
+SMB_PORT="${SMB_PORT:-445}"
 command -v mount.cifs &>/dev/null || err "mount.cifs not found (install cifs-utils)"
 command -v systemd-escape &>/dev/null || err "systemd-escape not found"
 
@@ -18,11 +20,22 @@ Mount and manage SMB/CIFS shares from remote servers (cifs-utils).
 
 Commands:
   mount <//server/share> <local-dir> [user]   One-shot mount (creates local-dir if needed)
-  unmount <local-dir>                          Unmount the share
+  unmount <local-dir>                          Unmount the share (idempotent)
   list                                         Show active + persistent SMB mounts
   persist <//server/share> <local-dir> [user]  Persistent mount via systemd .mount + .automount
                                                units (mounts on first access — never blocks boot)
   unpersist <local-dir>                        Stop, disable and remove the mount/automount units
+
+Safety net before anything is mounted:
+  - server reachability on port 445 is probed first (fast fail with hints,
+    before any password is asked)
+  - an already-mounted target refuses a second mount instead of stacking
+  - mounting over a non-empty directory asks for confirmation first
+  - every successful mount is read-tested immediately; a mount that cannot
+    be listed is rolled back automatically
+  - mount failures are translated into targeted fixes (password, chmod o+x
+    traversal, wrong share name, firewall/down server) instead of raw
+    kernel errors
 
 With no user, guest access is attempted. With a user, you are prompted for
 the Samba password — one-shot mounts use a throwaway chmod-600 credentials
@@ -47,7 +60,8 @@ esac
 
 validate_share() {
     case "$1" in
-        //*) ;;
+        //*/*) ;;
+        //*) err "Invalid share '$1' — missing share name: expected <//server/share> (e.g. //10.0.0.5/media)" ;;
         *) err "Invalid share '$1' — expected <//server/share> (e.g. //10.0.0.5/media)" ;;
     esac
 }
@@ -59,11 +73,57 @@ validate_dir() {
     esac
 }
 
-# Prompt for the Samba password (no echo, via /dev/tty) and write a fresh
-# chmod-600 credentials file; prints its path, caller removes it.
+# Split //server/share into server + share; normalizes trailing slashes.
+split_share() {
+    local rest="$1"
+    rest="${rest#//}"
+    SHARE_PATH="/${rest#*/}"
+    SERVER="${rest%%/*}"
+    SHARE_PATH="${SHARE_PATH%/}"
+    [ -n "$SERVER" ] || err "No server in share '$1'"
+    [ -n "${SHARE_PATH#/}" ] || err "No share name in '$1'"
+}
+
+# TCP connect probe against the server before touching passwords or mounts.
+probe_server() {
+    local host="$1"
+    if timeout 3 bash -c "exec 3<>/dev/tcp/${host}/${SMB_PORT}" 2>/dev/null; then
+        return 0
+    fi
+    err "Server ${host} not reachable on port ${SMB_PORT} (SMB) — nothing was mounted.
+  Checks:
+    - is the address right? ping ${host}
+    - is the server up and sharing? on the server: pos share smb-server status
+    - port filtered? from here: pos network checkport ${host}:${SMB_PORT}
+    - Tailscale host? make sure 'tailscale status' lists it (up + recent)"
+}
+
+# Source currently cifs-mounted at $1 (empty string when none).
+mounted_src() {
+    findmnt -rnf -t cifs -o SOURCE,TARGET 2>/dev/null | awk -v t="$1" '$2 == t {print $1; exit}'
+}
+
+# Create the mountpoint if needed; refuse to silently shadow a non-empty dir.
+ensure_mountpoint() {
+    local where="$1"
+    if [ -e "$where" ] && [ ! -d "$where" ]; then
+        err "$where exists and is not a directory — pick another mount point"
+    fi
+    if [ -d "$where" ] && [ -n "$(ls -A "$where" 2>/dev/null)" ]; then
+        warn "$where is not empty — its contents are hidden while the share is mounted."
+        confirm "Mount over it anyway?" n || err "Aborted — nothing was mounted"
+    elif [ ! -d "$where" ]; then
+        run sudo mkdir -p "$where"
+        log "Created mount point $where"
+    fi
+}
+
+# Prompt for the Samba password (no echo) and write a fresh chmod-600
+# credentials file; prints its path, caller removes it. Test seam:
+# SMB_PW_FILE redirects the password read (never advertised).
 make_creds() {
-    local user="$1" pw tmp
-    read -rsp "Samba password for $user: " pw </dev/tty || true
+    local user="$1" pw tmp pw_in="${SMB_PW_FILE:-/dev/tty}"
+    read -rsp "Samba password for $user: " pw <"$pw_in" || true
     echo >&2
     [ -n "$pw" ] || err "empty password"
     tmp="$(mktemp)"
@@ -73,8 +133,71 @@ make_creds() {
 }
 
 mount_opts() {
-    local user="$1"
     printf 'uid=%s,gid=%s' "$(id -u)" "$(id -g)"
+}
+
+# Translate a failed mount attempt into the fix the human actually needs.
+diagnose_mount_failure() {
+    local msg="$1"
+    case "$msg" in
+        *LOGON_FAILURE*|*WRONG_PASSWORD*)
+            err "Server rejected the login (wrong user/password).
+  - retry with the correct Samba user: pos share smb-client mount $what $where <user>
+  - does the account exist at all? on the server: pos share smb-server status" ;;
+        *ACCESS_DENIED*|*"error(13)"*|*"Permission denied"*|*STATUS_CANNOT_DELETE*)
+            err "Access denied by the server (login worked, share said no).
+  On the server side, in order:
+    1. traversal: every parent dir of the share needs o+x — the server tool
+       prints the exact dirs when you re-share; quick fix:
+       chmod o+x <parent-dir>
+    2. user missing from the Samba passdb: pos share smb-server adduser <user>
+    3. share restricted: 'valid users' must contain your user (pos share smb-server list)" ;;
+        *BAD_NETWORK_NAME*)
+            err "The server has no share named '${SHARE_PATH#/}'.
+  - typo in the share name? on the server: pos share smb-server list
+  - correct syntax: //$SERVER/<share>" ;;
+        *CONNECTION_REFUSED*|*"error(111)"*)
+            err "${SERVER} refused the connection — smbd is down or a firewall rejects port ${SMB_PORT}.
+  on the server: pos share smb-server enable   /   sudo ufw allow Samba" ;;
+        *HOST_UNREACHABLE*|*"error(101)"*|*"error(113)"*|*"No route to host"*|*"Network is unreachable"*)
+            err "${SERVER} is unreachable (routing/host down).
+  - Tailscale host? 'tailscale status' must list it as online
+  - probe from here: pos network checkport ${SERVER}:${SMB_PORT}" ;;
+        *IO_TIMEOUT*|*"Host is down"*|*"error(112)"*|*"timed out"*)
+            err "${SERVER} accepted TCP but never answered the SMB handshake (usually a dropping firewall).
+  on the server: sudo ufw allow Samba   /   pos share smb-server status" ;;
+        *)
+            err "Mount failed:
+$msg
+  More causes + fixes: DOC/howto/share.md (SMB troubleshooting)" ;;
+    esac
+}
+
+# Mount attempt with captured stderr (so failures can be diagnosed).
+try_mount() {
+    local what="$1" where="$2" opts="$3"
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) mount -t cifs $what $where -o $opts"
+        return 0
+    fi
+    MOUNT_ERR="$(sudo mount -t cifs "$what" "$where" -o "$opts" 2>&1)" || return 1
+}
+
+# Post-mount proof: the mount must actually list. A mount that cannot be
+# read is worse than no mount — roll it back.
+read_test_or_rollback() {
+    local where="$1" what="$2"
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then return 0; fi
+    if timeout 5 ls -A "$where" >/dev/null 2>&1; then
+        return 0
+    fi
+    warn "Mounted, but $where cannot be listed — rolling back."
+    sudo umount "$where" 2>/dev/null || sudo umount -l "$where" 2>/dev/null || true
+    err "Share '${what}' mounted but reading it failed, so it was unmounted again.
+  Login works but file permissions don't — on the server:
+    - ls -la <shared-path> as root: do others/the owner have r-x?
+    - the connecting user must have unix-level access to the folder itself
+  Details: DOC/howto/share.md (SMB troubleshooting)"
 }
 
 case "$cmd" in
@@ -85,17 +208,36 @@ case "$cmd" in
         [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share smb-client mount <//server/share> <local-dir> [user]"
         validate_share "$what"
         validate_dir "$where"
+        split_share "$what"
 
-        sudo mkdir -p "$where"
+        probe_server "$SERVER"
+
+        if src="$(mounted_src "$where")"; [ -n "$src" ]; then
+            err "$where is already mounted (source: ${src:-unknown}) — nothing done.
+  Unmount it first: pos share smb-client unmount $where"
+        fi
+
+        ensure_mountpoint "$where"
+
         if [ -n "$user" ]; then
             creds="$(make_creds "$user")"
             trap 'rm -f "$creds"' EXIT
-            sudo mount -t cifs "$what" "$where" -o "credentials=$creds,$(mount_opts "$user")"
+            opts="credentials=$creds,$(mount_opts)"
+            try_mount "$what" "$where" "$opts" || {
+                rm -f "$creds"
+                trap - EXIT
+                diagnose_mount_failure "${MOUNT_ERR:-}"
+            }
+            rm -f "$creds"
+            trap - EXIT
         else
             warn "No user — attempting guest mount (works only if the server allows guest access)"
-            sudo mount -t cifs "$what" "$where" -o "guest,$(mount_opts "")"
+            try_mount "$what" "$where" "guest,$(mount_opts)" || diagnose_mount_failure "${MOUNT_ERR:-}"
         fi
-        log "Mounted $what at $where"
+
+        read_test_or_rollback "$where" "$what"
+        log "Mounted $what at $where (read test passed)"
+        notify_send "SMB mounted: $what → $where"
         ;;
 
     unmount)
@@ -103,8 +245,21 @@ case "$cmd" in
         [ -n "$where" ] || err "Usage: pos share smb-client unmount <local-dir>"
         validate_dir "$where"
 
-        sudo umount "$where"
+        src="$(mounted_src "$where")"
+        if [ -z "$src" ]; then
+            log "Nothing mounted at $where"
+            exit 0
+        fi
+        if ! out="$(sudo umount "$where" 2>&1)"; then
+            if grep -qE "busy|in use" <<<"$out"; then
+                warn "$where is busy (${src})"
+                confirm "Force a lazy unmount now?" y && { run sudo umount -l "$where"; log "Lazy-unmounted $where"; exit 0; }
+                err "Still mounted. Find the blocker: sudo lsof +D $where  (or fuser -vm $where)"
+            fi
+            err "Unmount failed: $out"
+        fi
         log "Unmounted $where"
+        notify_send "SMB unmounted: $where"
         ;;
 
     list)
@@ -141,12 +296,30 @@ case "$cmd" in
         [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share smb-client persist <//server/share> <local-dir> [user]"
         validate_share "$what"
         validate_dir "$where"
+        split_share "$what"
+
+        probe_server "$SERVER"
+
+        if src="$(mounted_src "$where")"; [ -n "$src" ]; then
+            err "$where is already mounted (source: ${src:-unknown}) — nothing done.
+  Active mount + automount units conflict; unmount first:
+    pos share smb-client unmount $where"
+        fi
 
         unit="$(systemd-escape --path --suffix=mount "$where")"
         auto_unit="${unit%.mount}.automount"
         unit_file="${UNIT_DIR}/${unit}"
         auto_file="${UNIT_DIR}/${auto_unit}"
-        opts="$(mount_opts "$user"),_netdev,noexec"
+
+        if [ -e "$unit_file" ] || [ -e "$auto_file" ]; then
+            warn "Units for $where already exist — they will be REPLACED:"
+            if [ -e "$unit_file" ]; then warn "  ${unit_file}"; fi
+            if [ -e "$auto_file" ]; then warn "  ${auto_file}"; fi
+            confirm "Replace them?" n || err "Aborted — units left untouched"
+        fi
+
+        opts="$(mount_opts),_netdev,noexec"
+        creds_file=""
         if [ -n "$user" ]; then
             creds_file="$SMB_CREDS_DIR/$(basename "$where")"
             sudo mkdir -p "$SMB_CREDS_DIR"
@@ -159,7 +332,23 @@ case "$cmd" in
             opts="guest,$opts"
         fi
 
-        sudo mkdir -p "$where"
+        rollback_persist() {
+            warn "Rolling back everything this command created…"
+            sudo systemctl disable "$auto_unit" 2>/dev/null || true
+            sudo systemctl stop "$auto_unit" 2>/dev/null || true
+            sudo systemctl disable "$unit" 2>/dev/null || true
+            sudo systemctl stop "$unit" 2>/dev/null || true
+            sudo rm -f "$unit_file" "$auto_file"
+            if [ -n "$creds_file" ]; then sudo rm -f "$creds_file"; fi
+            sudo systemctl daemon-reload 2>/dev/null || true
+        }
+
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) write $unit_file + $auto_file (Type=cifs, Options=$opts)"
+            log "(dry-run) daemon-reload + enable --now $auto_unit"
+            exit 0
+        fi
+
         cat <<UNIT | sudo tee "$unit_file" >/dev/null
 [Unit]
 Description=SMB mount of ${what} at ${where}
@@ -183,8 +372,37 @@ Where=${where}
 WantedBy=multi-user.target
 UNIT
         sudo systemctl daemon-reload
-        sudo systemctl enable --now "$auto_unit"
+
+        # Enable, then prove the automount actually serves the share before
+        # declaring victory — a broken unit here would bite months later.
+        if ! out="$(sudo systemctl enable --now "$auto_unit" 2>&1)"; then
+            rollback_persist
+            err "Could not enable $auto_unit: $out"
+        fi
+
+        ls "$where" >/dev/null 2>&1 || true   # poke the automount
+        verified=0
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if [ -n "$(mounted_src "$where")" ]; then verified=1; break; fi
+            sleep 0.5
+        done
+        if [ "$verified" -ne 1 ]; then
+            rollback_persist
+            err "Automount did not trigger for $where — units removed again.
+  Check: systemctl status $auto_unit"
+        fi
+
+        # Same read-proof as one-shot mounts: catch permission problems now.
+        if ! timeout 5 ls -A "$where" >/dev/null 2>&1; then
+            rollback_persist
+            err "Automount triggered but $where is not readable — units + credentials removed.
+  Login works but file permissions don't — fix unix perms on the server
+  (the shared folder itself needs r-x for the connecting user).
+  Details: DOC/howto/share.md (SMB troubleshooting)"
+        fi
+
         log "Persistent SMB mount (automount): ${what} → ${where} (${auto_unit})"
+        log "Verified: automount triggers and the share is readable"
         notify_send "SMB mount persisted: ${what} → ${where}"
         ;;
 
@@ -199,7 +417,7 @@ UNIT
         auto_file="${UNIT_DIR}/${auto_unit}"
 
         if [ ! -f "$unit_file" ] && [ ! -f "$auto_file" ]; then
-            warn "No systemd mount unit for $where (${unit})"
+            log "No persistent SMB mount for $where — nothing to do"
             exit 0
         fi
 
@@ -211,6 +429,11 @@ UNIT
         sudo rm -f "$SMB_CREDS_DIR/$(basename "$where")"
         sudo rmdir "$SMB_CREDS_DIR" 2>/dev/null || true
         sudo systemctl daemon-reload
+
+        if [ -n "$(mounted_src "$where")" ]; then
+            warn "$where is still mounted (something holds it open)"
+            if confirm "Force a lazy unmount now?" y; then run sudo umount -l "$where"; fi
+        fi
         log "Removed persistent SMB mount: $where"
         notify_send "SMB persistent mount removed: $where"
         ;;
