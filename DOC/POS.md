@@ -210,6 +210,17 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 | `pos media mp3 <url>` | `bin/pos-media-mp3` | Download audio as MP3 via yt-dlp, with thumbnail + metadata | Output to `~/Music/%(title)s.%(ext)s`, `--audio-quality 0` |
 | `pos media mp4 <url>` | `bin/pos-media-mp4` | Download video via yt-dlp with **interactive format selection** | Lists formats (`yt-dlp -F`), asks for a format ID, saves to `~/Videos/` |
 | `pos media sync [--mp3\|--mp4]` | `bin/pos-media-sync` | Incremental Music → USB sync (add/update only — never deletes) | Copies mp3/mp4 from `$HOME/Music` (or `--source <dir>`) into `<usb>/Music/`, preserving the tree; missing or changed (size/mtime) files are copied, identical ones skipped. Same USB detection as `pos system backup` (lsblk TRAN + lsusb/by-id, mount offer for unmounted sticks, multi-stick picker). `--mp3`/`--mp4` filter by extension, neither = both; `--dry-run` previews. Config: `MEDIA_SYNC_SOURCE`, `MEDIA_SYNC_DEST`, shared `USB_MOUNT_BASE`/`USB_BYID` from `~/.config/linux_post_install/system.env`. Result notified via `lib/notify.sh` |
+| `pos media ytsync [add\|sync\|list\|remove]` | `bin/pos-media-ytsync` | Incremental YouTube channel/playlist sync — first run asks for a URL (bare invocation = interactive menu; empty state goes straight to the prompt), repeat runs fetch only new videos | One yt-dlp call per new video (`bestvideo*+bestaudio/best` → MP4, metadata/chapters/thumbnail embedded, `--no-overwrites`, `--windows-filenames --trim-filenames 120`); per-source `--download-archive` (`~/.local/share/linux_post_install/ytsync/archive/<slug>.txt`) makes runs crash-safe and idempotent; registry tracks slug/type/url/subdir. Verbs never prompt (scheduler/timer safe); non-tty interactive entry prints a guard line and exits 0. `--dry-run` probes + plans with zero writes. Notify digest only when new>0 or failed>0 via `lib/notify.sh`. Config: `YTSYNC_VIDEOS_DIR`, `YTSYNC_EXTRA_ARGS` via `pos config ytsync`; automate with `pos system schedule` (`COMMAND=pos media ytsync sync`, `NOTIFY=never`) |
+
+A watch link carrying **both** `?v=` and `&list=` downloads only that single video
+(`--no-playlist`) — nobody accidentally backfills a 500-video playlist from a watch
+link; a pure playlist link becomes a tracked playlist source with numbered
+`<NNN> - <title>.mp4` files. `pos media ytsync remove <name>` stops tracking but
+keeps the downloaded files AND the archive — re-adding the same source later
+resumes incrementally instead of re-downloading. Members-only/age-gated videos are
+reported as "N videos require sign-in — skipped" (escape hatch:
+`YTSYNC_EXTRA_ARGS="--cookies …"` in `ytsync.env`). Research details:
+`tools-docs/ytsync.md`.
 
 ### system
 

@@ -1,0 +1,1180 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: media ytsync — Incrementally sync YouTube channels/playlists into ~/Videos
+# POS_SUBCMDS: add sync list remove
+# POS_FLAGS: --dry-run
+# POS_CONFIG: ytsync | ytsync.env | YTSYNC_VIDEOS_DIR=:Videos root for synced channels (default ~/Videos) | YTSYNC_EXTRA_ARGS=:Extra yt-dlp flags appended verbatim to every yt-dlp call (advanced)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+if ! command -v notify_send >/dev/null 2>&1; then
+    notify_send() { return 0; }   # notify.sh absent → silent no-op (opt-in by design)
+fi
+
+# ── Global flag pre-scan ────────────────────────────────────────────
+DRY_RUN=0
+for _arg in "$@"; do
+    if [ "$_arg" = "--dry-run" ]; then DRY_RUN=1; fi
+done
+
+# ── Deps guards (before -h|--help; yt-dlp+jq active EVEN under --dry-run,
+#    because the preview IS the probe — deliberate divergence from mp3/mp4) ──
+command -v yt-dlp >/dev/null 2>&1 || err "yt-dlp not found — installed by preinstall.sh (GitHub release → /usr/local/bin); run ./preinstall.sh or see DOC/howto/media.md"
+command -v jq >/dev/null 2>&1 || err "jq not found (needed to parse yt-dlp probe output) — install it with: sudo apt install jq"
+if [ "$DRY_RUN" -eq 0 ]; then
+    command -v ffmpeg >/dev/null 2>&1 || err "ffmpeg not found (needed for MP4 merge) — install it with: sudo apt install ffmpeg"
+fi
+
+# ── Runtime config (~/.config/linux_post_install/ytsync.env) ────────
+# Exported environment wins over the file; defaults come last.
+_YTSYNC_CFG="$CONFIG_DIR/ytsync.env"
+if [ -f "$_YTSYNC_CFG" ]; then
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in ''|\#*) continue ;; esac
+        case "$_line" in
+            YTSYNC_VIDEOS_DIR=*)
+                _v="${_line#*=}"
+                _v="${_v%\"}"; _v="${_v#\"}"; _v="${_v%\'}"; _v="${_v#\'}"
+                : "${YTSYNC_VIDEOS_DIR:=$_v}"
+                ;;
+            YTSYNC_EXTRA_ARGS=*)
+                _v="${_line#*=}"
+                _v="${_v%\"}"; _v="${_v#\"}"; _v="${_v%\'}"; _v="${_v#\'}"
+                : "${YTSYNC_EXTRA_ARGS:=$_v}"
+                ;;
+        esac
+    done <"$_YTSYNC_CFG"
+fi
+
+# ── Env seams (all written VAR="${VAR:-default}") ───────────────────
+YTSYNC_VIDEOS_DIR="${YTSYNC_VIDEOS_DIR:-$HOME/Videos}"   # user key AND test seam
+YTSYNC_STATE_DIR="${YTSYNC_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/share}/linux_post_install/ytsync}"
+
+REG_FILE="$YTSYNC_STATE_DIR/registry"
+ARCHIVE_DIR="$YTSYNC_STATE_DIR/archive"
+HIST_FILE="$YTSYNC_STATE_DIR/history.log"
+
+BAD_URL_MSG="Not a YouTube URL — expected a channel (@handle, /c/, /user/), a playlist (?list=…), or a video link"
+
+usage() {
+    cat <<'EOF'
+Usage: pos media ytsync [command] [args]
+
+Incrementally download YouTube channels/playlists into ~/Videos.
+First run asks for a channel URL; repeat runs fetch only new videos.
+
+Commands:
+  add [url]         Register a source and download it (asks for URL if omitted)
+  sync [name]       Incremental sync of tracked sources (all, if no name given)
+  list              Show tracked sources and their status
+  remove <name>     Stop tracking a source (keeps downloaded files)
+
+Options:
+  --dry-run         Show what would be downloaded, fetch nothing
+  -h, --help        This help
+
+Layout:
+  Videos/<channel>/<playlist>/<NNN> - <title>.<ext>   (playlist sources)
+  Videos/<channel>/<title>.<ext>                      (channel/video sources)
+
+Notes:
+  Existing files are never overwritten; renamed/retitled videos keep their
+  local filename. Unattended/scheduled use: 'pos media ytsync sync'.
+  A watch link carrying BOTH ?v= and &list= downloads only that single video
+  (--no-playlist), never the whole playlist. 'remove' keeps the downloaded
+  files AND the archive — re-adding the same source later resumes
+  incrementally instead of re-downloading.
+
+Examples:
+  pos media ytsync                                  # interactive
+  pos media ytsync add https://youtube.com/@SomeChannel
+  pos media ytsync sync                             # cron/timer entry point
+  pos media ytsync sync --dry-run                   # preview only
+  pos media ytsync list
+
+Environment:
+  YTSYNC_VIDEOS_DIR   Videos root (default: $HOME/Videos)
+  YTSYNC_EXTRA_ARGS   Extra yt-dlp flags appended to every download call
+  Both editable via 'pos config ytsync'.
+EOF
+    exit 0
+}
+
+# ── Small shared helpers ────────────────────────────────────────────
+_tmpfiles=()
+cleanup() {
+    if [ "${#_tmpfiles[@]}" -gt 0 ]; then
+        rm -f "${_tmpfiles[@]}" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+
+newtmp() {
+    local t
+    t="$(mktemp)"
+    _tmpfiles+=("$t")
+    printf '%s' "$t"
+}
+
+_pretty() {   # collapse a $HOME prefix to ~ for display only
+    local p="$1"
+    case "$p" in
+        "$HOME") printf '~' ;;
+        "$HOME"/*) printf '~%s' "${p#"$HOME"}" ;;
+        *) printf '%s' "$p" ;;
+    esac
+}
+
+fmt_dur() {   # seconds → "4m12s" / "37s" / "1h05m"
+    local s="$1"
+    if [ "$s" -ge 3600 ]; then
+        printf '%dh%02dm' $((s / 3600)) $(((s % 3600) / 60))
+    elif [ "$s" -ge 60 ]; then
+        printf '%dm%02ds' $((s / 60)) $((s % 60))
+    else
+        printf '%ss' "$s"
+    fi
+}
+
+secs_since() {   # nanosecond start stamp → whole seconds elapsed
+    local end
+    end=$(_nano_now)
+    echo $(((end - $1) / 1000000000))
+}
+
+is_youtube_url() {
+    local u="$1"
+    case "$u" in
+        http://*youtube.com/* | https://*youtube.com/* | \
+            http://*youtu.be/* | https://*youtu.be/* | \
+            www.youtube.com/* | m.youtube.com/* | music.youtube.com/* | \
+            youtube.com/* | youtu.be/* | @*)
+            return 0 ;;
+    esac
+    return 1
+}
+
+classify_url() {   # list= without v= → playlist; v= → single video; else channel
+    local u="$1"
+    if [[ "$u" == *list=* && "$u" != *v=* ]]; then
+        printf 'playlist\n'
+    elif [[ "$u" == *v=* ]]; then
+        printf 'video\n'
+    else
+        printf 'channel\n'
+    fi
+}
+
+sanitize_component() {   # safe directory component from a resolved name
+    local s="$1"
+    s="${s//\//-}"
+    s="$(printf '%s' "$s" | sed -E 's/^[[:space:].]+//; s/[[:space:].]+$//')"
+    s="${s:0:80}"
+    if [ -z "$s" ]; then s="YouTube"; fi
+    printf '%s' "$s"
+}
+
+slugify() {   # unique internal key [a-z0-9][a-z0-9_-]*
+    local s
+    s="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    s="$(printf '%s' "$s" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-60)"
+    if [ -z "$s" ]; then s="source"; fi
+    case "$s" in
+        [a-z0-9]*) ;;
+        *) s="c$s" ;;
+    esac
+    printf '%s' "$s"
+}
+
+# ── Registry (machine-owned state; \x1f-delimited records) ──────────
+# slug ⇥ type ⇥ url ⇥ subdir ⇥ playlist_title ⇥ added_ts
+registry_entries() {
+    if [ -f "$REG_FILE" ]; then
+        cat "$REG_FILE"
+    fi
+    return 0
+}
+
+registry_count() {
+    local n=""
+    if [ -f "$REG_FILE" ]; then
+        n="$(grep -c . "$REG_FILE" 2>/dev/null || true)"
+    fi
+    printf '%s' "${n:-0}"
+}
+
+registry_has_slug() {
+    local s="$1" line f1
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        f1="${line%%$'\x1f'*}"
+        if [ "$f1" = "$s" ]; then return 0; fi
+    done < <(registry_entries)
+    return 1
+}
+
+unique_slug() {   # numeric -2 suffix on collision (checks registry slugs only)
+    local base="$1" cand n=2
+    cand="$base"
+    while registry_has_slug "$cand"; do
+        cand="${base}-${n}"
+        n=$((n + 1))
+    done
+    printf '%s' "$cand"
+}
+
+registry_add_line() {   # atomic append (temp+mv)
+    local line="$1" tmp
+    mkdir -p "$YTSYNC_STATE_DIR"
+    tmp="$(mktemp "$YTSYNC_STATE_DIR/.registry.XXXXXX")"
+    _tmpfiles+=("$tmp")
+    {
+        if [ -f "$REG_FILE" ]; then cat "$REG_FILE"; fi
+        printf '%s\n' "$line"
+    } >"$tmp"
+    mv "$tmp" "$REG_FILE"
+}
+
+registry_remove_slug() {   # atomic rewrite without the slug's line
+    local slug="$1" tmp line f1
+    mkdir -p "$YTSYNC_STATE_DIR"
+    tmp="$(mktemp "$YTSYNC_STATE_DIR/.registry.XXXXXX")"
+    _tmpfiles+=("$tmp")
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || continue
+        f1="${line%%$'\x1f'*}"
+        if [ "$f1" = "$slug" ]; then continue; fi
+        printf '%s\n' "$line"
+    done < <(registry_entries) >"$tmp"
+    mv "$tmp" "$REG_FILE"
+}
+
+# ── Archive + history ───────────────────────────────────────────────
+is_archived() {   # native yt-dlp archive format "<extractor> <id>"; exact-field match
+    local id="$1" f="$2"
+    [ -f "$f" ] || return 1
+    awk -v want="$id" '$2 == want { found=1; exit } END { exit(found ? 0 : 1) }' "$f"
+}
+
+archive_count() {
+    local slug="$1" n=""
+    if [ -f "$ARCHIVE_DIR/$slug.txt" ]; then
+        n="$(wc -l <"$ARCHIVE_DIR/$slug.txt")"
+        n="$(printf '%s' "$n" | tr -d '[:space:]')"
+    fi
+    printf '%s' "${n:-0}"
+}
+
+append_history() {   # <date> · <name> · N new · M skipped · K failed
+    mkdir -p "$YTSYNC_STATE_DIR"
+    printf '%s · %s · %s new · %s skipped · %s failed\n' \
+        "$(date '+%Y-%m-%d %H:%M')" "$1" "$2" "$3" "$4" >>"$HIST_FILE"
+}
+
+append_history_failed() {
+    mkdir -p "$YTSYNC_STATE_DIR"
+    printf '%s · %s · FAILED (probe)\n' "$(date '+%Y-%m-%d %H:%M')" "$1" >>"$HIST_FILE"
+}
+
+last_sync_of() {   # newest history line naming <display name>, date field only
+    local name="$1" last=""
+    if [ -f "$HIST_FILE" ]; then
+        last="$(grep -F " · $name · " "$HIST_FILE" 2>/dev/null | tail -n 1 | cut -d'·' -f1 || true)"
+        last="${last% }"
+    fi
+    printf '%s' "${last:--}"
+}
+
+last_run_overall() {
+    local last=""
+    if [ -f "$HIST_FILE" ]; then
+        last="$(tail -n 1 "$HIST_FILE" | cut -d'·' -f1 || true)"
+        last="${last% }"
+    fi
+    printf '%s' "$last"
+}
+
+# ── Probe (yt-dlp --flat-playlist -J, parsed with jq) ───────────────
+# spawn()-shaped UX but RETURNS failure instead of exiting: the interactive add
+# flow re-prompts up to 3× and a failing source during sync must not kill the
+# others' passes (spawn() exits the process on failure — unusable here).
+# Spinner frames are TTY-only so no \r bytes ever reach the dispatcher tee log.
+PROBE_JSON=""
+PROBE_ERR=""
+
+run_probe() {   # run_probe <url>
+    local url="$1"
+    PROBE_JSON="$(newtmp)"
+    PROBE_ERR="$(newtmp)"
+    local msg="Resolving source …" start rc pid elapsed i
+    start=$(_nano_now)
+    yt-dlp --flat-playlist -J --no-warnings -- "$url" >"$PROBE_JSON" 2>"$PROBE_ERR" &
+    pid=$!
+    if [ -t 1 ]; then
+        local spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        i=0
+        while kill -0 "$pid" 2>/dev/null; do
+            printf '\r%s  %s%s %s' "$CYAN" "${spin[$i]}" "$RESET" "$msg"
+            i=$(((i + 1) % ${#spin[@]}))
+            sleep 0.1
+        done
+    else
+        printf '%s\n' "$msg"
+    fi
+    rc=0
+    wait "$pid" || rc=$?
+    elapsed=$(_elapsed "$start")
+    if [ "$rc" -eq 0 ]; then
+        if [ -t 1 ]; then
+            printf '\r%s  OK%s %s (%s)\n' "$GREEN" "$RESET" "$msg" "$elapsed"
+        else
+            printf '%s  OK %s (%s)\n' "$GREEN" "$msg" "$elapsed"
+        fi
+    else
+        if [ -t 1 ]; then
+            printf '\r%s  FAIL%s %s (%s)\n' "$RED" "$RESET" "$msg" "$elapsed"
+        else
+            printf '%s  FAIL %s (%s)\n' "$RED" "$msg" "$elapsed"
+        fi
+    fi
+    return "$rc"
+}
+
+probe_fail_reason() {   # echoes "notfound" | "unreachable" (reads $PROBE_ERR)
+    if grep -qiE 'not found|private|does not exist|404|unavailable|removed' "$PROBE_ERR" 2>/dev/null; then
+        printf 'notfound\n'
+    else
+        printf 'unreachable\n'
+    fi
+}
+
+parse_probe() {   # sets P_NAME P_OWNER P_TITLE P_KEY from $PROBE_JSON
+    jq -e 'type == "object"' "$PROBE_JSON" >/dev/null 2>&1 || return 1
+    P_NAME="$(jq -r '.channel // .uploader // .uploader_id // .title // ""' "$PROBE_JSON")"
+    P_OWNER="$(jq -r '.channel // .uploader // .uploader_id // ""' "$PROBE_JSON")"
+    P_TITLE="$(jq -r '.title // ""' "$PROBE_JSON")"
+    P_KEY="$(jq -r '.uploader_id // .channel_id // .id // ""' "$PROBE_JSON")"
+    return 0
+}
+
+ENTRY_IDS=()
+ENTRY_TITLES=()
+
+collect_entries() {   # flat .entries[] or a single video object (?v= URLs)
+    ENTRY_IDS=()
+    ENTRY_TITLES=()
+    local n p id t
+    n="$(jq -r '((.entries // []) | length)' "$PROBE_JSON")"
+    if [ "$n" -gt 0 ]; then
+        local -a pairs=()
+        mapfile -t pairs < <(jq -r '.entries[] | ((.id // "") + "\u001f" + (.title // ""))' "$PROBE_JSON")
+        for p in "${pairs[@]}"; do
+            id="${p%%$'\x1f'*}"
+            t="${p#*$'\x1f'}"
+            ENTRY_IDS+=("$id")
+            ENTRY_TITLES+=("$t")
+        done
+    else
+        ENTRY_IDS+=("$(jq -r '.id // ""' "$PROBE_JSON")")
+        ENTRY_TITLES+=("$(jq -r '.title // ""' "$PROBE_JSON")")
+    fi
+}
+
+NEW_IDS=()
+NEW_TITLES=()
+NEW_POS=()
+NEW_TOTAL=0
+SIGNIN_COUNT=0
+TOTAL_VALID=0
+
+is_signin_skipped() {   # empty id OR "[Private"/"[Deleted"/"[Unavailable" titles
+    if [ -z "$1" ]; then return 0; fi
+    case "$2" in
+        "[Private"* | "[Deleted"* | "[Unavailable"*) return 0 ;;
+    esac
+    return 1
+}
+
+compute_new_list() {   # $1 = archive file; diff entry ids against it BEFORE downloads
+    local archive="$1"
+    NEW_IDS=()
+    NEW_TITLES=()
+    NEW_POS=()
+    NEW_TOTAL=0
+    SIGNIN_COUNT=0
+    TOTAL_VALID=0
+    local i n id t pos=0
+    n="${#ENTRY_IDS[@]}"
+    for ((i = 0; i < n; i++)); do
+        id="${ENTRY_IDS[$i]}"
+        t="${ENTRY_TITLES[$i]}"
+        pos=$((pos + 1))
+        if is_signin_skipped "$id" "$t"; then
+            SIGNIN_COUNT=$((SIGNIN_COUNT + 1))
+            continue
+        fi
+        TOTAL_VALID=$((TOTAL_VALID + 1))
+        if ! is_archived "$id" "$archive"; then
+            NEW_IDS+=("$id")
+            NEW_TITLES+=("$t")
+            NEW_POS+=("$pos")
+            NEW_TOTAL=$((NEW_TOTAL + 1))
+        fi
+    done
+    return 0
+}
+
+# ── Per-video download (NEVER wrapped in spawn(): hours-long batches need a
+#    live heartbeat; spawn captures output until completion) ────────────────
+DL_ERRCAP=""
+DL_RC=0
+
+download_video() {   # <archive> <template> <video_id> <type>; stderr→$DL_ERRCAP
+    local archive="$1" tpl="$2" vid="$3" vtype="$4"
+    local -a dl=(
+        yt-dlp
+        -f "bestvideo*+bestaudio/best"
+        --merge-output-format mp4
+        --embed-metadata --embed-chapters
+        --embed-thumbnail
+        --no-overwrites
+        --download-archive "$archive"
+        --windows-filenames
+        --trim-filenames 120
+        --retries 3 --fragment-retries 3
+    )
+    if [ "$vtype" = "video" ]; then dl+=(--no-playlist); fi
+    dl+=(--quiet --no-warnings)
+    if [ -t 1 ]; then dl+=(--progress); fi
+    if [ -n "${YTSYNC_EXTRA_ARGS:-}" ]; then
+        local -a extra=()
+        read -r -a extra <<<"$YTSYNC_EXTRA_ARGS" || true
+        if [ "${#extra[@]}" -gt 0 ]; then dl+=("${extra[@]}"); fi
+    fi
+    dl+=(-o "$tpl" "https://www.youtube.com/watch?v=$vid")
+    DL_ERRCAP="$(newtmp)"
+    DL_RC=0
+    "${dl[@]}" 2>"$DL_ERRCAP" || DL_RC=$?
+}
+
+# ── Failure-alarm trap (media-sync precedent), armed per pass ───────
+CURRENT_SOURCE=""
+arm_fail_alarm() {
+    CURRENT_SOURCE="$1"
+    trap 'notify_send "⚠️ ytSync FAILED for ${CURRENT_SOURCE}"' ERR
+}
+disarm_fail_alarm() {
+    trap - ERR
+    CURRENT_SOURCE=""
+}
+
+# ── Run-result accumulators ─────────────────────────────────────────
+G_NEW=0
+G_PRESENT=0
+G_FAILED=0
+G_WHOLEFAIL=0
+G_SOURCES=0
+NOTIFY_TITLES=()
+NOTIFY_MORE=0
+NOTIFY_NAMES_NEW=()
+NOTIFY_NAMES_FAIL=()
+NOTIFY_SRC_NEW=0
+NOTIFY_DEST=""
+PASS_ROWS=()
+
+reset_globals() {
+    G_NEW=0
+    G_PRESENT=0
+    G_FAILED=0
+    G_WHOLEFAIL=0
+    G_SOURCES=0
+    NOTIFY_TITLES=()
+    NOTIFY_MORE=0
+    NOTIFY_NAMES_NEW=()
+    NOTIFY_NAMES_FAIL=()
+    NOTIFY_SRC_NEW=0
+    NOTIFY_DEST=""
+    PASS_ROWS=()
+}
+
+join_comma() {   # join_comma <array-name>
+    local -n arr="$1"
+    local out="" el
+    for el in "${arr[@]}"; do
+        if [ -z "$out" ]; then out="$el"; else out="${out}, ${el}"; fi
+    done
+    printf '%s' "$out"
+}
+
+send_digest() {   # noteworthy-only: new>0 or failed>0 (silent noop runs)
+    if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
+    if [ "$G_NEW" -gt 0 ]; then
+        local msg t dest
+        msg="📺 ytSync — ${G_NEW} new videos: $(join_comma NOTIFY_NAMES_NEW)"
+        for t in "${NOTIFY_TITLES[@]}"; do
+            msg+=$'\n• '"${t}"
+        done
+        if [ "$NOTIFY_MORE" -gt 0 ]; then
+            msg+=$'\n…and '"${NOTIFY_MORE}"' more'
+        fi
+        if [ "$NOTIFY_SRC_NEW" -eq 1 ]; then
+            dest="$NOTIFY_DEST"
+        else
+            dest="$YTSYNC_VIDEOS_DIR"
+        fi
+        msg+=$'\n→ '"$(_pretty "$dest")"
+        notify_send "$msg"
+    fi
+    if [ "$G_FAILED" -gt 0 ]; then
+        notify_send "⚠️ ytSync — ${G_FAILED} videos failed: $(join_comma NOTIFY_NAMES_FAIL) (run 'pos media ytsync sync' to retry)"
+    elif [ "$G_WHOLEFAIL" -gt 0 ]; then
+        notify_send "⚠️ ytSync — ${G_WHOLEFAIL} sources failed: $(join_comma NOTIFY_NAMES_FAIL) (check connectivity; run 'pos media ytsync sync' to retry)"
+    fi
+    return 0
+}
+
+# ── Per-source pass engine ──────────────────────────────────────────
+S_SLUG="" S_TYPE="" S_URL="" S_SUBDIR="" S_TITLE=""
+R_NEW=0 R_PRESENT=0 R_FAILED=0 R_EXISTS=0 R_SIGNIN=0 R_STOPPED=""
+
+pass_prepare() {   # fresh probe + diff; rc 0 ok / 1 wholesale failure
+    R_NEW=0
+    R_PRESENT=0
+    R_FAILED=0
+    R_EXISTS=0
+    R_SIGNIN=0
+    R_STOPPED=""
+    CURRENT_SOURCE="${S_SUBDIR##*/}"
+    if ! run_probe "$S_URL"; then
+        if [ "$(probe_fail_reason)" = "notfound" ]; then
+            warn "source not found or private: $S_URL — skipping"
+        else
+            warn "could not reach YouTube — check your connection and try again (${CURRENT_SOURCE})"
+        fi
+        return 1
+    fi
+    if ! parse_probe; then
+        warn "unexpected yt-dlp probe output for ${CURRENT_SOURCE} — skipping"
+        return 1
+    fi
+    collect_entries
+    compute_new_list "$ARCHIVE_DIR/$S_SLUG.txt"
+    R_SIGNIN="$SIGNIN_COUNT"
+    R_PRESENT=$((TOTAL_VALID - NEW_TOTAL))
+    return 0
+}
+
+print_dry_plan_for_current() {
+    if [ "$R_SIGNIN" -gt 0 ]; then
+        warn "${R_SIGNIN} videos require sign-in — skipped"
+    fi
+    printf 'Source   : %s\n' "$S_URL"
+    printf 'Resolved : %s (%s · %s videos)\n' "${P_NAME:-${S_SUBDIR##*/}}" "$S_TYPE" "$TOTAL_VALID"
+    printf 'Library  : %s/\n' "$(_pretty "$YTSYNC_VIDEOS_DIR/$S_SUBDIR")"
+    printf 'New      : %s would be downloaded (%s already present)\n' "$NEW_TOTAL" "$R_PRESENT"
+    local i shown=0 ex
+    for ((i = 0; i < NEW_TOTAL; i++)); do
+        if [ "$shown" -ge 5 ]; then break; fi
+        if [ "$S_TYPE" = "playlist" ]; then
+            ex="$(printf '%03d - %s.mp4' "${NEW_POS[$i]}" "${NEW_TITLES[$i]}")"
+        else
+            ex="${NEW_TITLES[$i]}.mp4"
+        fi
+        printf '  %s\n' "$ex"
+        shown=$((shown + 1))
+    done
+    if [ "$NEW_TOTAL" -gt "$shown" ]; then
+        printf '  … %s more\n' "$((NEW_TOTAL - shown))"
+    fi
+    printf 'DRY RUN complete — %s new would be fetched → %s/%s\n' \
+        "$NEW_TOTAL" "$(_pretty "$YTSYNC_VIDEOS_DIR")" "$S_SUBDIR"
+    return 0
+}
+
+pass_execute() {
+    local name="${S_SUBDIR##*/}"
+    local archive="$ARCHIVE_DIR/$S_SLUG.txt"
+    local destdir="$YTSYNC_VIDEOS_DIR/$S_SUBDIR"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        print_dry_plan_for_current
+        G_SOURCES=$((G_SOURCES + 1))
+        G_NEW=$((G_NEW + NEW_TOTAL))
+        G_PRESENT=$((G_PRESENT + R_PRESENT))
+        PASS_ROWS+=("${name} — ${NEW_TOTAL} new · ${R_PRESENT} present")
+        return 0
+    fi
+
+    if [ "$R_SIGNIN" -gt 0 ]; then
+        warn "${R_SIGNIN} videos require sign-in — skipped"
+    fi
+    log "${name} — ${NEW_TOTAL} new of ${TOTAL_VALID}"
+
+    if [ "${#NEW_IDS[@]}" -eq 0 ]; then
+        ok "Sync complete: 0 new, ${R_PRESENT} already present, 0 failed → ${destdir}"
+        append_history "$name" 0 "$R_PRESENT" 0
+        G_SOURCES=$((G_SOURCES + 1))
+        G_PRESENT=$((G_PRESENT + R_PRESENT))
+        PASS_ROWS+=("${name} — 0 new · ${R_PRESENT} present · 0 failed")
+        return 0
+    fi
+    mkdir -p "$destdir" "$ARCHIVE_DIR"
+
+    arm_fail_alarm "$name"
+    local i total idx vid vt tpl pos tstart rc
+    total="${#NEW_IDS[@]}"
+    idx=0
+    for ((i = 0; i < total; i++)); do
+        vid="${NEW_IDS[$i]}"
+        vt="${NEW_TITLES[$i]}"
+        pos="${NEW_POS[$i]}"
+        idx=$((idx + 1))
+        echo "  [$idx/$total] $vt"
+        if [ "$S_TYPE" = "playlist" ]; then
+            tpl="${destdir}/$(printf '%03d' "$pos") - %(title)s.%(ext)s"
+        else
+            tpl="${destdir}/%(title)s.%(ext)s"
+        fi
+        tstart=$(_nano_now)
+        download_video "$archive" "$tpl" "$vid" "$S_TYPE"
+        rc="$DL_RC"
+        if [ "$rc" -eq 0 ]; then
+            ok "[$idx/$total] $vt ($(fmt_dur "$(secs_since "$tstart")"))"
+            R_NEW=$((R_NEW + 1))
+            G_NEW=$((G_NEW + 1))
+            if [ "${#NOTIFY_TITLES[@]}" -lt 5 ]; then
+                NOTIFY_TITLES+=("$vt")
+            else
+                NOTIFY_MORE=$((NOTIFY_MORE + 1))
+            fi
+        elif grep -qE 'No space left on device|Errno 28' "$DL_ERRCAP" 2>/dev/null; then
+            warn "disk full — stopping '${name}' mid-run"
+            sed -n '1,3p' "$DL_ERRCAP" | sed 's/^/    /'
+            R_STOPPED="yes"
+            break
+        elif grep -qiE 'has already been downloaded|already been recorded' "$DL_ERRCAP" 2>/dev/null; then
+            warn "exists, kept: $vt"
+            ok "[$idx/$total] $vt ($(fmt_dur "$(secs_since "$tstart")"))"
+            R_EXISTS=$((R_EXISTS + 1))
+        else
+            warn "unavailable: $vt"
+            sed -n '1,3p' "$DL_ERRCAP" | sed 's/^/    /'
+            R_FAILED=$((R_FAILED + 1))
+            G_FAILED=$((G_FAILED + 1))
+        fi
+    done
+    disarm_fail_alarm
+
+    local present_total=$((R_PRESENT + R_EXISTS))
+    ok "Sync complete: ${R_NEW} new, ${present_total} already present, ${R_FAILED} failed → ${destdir}"
+    append_history "$name" "$R_NEW" "$present_total" "$R_FAILED"
+    G_SOURCES=$((G_SOURCES + 1))
+    G_PRESENT=$((G_PRESENT + present_total))
+    local row="${name} — ${R_NEW} new · ${present_total} present · ${R_FAILED} failed"
+    if [ -n "$R_STOPPED" ]; then row+=" · STOPPED (disk full)"; fi
+    PASS_ROWS+=("$row")
+
+    if [ "$R_NEW" -gt 0 ]; then
+        NOTIFY_NAMES_NEW+=("$name")
+        NOTIFY_SRC_NEW=$((NOTIFY_SRC_NEW + 1))
+        NOTIFY_DEST="$destdir"
+    fi
+    if [ "$R_FAILED" -gt 0 ]; then
+        NOTIFY_NAMES_FAIL+=("$name")
+    fi
+    return 0
+}
+
+# ── Add flow ────────────────────────────────────────────────────────
+DERIVED_SLUG=""
+DERIVED_SUBDIR=""
+
+derive_source_fields() {   # $1=vtype $2=url; needs parsed probe globals
+    local vtype="$1" url="$2"
+    local name="$P_NAME" key="$P_KEY" base subdir title
+    if [ -z "$name" ]; then name="$url"; fi
+    if [ -n "$key" ]; then
+        base="$(slugify "$key")"
+    else
+        base="$(slugify "$name")"
+    fi
+    DERIVED_SLUG="$(unique_slug "$base")"
+    case "$vtype" in
+        playlist)
+            title="$(sanitize_component "${P_TITLE:-Playlist}")"
+            if [ -n "$P_OWNER" ]; then
+                subdir="$(sanitize_component "$P_OWNER")/${title}"
+            else
+                subdir="$title"
+            fi
+            ;;
+        *)
+            subdir="$(sanitize_component "$name")"
+            ;;
+    esac
+    DERIVED_SUBDIR="$subdir"
+}
+
+show_resolution_screen() {   # $1=vtype $2=subdir
+    printf 'Resolved : %s (%s · %s videos)\n' "${P_NAME:-unknown}" "$1" "$TOTAL_VALID"
+    printf 'Library  : %s/\n' "$(_pretty "$YTSYNC_VIDEOS_DIR/$2")"
+    case "$1" in
+        playlist) printf '          └── numbered: <NNN> - <title>.<ext>\n' ;;
+        *) printf '          └── flat videos: <title>.<ext>\n' ;;
+    esac
+}
+
+finish_add() {   # $1=vtype $2=url $3=confirm|explicit — probe already done
+    local vtype="$1" url="$2" mode="$3"
+    collect_entries
+    derive_source_fields "$vtype" "$url"
+    local slug="$DERIVED_SLUG" subdir="$DERIVED_SUBDIR"
+    local name="${subdir##*/}"
+
+    if registry_has_slug "$slug"; then
+        log "'$name' is already tracked — nothing to add (run 'pos media ytsync sync')"
+        return 0
+    fi
+
+    compute_new_list "$ARCHIVE_DIR/$slug.txt"
+    # mirror pass_prepare's counters so pass_execute's summary/digest are
+    # correct on the add path too (archive may hold ids from a previous
+    # tracking period — remove/re-add resume)
+    R_SIGNIN="$SIGNIN_COUNT"
+    R_PRESENT=$((TOTAL_VALID - NEW_TOTAL))
+    show_resolution_screen "$vtype" "$subdir"
+
+    if [ "$DRY_RUN" -eq 0 ]; then
+        if [ "$mode" = "confirm" ]; then
+            local ans=""
+            if ! read -rp "Start download? [Y/n] " ans </dev/tty; then
+                log "Cancelled — nothing changed"
+                return 0
+            fi
+            case "$ans" in
+                n | N | no | NO)
+                    log "Cancelled — nothing changed"
+                    return 0
+                    ;;
+            esac
+        fi
+        mkdir -p "$YTSYNC_STATE_DIR" "$ARCHIVE_DIR"
+        registry_add_line "$(printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s' \
+            "$slug" "$vtype" "$url" "$subdir" "${P_TITLE:-}" "$(date '+%Y-%m-%d %H:%M')")"
+    fi
+
+    S_SLUG="$slug"
+    S_TYPE="$vtype"
+    S_URL="$url"
+    S_SUBDIR="$subdir"
+    S_TITLE="${P_TITLE:-}"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "DRY RUN — nothing will be downloaded"
+        print_dry_plan_for_current
+        return 0
+    fi
+    pass_execute
+    send_digest
+    return 0
+}
+
+require_tty() {
+    if [ ! -t 0 ]; then
+        printf "%s\n" "[!] ytSync needs a terminal for its prompt — use 'pos media ytsync sync' for unattended runs." >&2
+        return 1
+    fi
+    return 0
+}
+
+ASKED_URL=""
+ATTEMPT=1
+
+attempt_exhausted() {   # bumps ATTEMPT; rc 0 → exhausted (cancel), 1 → keep asking
+    ATTEMPT=$((ATTEMPT + 1))
+    [ "$ATTEMPT" -gt 3 ]
+}
+
+ask_url_interactive() {   # sets ASKED_URL; rc 1 = cancelled/EOF
+    ATTEMPT=1
+    ASKED_URL=""
+    local u prompt vtype
+    while :; do
+        if [ "$ATTEMPT" -eq 1 ]; then
+            prompt="Channel or playlist URL: "
+        else
+            prompt="Try again (${ATTEMPT} of 3), or press Enter to cancel: "
+        fi
+        u=""
+        if ! read -rp "$prompt" u </dev/tty; then
+            log "Cancelled — nothing changed"
+            return 1
+        fi
+        if [ -z "$u" ]; then
+            if attempt_exhausted; then
+                log "Cancelled — nothing changed"
+                return 1
+            fi
+            continue
+        fi
+        if ! is_youtube_url "$u"; then
+            warn "$BAD_URL_MSG"
+            if attempt_exhausted; then
+                log "Cancelled — nothing changed"
+                return 1
+            fi
+            continue
+        fi
+        vtype="$(classify_url "$u")"
+        if ! run_probe "$u"; then
+            if [ "$(probe_fail_reason)" = "notfound" ]; then
+                warn "source not found or private: $u"
+            else
+                warn "could not reach YouTube — check your connection and try again"
+            fi
+            if attempt_exhausted; then
+                log "Cancelled — nothing changed"
+                return 1
+            fi
+            continue
+        fi
+        if ! parse_probe; then
+            warn "unexpected yt-dlp probe output"
+            if attempt_exhausted; then
+                log "Cancelled — nothing changed"
+                return 1
+            fi
+            continue
+        fi
+        ASKED_URL="$u"
+        return 0
+    done
+}
+
+cmd_add() {
+    local url="${1:-}"
+    reset_globals
+    if [ -z "$url" ]; then
+        if ! require_tty; then exit 0; fi
+        if ! ask_url_interactive; then return 0; fi
+        url="$ASKED_URL"
+    fi
+    if ! is_youtube_url "$url"; then
+        warn "$BAD_URL_MSG"
+        exit 1
+    fi
+    if ! run_probe "$url"; then
+        if [ "$(probe_fail_reason)" = "notfound" ]; then
+            err "source not found or private: $url"
+        fi
+        warn "could not reach YouTube — check your connection and try again"
+        exit 1
+    fi
+    if ! parse_probe; then
+        err "could not parse yt-dlp probe output for: $url"
+    fi
+    local mode="explicit"
+    if [ -z "${1:-}" ]; then mode="confirm"; fi
+    finish_add "$(classify_url "$url")" "$url" "$mode"
+}
+
+# ── Sync flow ───────────────────────────────────────────────────────
+SYNC_LINES=()
+MATCHING_SLUGS=()
+
+resolve_sources() {   # $1=token-or-empty → SYNC_LINES[]; rc 0 ok / 1 none / 2 ambiguous
+    SYNC_LINES=()
+    MATCHING_SLUGS=()
+    local token="$1" line slug sub
+    if [ -z "$token" ]; then
+        mapfile -t SYNC_LINES < <(registry_entries)
+        if [ "${#SYNC_LINES[@]}" -eq 0 ]; then return 1; fi
+        return 0
+    fi
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        IFS=$'\x1f' read -r slug _ _ sub _ _ <<<"$line"
+        if [ "$token" = "$slug" ] || [ "$token" = "${sub##*/}" ]; then
+            SYNC_LINES+=("$line")
+            MATCHING_SLUGS+=("$slug")
+        fi
+    done < <(registry_entries)
+    if [ "${#SYNC_LINES[@]}" -eq 0 ]; then return 1; fi
+    if [ "${#SYNC_LINES[@]}" -gt 1 ]; then return 2; fi
+    return 0
+}
+
+run_sync_set() {   # iterates SYNC_LINES[]; roll-up + digest; rc 1 iff wholesale failure
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "DRY RUN — nothing will be downloaded"
+    fi
+    local line
+    for line in "${SYNC_LINES[@]}"; do
+        IFS=$'\x1f' read -r S_SLUG S_TYPE S_URL S_SUBDIR S_TITLE rest <<<"$line"
+        if pass_prepare; then
+            pass_execute
+        else
+            G_WHOLEFAIL=$((G_WHOLEFAIL + 1))
+            NOTIFY_NAMES_FAIL+=("${S_SUBDIR##*/}")
+            if [ "$DRY_RUN" -eq 0 ]; then
+                append_history_failed "${S_SUBDIR##*/}"
+            fi
+        fi
+    done
+    if [ "${#PASS_ROWS[@]}" -gt 1 ]; then
+        printf 'Sync summary\n'
+        local row
+        for row in "${PASS_ROWS[@]}"; do
+            printf '  %s\n' "$row"
+        done
+    fi
+    send_digest
+    if [ "$G_WHOLEFAIL" -gt 0 ]; then
+        return 1
+    fi
+    return 0
+}
+
+cmd_sync() {
+    local token="${1:-}"
+    reset_globals
+    local rs=0
+    resolve_sources "$token" || rs=$?
+    if [ "$rs" -eq 1 ]; then
+        if [ -z "$token" ]; then
+            log "nothing tracked yet — add a source with 'pos media ytsync add'"
+            return 0
+        fi
+        err "unknown source '${token}' — see 'pos media ytsync list'"
+    fi
+    if [ "$rs" -eq 2 ]; then
+        err "ambiguous '${token}' — candidates: $(join_comma MATCHING_SLUGS)"
+    fi
+    local src_rc=0
+    run_sync_set || src_rc=$?
+    return "$src_rc"
+}
+
+# ── List flow ───────────────────────────────────────────────────────
+cmd_list() {
+    local count
+    count="$(registry_count)"
+    if [ "$count" -eq 0 ]; then
+        log "nothing tracked yet — add a source with 'pos media ytsync add'"
+        return 0
+    fi
+    printf 'Tracked sources (%s)\n\n' "$count"
+    local wname=4 line slug stype surl ssub stitle sts rest
+    local dn dest vids last
+    local -a names=() types=() vids_last=() dests=()
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        IFS=$'\x1f' read -r slug stype surl ssub stitle sts rest <<<"$line"
+        dn="${ssub##*/}"
+        dest="$(_pretty "$YTSYNC_VIDEOS_DIR/$ssub")"
+        vids="$(archive_count "$slug")"
+        last="$(last_sync_of "$dn")"
+        last="${last:0:10}"
+        names+=("$dn")
+        types+=("$stype")
+        vids_last+=("${vids}|${last}")
+        dests+=("$dest")
+        if [ "${#dn}" -gt "$wname" ]; then wname="${#dn}"; fi
+    done < <(registry_entries)
+
+    printf '  %-*s  %-8s  %6s  %-10s  %s\n' "$wname" "NAME" "TYPE" "VIDEOS" "LAST SYNC" "DESTINATION"
+    local i n vl
+    for ((i = 0; i < ${#names[@]}; i++)); do
+        n="${names[$i]}"
+        vl="${vids_last[$i]}"
+        printf '  %-*s  %-8s  %6s  %-10s  %s\n' \
+            "$wname" "$n" "${types[$i]}" "${vl%%|*}" "${vl#*|}" "${dests[$i]}"
+    done
+    printf '\nState: %s (registry · archive/ · history.log)\n' "$(_pretty "$YTSYNC_STATE_DIR")"
+    return 0
+}
+
+# ── Remove flow ─────────────────────────────────────────────────────
+remove_by_line() {   # $1=registry line — drops tracking, keeps files AND archive
+    local line="$1" slug stype surl ssub stitle sts rest
+    IFS=$'\x1f' read -r slug stype surl ssub stitle sts rest <<<"$line"
+    local name="${ssub##*/}"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "would stop tracking '${name}' — files and archive stay"
+        return 0
+    fi
+    registry_remove_slug "$slug"
+    ok "Stopped tracking '${name}' — files kept in $(_pretty "$YTSYNC_VIDEOS_DIR/$ssub")"
+    log "Archive kept — re-adding this source later resumes incrementally"
+    return 0
+}
+
+cmd_remove() {
+    local token="${1:-}"
+    if [ -z "$token" ]; then
+        err "usage: pos media ytsync remove <name>"
+    fi
+    reset_globals
+    local rs=0
+    resolve_sources "$token" || rs=$?
+    if [ "$rs" -eq 1 ]; then
+        err "unknown source '${token}' — see 'pos media ytsync list'"
+    fi
+    if [ "$rs" -eq 2 ]; then
+        err "ambiguous '${token}' — candidates: $(join_comma MATCHING_SLUGS)"
+    fi
+    remove_by_line "${SYNC_LINES[0]}"
+}
+
+# ── Interactive front door ──────────────────────────────────────────
+menu_render() {
+    {
+        printf '════════════════════════════════════════════\n'
+        printf '  ytSync — YouTube channel sync\n'
+        printf '════════════════════════════════════════════\n'
+        local lr suffix
+        lr="$(last_run_overall)"
+        suffix=""
+        if [ -n "$lr" ]; then suffix=" · last run ${lr}"; fi
+        printf '  1) Sync all channels now   (%s tracked%s)\n' "$(registry_count)" "$suffix"
+        printf '  2) Add a channel or playlist\n'
+        printf '  3) List channels\n'
+        printf '  4) Remove a channel\n'
+        printf '  0) Exit\n'
+        printf '--------------------------------------------\n'
+    } >&2
+}
+
+menu_remove_flow() {
+    local -a lines=() dnames=()
+    mapfile -t lines < <(registry_entries)
+    if [ "${#lines[@]}" -eq 0 ]; then
+        log "nothing tracked yet"
+        return 0
+    fi
+    local line slug stype surl ssub stitle sts rest i pick ans target rs=0
+    for line in "${lines[@]}"; do
+        IFS=$'\x1f' read -r slug stype surl ssub stitle sts rest <<<"$line"
+        dnames+=("${ssub##*/}")
+    done
+    for i in "${!dnames[@]}"; do
+        printf '  %s) %s\n' "$((i + 1))" "${dnames[$i]}" >&2
+    done
+    pick=""
+    if ! read -rp "Remove which channel? [1-${#dnames[@]}], 0=cancel " pick </dev/tty; then
+        log "Cancelled — nothing changed"
+        return 0
+    fi
+    case "$pick" in
+        0 | "" | q | Q)
+            log "Cancelled — nothing changed"
+            return 0
+            ;;
+    esac
+    if [[ ! "$pick" =~ ^[0-9]+$ ]] || [ "$pick" -lt 1 ] || [ "$pick" -gt "${#dnames[@]}" ]; then
+        warn "invalid choice: $pick"
+        return 0
+    fi
+    target="${dnames[$((pick - 1))]}"
+    ans=""
+    if ! read -rp "Stop tracking '${target}'? Files stay in ~/Videos. [y/N]: " ans </dev/tty; then
+        log "Cancelled — nothing changed"
+        return 0
+    fi
+    case "$ans" in
+        y | Y | yes | YES)
+            resolve_sources "$target" || rs=$?
+            if [ "$rs" -ne 0 ]; then
+                warn "could not uniquely resolve '${target}'"
+                return 0
+            fi
+            remove_by_line "${SYNC_LINES[0]}"
+            ;;
+        *)
+            log "Cancelled — nothing changed"
+            ;;
+    esac
+    return 0
+}
+
+interactive_empty_state() {   # zero sources → straight to the URL prompt
+    while :; do
+        if ! ask_url_interactive; then
+            return 0
+        fi
+        finish_add "$(classify_url "$ASKED_URL")" "$ASKED_URL" confirm
+    done
+}
+
+interactive_menu() {
+    if ! require_tty; then exit 0; fi
+    if [ "$(registry_count)" -eq 0 ]; then
+        interactive_empty_state
+        return 0
+    fi
+    local choice rs=0
+    while :; do
+        menu_render
+        choice=""
+        if ! read -rp "Choose: " choice </dev/tty; then
+            return 0
+        fi
+        case "$choice" in
+            1)
+                reset_globals
+                resolve_sources "" || rs=$?
+                if [ "$rs" -eq 0 ]; then
+                    run_sync_set || true
+                fi
+                rs=0
+                ;;
+            2)
+                reset_globals
+                if ask_url_interactive; then
+                    finish_add "$(classify_url "$ASKED_URL")" "$ASKED_URL" confirm
+                fi
+                ;;
+            3) cmd_list ;;
+            4) menu_remove_flow ;;
+            0 | q | Q) return 0 ;;
+            *) : ;;   # unknown choice → redraw
+        esac
+    done
+}
+
+# ── Argument dispatch ───────────────────────────────────────────────
+VERB=""
+TARGET=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1 ;;
+        -h | --help) usage ;;
+        --*) err "unknown option: $1 (see 'pos media ytsync --help')" ;;
+        *)
+            if [ -z "$VERB" ]; then
+                VERB="$1"
+            elif [ -z "$TARGET" ]; then
+                TARGET="$1"
+            else
+                err "too many arguments: $* (see 'pos media ytsync --help')"
+            fi
+            ;;
+    esac
+    shift
+done
+
+if [ -z "$VERB" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf "[!] use 'add --dry-run' or 'sync --dry-run'\n" >&2
+        exit 1
+    fi
+    interactive_menu
+    exit 0
+fi
+
+case "$VERB" in
+    add) cmd_add "$TARGET" ;;
+    sync) cmd_sync "$TARGET" ;;
+    list) cmd_list ;;
+    remove) cmd_remove "$TARGET" ;;
+    *) err "unknown command: $VERB (see 'pos media ytsync --help')" ;;
+esac

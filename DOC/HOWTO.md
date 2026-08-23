@@ -12,7 +12,7 @@ authoritative one-line reference (every command + flag), see
 | `pos ai` | Chat with Google Gemini from CLI or Telegram | [ai](howto/ai.md) |
 | `pos network` | IP info, hotspot, scan, port check, aria2 download daemon | [network](howto/network.md) |
 | `pos docker` | Compose services, container dashboards, disposable VMs | [docker](howto/docker.md) |
-| `pos media` | Download audio/video via yt-dlp | [media](howto/media.md) |
+| `pos media` | Download audio/video via yt-dlp; incremental YouTube channel sync | [media](howto/media.md) |
 | `pos system` | Backups, firewall, health dashboard | [system](howto/system.md) |
 | `pos system schedule` | Scheduled jobs: run a command on a timer, notify on threshold/change/error or silently | [schedule](howto/schedule.md) |
 | `pos ssh` | Load keys into the agent | [ssh](howto/ssh.md) |

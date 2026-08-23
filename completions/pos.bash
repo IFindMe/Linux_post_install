@@ -12,6 +12,7 @@ _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[media-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
 _pos_flags[media-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
 _pos_flags[media-sync]="--mp3 --mp4 --source --dry-run"
+_pos_flags[media-ytsync]="--dry-run"
 _pos_flags[network-checkport]="--tcp --udp --ping --no-banner --versions --timeout"
 _pos_flags[network-download]="--dir --out --split --seed --force --upload --gid --tmux"
 _pos_flags[network-hotspot]="--foreground"
@@ -28,11 +29,14 @@ _pos_subcmds[communication-scrcpy]="devices record tcpip connect push pull scree
 _pos_subcmds[communication-telegram-sender]="send test"
 _pos_subcmds[docker-compose]="ls installed up down restart logs update config"
 _pos_subcmds[docker-vbox]="create enter stop start rm ls"
+_pos_subcmds[media-ytsync]="add sync list remove"
 _pos_subcmds[network-download]="start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace"
+_pos_subcmds[share-smb-client]="mount unmount list persist unpersist"
+_pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
-declare -a _pos_config_scopes=(ai compose entertainment matrix notify scrcpy system telegram)
+declare -a _pos_config_scopes=(ai compose entertainment matrix notify scrcpy system telegram ytsync)
 # GEN:END posconfigscopes
 
 _pos() {

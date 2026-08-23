@@ -153,6 +153,7 @@ EXAMPLES
 
   pos media mp3 <url>                     Download audio as MP3
   pos media mp4 <url>                     Download video as MP4
+  pos media ytsync sync                   Incremental YouTube channel sync
 
   pos system firewall                     Interactive UFW manager
   pos system backup /srv/project          Encrypted (AES-256) folder snapshot
