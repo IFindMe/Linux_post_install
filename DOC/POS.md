@@ -214,7 +214,8 @@ The standalone `vbox` command still works and forwards to `pos docker vbox` (see
 
 A watch link carrying **both** `?v=` and `&list=` downloads only that single video
 (`--no-playlist`) — nobody accidentally backfills a 500-video playlist from a watch
-link; a pure playlist link becomes a tracked playlist source with numbered
+link; `youtu.be/<id>` short links count as watch links too. A pure playlist link
+becomes a tracked playlist source with numbered
 `<NNN> - <title>.mp4` files. `pos media ytsync remove <name>` stops tracking but
 keeps the downloaded files AND the archive — re-adding the same source later
 resumes incrementally instead of re-downloading. Members-only/age-gated videos are

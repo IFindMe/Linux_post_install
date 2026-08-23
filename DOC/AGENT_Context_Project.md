@@ -605,7 +605,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-media-sync` | 164 | Incremental Music → USB sync (mp3/mp4, add/update only) |
-| `bin/pos-media-ytsync` | 1180 | Incrementally sync YouTube channels/playlists into ~/Videos |
+| `bin/pos-media-ytsync` | 1190 | Incrementally sync YouTube channels/playlists into ~/Videos |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | `bin/pos-network-download` | 951 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |

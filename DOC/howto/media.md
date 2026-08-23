@@ -183,7 +183,7 @@ Where files land:
 Notes:
 
 - A watch link with **both** `?v=` and `&list=` downloads only that single video,
-  never the whole playlist.
+  never the whole playlist; `youtu.be/<id>` short links count as watch links too.
 - Retitled/renamed videos keep their local filenames (the archive is keyed by video
   id); inserting a video mid-playlist shifts future numbering only.
 - Members-only / age-gated videos are skipped with a count ("N videos require

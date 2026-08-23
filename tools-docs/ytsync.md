@@ -43,8 +43,9 @@ bytes ever reach the dispatcher's tee'd logs.
 
 | URL contains | Type | Behavior |
 |---|---|---|
-| `list=` without `v=` | `playlist` | tracked source; files land as `<videos>/<owner>/<playlist>/<NNN> - <title>.<ext>` |
+| `youtu.be/<id>` path (with or without `list=`) | `video` | short links name one video — treated exactly like `v=` |
 | `v=` present (with or without `list=`) | `video` | single video, downloaded with `--no-playlist`; nobody backfills a 500-video playlist by pasting a watch link |
+| `list=` without any video-naming part | `playlist` | tracked source; files land as `<videos>/<owner>/<playlist>/<NNN> - <title>.<ext>` |
 | neither | `channel` | flat source; `<videos>/<channel>/<title>.<ext>` |
 
 ## Download invocation (one yt-dlp call PER NEW VIDEO)
@@ -53,6 +54,7 @@ bytes ever reach the dispatcher's tee'd logs.
 yt-dlp -f "bestvideo*+bestaudio/best"
        --merge-output-format mp4        # parity with pos media mp4
        --embed-metadata --embed-chapters --embed-thumbnail
+       --convert-thumbnails jpg
        --no-overwrites                  # parity; collisions become "exists, kept" warnings
        --download-archive <state>/archive/<slug>.txt   # crash-safe per-video recording
        --windows-filenames              # USB/Samba/TV-safe names

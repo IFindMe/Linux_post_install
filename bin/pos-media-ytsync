@@ -80,10 +80,10 @@ Layout:
 Notes:
   Existing files are never overwritten; renamed/retitled videos keep their
   local filename. Unattended/scheduled use: 'pos media ytsync sync'.
-  A watch link carrying BOTH ?v= and &list= downloads only that single video
-  (--no-playlist), never the whole playlist. 'remove' keeps the downloaded
-  files AND the archive — re-adding the same source later resumes
-  incrementally instead of re-downloading.
+  A watch link (?v=…, incl. youtu.be/<id> short links) downloads only that
+  single video (--no-playlist), even when it carries &list= — never the whole
+  playlist. 'remove' keeps the downloaded files AND the archive — re-adding
+  the same source later resumes incrementally instead of re-downloading.
 
 Examples:
   pos media ytsync                                  # interactive
@@ -154,12 +154,22 @@ is_youtube_url() {
     return 1
 }
 
-classify_url() {   # list= without v= → playlist; v= → single video; else channel
-    local u="$1"
-    if [[ "$u" == *list=* && "$u" != *v=* ]]; then
-        printf 'playlist\n'
+classify_url() {   # names-one-video (v= or youtu.be/<id>) → video; list= → playlist; else channel
+    local u="$1" vid=""
+    case "$u" in
+        *youtu.be/*)
+            vid="${u#*youtu.be/}"   # short link: video id is the first path segment
+            vid="${vid%%\?*}"
+            vid="${vid%%\#*}"
+            vid="${vid%%/*}"
+            ;;
+    esac
+    if [ -n "$vid" ]; then
+        printf 'video\n'
     elif [[ "$u" == *v=* ]]; then
         printf 'video\n'
+    elif [[ "$u" == *list=* ]]; then
+        printf 'playlist\n'
     else
         printf 'channel\n'
     fi
