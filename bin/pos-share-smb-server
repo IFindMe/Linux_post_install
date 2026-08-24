@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share smb-server — Manage the Samba server (status, share/unshare exports, users, enable/disable)
-# POS_SUBCMDS: status share unshare list adduser deluser reload enable disable
+# POS_SUBCMDS: status share unshare list adduser deluser reload enable disable menu
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$0")/share-lib.sh"
 
 command -v smbd &>/dev/null || err "smbd not found (install samba)"
 command -v smbcontrol &>/dev/null || err "smbcontrol not found (install samba)"
@@ -48,8 +49,7 @@ SMB_CONF="${SMB_CONF:-/etc/samba/smb.conf}"
 cmd="${1:-}"
 case "$cmd" in
     -h|--help) usage ;;
-    status|share|unshare|list|adduser|deluser|reload|enable|disable) ;;
-    "") err "Missing command (status|share|unshare|list|adduser|deluser|reload|enable|disable)" ;;
+    ""|menu|status|share|unshare|list|adduser|deluser|reload|enable|disable) ;;
     *) err "Unknown command '$cmd' (see --help)" ;;
 esac
 
@@ -106,15 +106,9 @@ reload_config() {
 
 # rc 0 = Samba reachable through the firewall (or nothing to check),
 # rc 1 = ufw active but no Samba rule → clients can't reach 139/445.
+# Thin wrapper: the decision core lives in lib/share-lib.sh.
 ufw_blocks_samba() {
-    command -v ufw >/dev/null 2>&1 || return 1
-    local st
-    st="$(sudo ufw status 2>/dev/null)" || return 1
-    grep -q "^Status: active" <<<"$st" || return 1
-    if grep -qiE 'samba|(^|[^0-9])(137|138|139|445)([^0-9]|$)' <<<"$st"; then
-        return 1
-    fi
-    return 0
+    share_ufw_blocks_ports 'samba|(^|[^0-9])(137|138|139|445)([^0-9]|$)'
 }
 
 # Warn when another managed share already exports the same path under a
@@ -141,171 +135,307 @@ list_shares() {
     printf '%s\n' "$out" | grep -Fv '[global]' | sed 's/\[\(.*\)\]/  \1/'
 }
 
-case "$cmd" in
-    status)
-        if systemctl is-active --quiet smbd 2>/dev/null; then
-            ok "smbd: running"
-        else
-            warn "smbd: not running (enable with 'pos share smb-server enable')"
-        fi
-        echo
-        section "Shares"
-        list_shares
-        echo
-        section "Users"
-        sudo pdbedit -L 2>/dev/null | cut -d: -f1 | sed 's/^/  /' || echo " (none)"
-        echo
-        section "Ports"
-        if ss -tln 2>/dev/null | awk '$4 ~ /:(139|445)$/ { f = 1 } END { exit !f }'; then
-            ok "smbd listening on :139/:445"
-        else
-            warn "nothing listening on :139/:445 locally (smbd down or bound elsewhere)"
-        fi
-        if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "^Status: active"; then
-            if ufw_blocks_samba; then
-                warn "firewall: ufw active, NO Samba rule — clients can't connect. Fix: sudo ufw allow Samba"
-            else
-                ok "firewall: ufw active, Samba allowed"
-            fi
-        else
-            ok "firewall: no active ufw — nothing blocking SMB ports"
-        fi
-        ;;
-
-    share)
-        path="${2:-}"
-        [ -n "$path" ] || err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]"
-        case "$path" in
-            -*) err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]" ;;
-        esac
-        require_root_dir "$path"
-        check_traversal "$path"
-        [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
-
-        shift 2
-        name="" ro=0 guest=0 users=""
-        while [ $# -gt 0 ]; do
-            case "$1" in
-                --read-only) ro=1; shift ;;
-                --guest) guest=1; shift ;;
-                --users) [ $# -ge 2 ] || err "--users needs a value"; users="$2"; shift 2 ;;
-                -*) err "unknown option '$1'" ;;
-                *) name="$1"; shift ;;
-            esac
-        done
-        name="${name:-$(basename "$path")}"
-        validate_share_name "$name"
-        dup_path_share "$path" "$name"
-
-        if [ "$guest" -eq 1 ]; then
-            warn "guest access on — ANY network user can access $path. Restrict with --users."
-        elif [ -z "$users" ]; then
-            warn "No valid users — any Samba account can access $path. Restrict with --users u1,u2."
-        fi
-        [ -n "$users" ] && check_samba_users "$users"
+cmd_status() {
+    if systemctl is-active --quiet smbd 2>/dev/null; then
+        ok "smbd: running"
+    else
+        warn "smbd: not running (enable with 'pos share smb-server enable')"
+    fi
+    echo
+    section "Shares"
+    list_shares
+    echo
+    section "Users"
+    sudo pdbedit -L 2>/dev/null | cut -d: -f1 | sed 's/^/  /' || echo " (none)"
+    echo
+    section "Ports"
+    if ss -tln 2>/dev/null | awk '$4 ~ /:(139|445)$/ { f = 1 } END { exit !f }'; then
+        ok "smbd listening on :139/:445"
+    else
+        warn "nothing listening on :139/:445 locally (smbd down or bound elsewhere)"
+    fi
+    if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "^Status: active"; then
         if ufw_blocks_samba; then
-            warn "ufw is active but allows no Samba traffic — clients can't reach ports 139/445.
-  Fix on this machine: sudo ufw allow Samba"
+            warn "firewall: ufw active, NO Samba rule — clients can't connect. Fix: sudo ufw allow Samba"
+        else
+            ok "firewall: ufw active, Samba allowed"
         fi
+    else
+        ok "firewall: no active ufw — nothing blocking SMB ports"
+    fi
+}
 
-        ro_val=no; [ "$ro" -eq 1 ] && ro_val=yes
-        guest_val=no; [ "$guest" -eq 1 ] && guest_val=yes
-        block="[$name]
+cmd_share() {
+    local path="$1"
+    [ -n "$path" ] || err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]"
+    case "$path" in
+        -*) err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]" ;;
+    esac
+    require_root_dir "$path"
+    check_traversal "$path"
+    [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
+
+    shift
+    local name="" ro=0 guest=0 users=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --read-only) ro=1; shift ;;
+            --guest) guest=1; shift ;;
+            --users) [ $# -ge 2 ] || err "--users needs a value"; users="$2"; shift 2 ;;
+            -*) err "unknown option '$1'" ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+    name="${name:-$(basename "$path")}"
+    validate_share_name "$name"
+    dup_path_share "$path" "$name"
+
+    if [ "$guest" -eq 1 ]; then
+        warn "guest access on — ANY network user can access $path. Restrict with --users."
+    elif [ -z "$users" ]; then
+        warn "No valid users — any Samba account can access $path. Restrict with --users u1,u2."
+    fi
+    [ -n "$users" ] && check_samba_users "$users"
+    if ufw_blocks_samba; then
+        warn "ufw is active but allows no Samba traffic — clients can't reach ports 139/445.
+  Fix on this machine: sudo ufw allow Samba"
+    fi
+
+    local ro_val=no guest_val=no block tmp
+    [ "$ro" -eq 1 ] && ro_val=yes
+    [ "$guest" -eq 1 ] && guest_val=yes
+    block="[$name]
    path = $path
    browseable = yes
    read only = $ro_val
    guest ok = $guest_val"
-        [ -n "$users" ] && block="$block
+    [ -n "$users" ] && block="$block
    valid users = $users"
 
-        tmp="$(mktemp)"
-        awk -v s="# >>> pos-managed share: $name" -v e="# <<< end pos-managed share" '
-            $0 == s {inblock=1}
-            $0 == e && inblock == 1 {inblock=0; next}
-            !inblock {print}
-        ' "$SMB_CONF" > "$tmp"
-        {
-            echo
-            echo "# >>> pos-managed share: $name"
-            printf '%s\n' "$block"
-            echo "# <<< end pos-managed share"
-        } >> "$tmp"
+    tmp="$(mktemp)"
+    awk -v s="# >>> pos-managed share: $name" -v e="# <<< end pos-managed share" '
+        $0 == s {inblock=1}
+        $0 == e && inblock == 1 {inblock=0; next}
+        !inblock {print}
+    ' "$SMB_CONF" > "$tmp"
+    {
+        echo
+        echo "# >>> pos-managed share: $name"
+        printf '%s\n' "$block"
+        echo "# <<< end pos-managed share"
+    } >> "$tmp"
 
-        testparm -s "$tmp" >/dev/null || { rm -f "$tmp"; err "Invalid smb.conf — changes not applied (see testparm -s $SMB_CONF)"; }
-        sudo cp "$tmp" "$SMB_CONF"
-        rm -f "$tmp"
-        reload_config
-        log "Share added: [$name] → $path"
-        notify_send "SMB share added: $name ($path)"
+    testparm -s "$tmp" >/dev/null || { rm -f "$tmp"; err "Invalid smb.conf — changes not applied (see testparm -s $SMB_CONF)"; }
+    sudo cp "$tmp" "$SMB_CONF"
+    rm -f "$tmp"
+    reload_config
+    log "Share added: [$name] → $path"
+    notify_send "SMB share added: $name ($path)"
+}
+
+cmd_unshare() {
+    local name="$1" tmp
+    validate_share_name "$name"
+    [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
+
+    if ! grep -Fq "# >>> pos-managed share: $name" "$SMB_CONF"; then
+        warn "No share '$name' found in $SMB_CONF"
+        exit 0
+    fi
+
+    tmp="$(mktemp)"
+    awk -v s="# >>> pos-managed share: $name" -v e="# <<< end pos-managed share" '
+        $0 == s {inblock=1}
+        $0 == e && inblock == 1 {inblock=0; next}
+        !inblock {print}
+    ' "$SMB_CONF" > "$tmp"
+    sudo cp "$tmp" "$SMB_CONF"
+    rm -f "$tmp"
+    reload_config
+    log "Removed share: $name"
+    notify_send "SMB share removed: $name"
+}
+
+cmd_list() {
+    list_shares
+}
+
+cmd_adduser() {
+    local user="$1"
+    [ -n "$user" ] || err "Usage: pos share smb-server adduser <user>"
+    id -u "$user" >/dev/null 2>&1 || err "No system user '$user' — create it first (e.g. sudo adduser $user)"
+    if sudo pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qxF "$user"; then
+        warn "'$user' already has a Samba account — nothing to do."
+        log "Reset the password with: sudo smbpasswd $user"
+        exit 0
+    fi
+    sudo smbpasswd -a "$user"
+    log "Samba user added: $user"
+    notify_send "SMB user added: $user"
+}
+
+cmd_deluser() {
+    local user="$1"
+    [ -n "$user" ] || err "Usage: pos share smb-server deluser <user>"
+    if ! sudo pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qxF "$user"; then
+        log "'$user' is not a Samba user — nothing to remove"
+        exit 0
+    fi
+    sudo smbpasswd -x "$user"
+    log "Samba user removed: $user"
+    notify_send "SMB user removed: $user"
+}
+
+cmd_reload() {
+    reload_config
+}
+
+cmd_enable() {
+    sudo systemctl enable --now smbd
+    log "smbd enabled (starts on boot)"
+    notify_send "SMB server enabled"
+}
+
+cmd_disable() {
+    sudo systemctl disable --now smbd
+    log "smbd disabled (will not start on boot)"
+    notify_send "SMB server disabled"
+}
+
+# ── Interactive menu flows ─────────────────────────────────────
+menu_pick_folder() { # stdout: folder path · rc 1 cancelled
+    local idx dir cand
+    local -a cands=()
+    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
+        if idx="$(share_pick "Share which folder?" "${cands[@]}")"; then
+            cand="${cands[$((idx - 1))]}"
+            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+            [ -d "$dir" ] || { warn "Folder vanished: $dir"; return 1; }
+            echo "$dir"
+            return 0
+        fi
+        return 1
+    fi
+    dir="$(share_ask_value "Folder to share (absolute path)")" || return 1
+    [ -n "$dir" ] || { warn "No folder given"; return 1; }
+    echo "$dir"
+}
+
+menu_share() {
+    local dir name users
+    local -a args=()
+    dir="$(menu_pick_folder)" || return 1
+    name="$(share_ask_value "Share name" "$(basename "$dir")")" || return 1
+    [ -n "$name" ] || name="$(basename "$dir")"
+
+    if confirm "Read-only share?" n; then
+        args+=(--read-only)
+    fi
+    if confirm "Guest access (ANY network user, no login)?" n; then
+        args+=(--guest)
+    else
+        users="$(share_ask_value "Restrict to Samba users (comma-separated, empty = any account)")" || return 1
+        [ -n "$users" ] && args+=(--users "$users")
+    fi
+    cmd_share "$dir" "$name" ${args[@]+"${args[@]}"}
+}
+
+menu_unshare() {
+    local idx name
+    local -a names=()
+    if mapfile -t names < <(awk '/^# >>> pos-managed share: /{ sub(/^# >>> pos-managed share: /, ""); print }' "$SMB_CONF" 2>/dev/null) &&
+        [ "${#names[@]}" -gt 0 ]; then
+        idx="$(share_pick "Remove which share?" "${names[@]}")" || return 1
+        name="${names[$((idx - 1))]}"
+    else
+        name="$(share_ask_value "Share name to remove")" || return 1
+        [ -n "$name" ] || return 1
+    fi
+    cmd_unshare "$name"
+}
+
+menu_adduser() {
+    local user
+    user="$(share_ask_value "System user to give a Samba account")" || return 1
+    [ -n "$user" ] || return 1
+    cmd_adduser "$user"
+}
+
+menu_deluser() {
+    local idx user
+    local -a users=()
+    if mapfile -t users < <(sudo pdbedit -L 2>/dev/null | cut -d: -f1) &&
+        [ "${#users[@]}" -gt 0 ]; then
+        idx="$(share_pick "Remove which Samba user?" "${users[@]}")" || return 1
+        user="${users[$((idx - 1))]}"
+    else
+        user="$(share_ask_value "Samba user to remove")" || return 1
+        [ -n "$user" ] || return 1
+    fi
+    cmd_deluser "$user"
+}
+
+run_menu() {
+    share_menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(share_menu_run "Samba server" \
+            "Show status (shares/users/ports/firewall)" \
+            "Share a folder" \
+            "Remove a share" \
+            "List current shares" \
+            "Add a Samba user" \
+            "Remove a Samba user" \
+            "Validate + reload config" \
+            "Enable service on boot" \
+            "Disable service")" || return 0
+        case "$choice" in
+            1) cmd_status ;;
+            2) menu_share ;;
+            3) menu_unshare ;;
+            4) cmd_list ;;
+            5) menu_adduser ;;
+            6) menu_deluser ;;
+            7) cmd_reload ;;
+            8) cmd_enable ;;
+            9) cmd_disable ;;
+        esac
+    done
+}
+
+case "$cmd" in
+    ""|menu)
+        run_menu
+        exit 0
+        ;;
+
+    status)  cmd_status ;;
+
+    share)
+        [ $# -ge 2 ] || err "Usage: pos share smb-server share <path> [name] [--read-only|--guest|--users u1,u2]"
+        cmd_share "${@:2}"
         ;;
 
     unshare)
-        name="${2:-}"
-        [ -n "$name" ] || err "Usage: pos share smb-server unshare <name>"
-        validate_share_name "$name"
-        [ -f "$SMB_CONF" ] || err "No smb.conf at $SMB_CONF (is samba installed?)"
-
-        if ! grep -Fq "# >>> pos-managed share: $name" "$SMB_CONF"; then
-            warn "No share '$name' found in $SMB_CONF"
-            exit 0
-        fi
-
-        tmp="$(mktemp)"
-        awk -v s="# >>> pos-managed share: $name" -v e="# <<< end pos-managed share" '
-            $0 == s {inblock=1}
-            $0 == e && inblock == 1 {inblock=0; next}
-            !inblock {print}
-        ' "$SMB_CONF" > "$tmp"
-        sudo cp "$tmp" "$SMB_CONF"
-        rm -f "$tmp"
-        reload_config
-        log "Removed share: $name"
-        notify_send "SMB share removed: $name"
+        [ $# -ge 2 ] || err "Usage: pos share smb-server unshare <name>"
+        cmd_unshare "$2"
         ;;
 
-    list)
-        list_shares
-        ;;
+    list)    cmd_list ;;
 
     adduser)
-        user="${2:-}"
-        [ -n "$user" ] || err "Usage: pos share smb-server adduser <user>"
-        id -u "$user" >/dev/null 2>&1 || err "No system user '$user' — create it first (e.g. sudo adduser $user)"
-        if sudo pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qxF "$user"; then
-            warn "'$user' already has a Samba account — nothing to do."
-            log "Reset the password with: sudo smbpasswd $user"
-            exit 0
-        fi
-        sudo smbpasswd -a "$user"
-        log "Samba user added: $user"
-        notify_send "SMB user added: $user"
+        [ $# -ge 2 ] || err "Usage: pos share smb-server adduser <user>"
+        cmd_adduser "$2"
         ;;
 
     deluser)
-        user="${2:-}"
-        [ -n "$user" ] || err "Usage: pos share smb-server deluser <user>"
-        if ! sudo pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qxF "$user"; then
-            log "'$user' is not a Samba user — nothing to remove"
-            exit 0
-        fi
-        sudo smbpasswd -x "$user"
-        log "Samba user removed: $user"
-        notify_send "SMB user removed: $user"
+        [ $# -ge 2 ] || err "Usage: pos share smb-server deluser <user>"
+        cmd_deluser "$2"
         ;;
 
-    reload)
-        reload_config
-        ;;
+    reload)  cmd_reload ;;
 
-    enable)
-        sudo systemctl enable --now smbd
-        log "smbd enabled (starts on boot)"
-        notify_send "SMB server enabled"
-        ;;
+    enable)  cmd_enable ;;
 
-    disable)
-        sudo systemctl disable --now smbd
-        log "smbd disabled (will not start on boot)"
-        notify_send "SMB server disabled"
-        ;;
+    disable) cmd_disable ;;
 esac

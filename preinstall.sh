@@ -31,7 +31,7 @@ PACKAGES=(
     net-tools iputils-ping traceroute tcpdump nmap
     openssh-client openssh-server ufw fail2ban
     nfs-common nfs-kernel-server
-    samba cifs-utils
+    samba cifs-utils smbclient
     hostapd dnsmasq iptables iw
     ca-certificates gnupg lsb-release
     lm-sensors smartmontools nvme-cli hdparm

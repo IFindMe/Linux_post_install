@@ -55,6 +55,12 @@ omitted.
 - **Dedicated USB-over-network box:** set `--port` once, then clients connect
   to that port.
 
+**Interactive menu:** run `pos share usb server` with no args for a menu
+(list / share / unshare / auto-share / disconnect …). The share flow lists
+devices and clients from the server as pickers — no IDs to memorize; if the
+server listing can't be read, it prints the raw output and falls back to
+manual ID entry.
+
 **Troubleshooting:**
 - `usbsrv: command not found` → the binary isn't installed; get it from
   incentivespro.com and drop it in `x64_bin/` (or `arm64_bin/`) then re-run
@@ -101,6 +107,12 @@ to restrict it** — print the restricted form:
 - **Read-only backups to a LAN host:** use `(ro,sync,no_subtree_check)` and only
   `enable` the server where it's needed.
 
+**Interactive menu:** run `pos share nfs server` with no args for a menu
+(share / unshare / list / reload / enable / disable / status). The share flow
+offers mounted folders as a picker and client-spec presets (open, WireGuard,
+LAN, single IP) so you don't hand-type export specs; an inactive
+`nfs-server` service or a UFW conflict is offered as a one-key fix.
+
 **Troubleshooting:**
 - "exportfs not found" → `nfs-kernel-server` isn't installed; `sudo apt install nfs-kernel-server`
 - Client sees "mount.nfs: Permission denied" → your `/etc/exports` client rule
@@ -138,6 +150,11 @@ up — a down/unreachable NFS server can't break boot (with fstab it could).
   ```
 - **One-off mount (no persistence):**
   `pos share nfs client mount 10.0.0.5:/srv/data /mnt/data`
+
+**Interactive menu:** run `pos share nfs client` with no args for a menu
+(mount / persist / unmount / unpersist / list). Mountpoints are offered from
+existing mount-layout candidates with manual entry as fallback; unmount and
+unpersist tolerate already-absent targets instead of erroring.
 
 **Troubleshooting:**
 - "mount.nfs not found" → `nfs-common` isn't installed; `sudo apt install nfs-common`
@@ -196,6 +213,11 @@ Both are warnings only — the share is still written.
 - **Public read-only download share:** `pos share smb server share /srv/pub pub --read-only --guest`
 - **Change a share's access later:** re-run `share` with the same name — the
   block is replaced, not duplicated.
+
+**Interactive menu:** run `pos share smb server` with no args for a menu
+(share / unshare / list / users / reload / enable / disable / status). The
+share flow offers mounted folders as a picker and walks through read-only /
+guest / valid-users confirms; a UFW conflict is offered as a one-key fix.
 
 **Troubleshooting:**
 - "smbd not found" → `samba` isn't installed; `sudo apt install samba`
@@ -258,6 +280,12 @@ fstab it could). `enable --now` arms the automount immediately.
   intended (`x-systemd.automount`); `pos share smb client list` now also lists
   persistent units under "Persistent (automount)", so the configured shares are
   visible even before their first access
+
+**Interactive menu:** run `pos share smb client` with no args for a menu
+(enumerate / mount / persist / unmount / unpersist / list). Enter the server,
+an empty user tries guest enumeration first (with an auth retry on denial),
+then shares and mountpoints are offered as pickers with manual fallback —
+the account you authenticated with is reused for the mount.
 
 ---
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share smb-client — Mount SMB/CIFS shares (ephemeral or persistent systemd mount units)
-# POS_SUBCMDS: mount unmount list persist unpersist
+# POS_SUBCMDS: mount unmount list persist unpersist menu
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$0")/share-lib.sh"
 
 SMB_CREDS_DIR="${SMB_CREDS_DIR:-/etc/samba/credentials}"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
@@ -53,8 +54,7 @@ EOF
 cmd="${1:-}"
 case "$cmd" in
     -h|--help) usage ;;
-    mount|unmount|list|persist|unpersist) ;;
-    "") err "Missing command (mount|unmount|list|persist|unpersist)" ;;
+    ""|menu|mount|unmount|list|persist|unpersist) ;;
     *) err "Unknown command '$cmd' (see --help)" ;;
 esac
 
@@ -200,156 +200,150 @@ read_test_or_rollback() {
   Details: DOC/howto/share.md (SMB troubleshooting)"
 }
 
-case "$cmd" in
-    mount)
-        what="${2:-}"
-        where="${3:-}"
-        user="${4:-}"
-        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share smb-client mount <//server/share> <local-dir> [user]"
-        validate_share "$what"
-        validate_dir "$where"
-        split_share "$what"
+cmd_mount() { # <//server/share> <local-dir> [user]
+    local what="$1" where="$2" user="${3:-}"
+    local src creds opts
+    validate_share "$what"
+    validate_dir "$where"
+    split_share "$what"
 
-        probe_server "$SERVER"
+    probe_server "$SERVER"
 
-        if src="$(mounted_src "$where")"; [ -n "$src" ]; then
-            err "$where is already mounted (source: ${src:-unknown}) — nothing done.
+    if src="$(mounted_src "$where")"; [ -n "$src" ]; then
+        err "$where is already mounted (source: ${src:-unknown}) — nothing done.
   Unmount it first: pos share smb-client unmount $where"
-        fi
+    fi
 
-        ensure_mountpoint "$where"
+    ensure_mountpoint "$where"
 
-        if [ -n "$user" ]; then
-            creds="$(make_creds "$user")"
-            trap 'rm -f "$creds"' EXIT
-            opts="credentials=$creds,$(mount_opts)"
-            try_mount "$what" "$where" "$opts" || {
-                rm -f "$creds"
-                trap - EXIT
-                diagnose_mount_failure "${MOUNT_ERR:-}"
-            }
+    if [ -n "$user" ]; then
+        creds="$(make_creds "$user")"
+        trap 'rm -f "$creds"' EXIT
+        opts="credentials=$creds,$(mount_opts)"
+        try_mount "$what" "$where" "$opts" || {
             rm -f "$creds"
             trap - EXIT
-        else
-            warn "No user — attempting guest mount (works only if the server allows guest access)"
-            try_mount "$what" "$where" "guest,$(mount_opts)" || diagnose_mount_failure "${MOUNT_ERR:-}"
-        fi
+            diagnose_mount_failure "${MOUNT_ERR:-}"
+        }
+        rm -f "$creds"
+        trap - EXIT
+    else
+        warn "No user — attempting guest mount (works only if the server allows guest access)"
+        try_mount "$what" "$where" "guest,$(mount_opts)" || diagnose_mount_failure "${MOUNT_ERR:-}"
+    fi
 
-        read_test_or_rollback "$where" "$what"
-        log "Mounted $what at $where (read test passed)"
-        notify_send "SMB mounted: $what → $where"
-        ;;
+    read_test_or_rollback "$where" "$what"
+    log "Mounted $what at $where (read test passed)"
+    notify_send "SMB mounted: $what → $where"
+}
 
-    unmount)
-        where="${2:-}"
-        [ -n "$where" ] || err "Usage: pos share smb-client unmount <local-dir>"
-        validate_dir "$where"
+cmd_unmount() { # <local-dir>
+    local where="$1" src out
+    validate_dir "$where"
 
-        src="$(mounted_src "$where")"
-        if [ -z "$src" ]; then
-            log "Nothing mounted at $where"
-            exit 0
+    src="$(mounted_src "$where")"
+    if [ -z "$src" ]; then
+        log "Nothing mounted at $where"
+        exit 0
+    fi
+    if ! out="$(sudo umount "$where" 2>&1)"; then
+        if grep -qE "busy|in use" <<<"$out"; then
+            warn "$where is busy (${src})"
+            confirm "Force a lazy unmount now?" y && { run sudo umount -l "$where"; log "Lazy-unmounted $where"; exit 0; }
+            err "Still mounted. Find the blocker: sudo lsof +D $where  (or fuser -vm $where)"
         fi
-        if ! out="$(sudo umount "$where" 2>&1)"; then
-            if grep -qE "busy|in use" <<<"$out"; then
-                warn "$where is busy (${src})"
-                confirm "Force a lazy unmount now?" y && { run sudo umount -l "$where"; log "Lazy-unmounted $where"; exit 0; }
-                err "Still mounted. Find the blocker: sudo lsof +D $where  (or fuser -vm $where)"
-            fi
-            err "Unmount failed: $out"
-        fi
-        log "Unmounted $where"
-        notify_send "SMB unmounted: $where"
-        ;;
+        err "Unmount failed: $out"
+    fi
+    log "Unmounted $where"
+    notify_send "SMB unmounted: $where"
+}
 
-    list)
-        found=0
-        active_mounts="$(findmnt -t cifs 2>/dev/null || true)"
-        if [ -n "$active_mounts" ]; then
-            printf 'Active mounts:\n'
-            printf '%s\n' "$active_mounts"
-            found=1
-        fi
-        persistent=()
-        for unit in "${UNIT_DIR}"/*.mount; do
-            [ -e "$unit" ] || continue
-            grep -q '^Type=cifs$' "$unit" || continue
-            what="$(sed -n 's/^What=//p' "$unit")"
-            where="$(sed -n 's/^Where=//p' "$unit")"
-            [ -n "$what" ] && [ -n "$where" ] || continue
-            persistent+=("$where|$what")
+cmd_list() {
+    local found=0 active_mounts unit what where
+    local -a persistent=()
+    active_mounts="$(findmnt -t cifs 2>/dev/null || true)"
+    if [ -n "$active_mounts" ]; then
+        printf 'Active mounts:\n'
+        printf '%s\n' "$active_mounts"
+        found=1
+    fi
+    for unit in "${UNIT_DIR}"/*.mount; do
+        [ -e "$unit" ] || continue
+        grep -q '^Type=cifs$' "$unit" || continue
+        what="$(sed -n 's/^What=//p' "$unit")"
+        where="$(sed -n 's/^Where=//p' "$unit")"
+        [ -n "$what" ] && [ -n "$where" ] || continue
+        persistent+=("$where|$what")
+    done
+    if [ "${#persistent[@]}" -gt 0 ]; then
+        found=1
+        printf 'Persistent (automount):\n'
+        for entry in "${persistent[@]}"; do
+            printf '  %-44s %s\n' "${entry%%|*}" "${entry#*|}"
         done
-        if [ "${#persistent[@]}" -gt 0 ]; then
-            found=1
-            printf 'Persistent (automount):\n'
-            for entry in "${persistent[@]}"; do
-                printf '  %-44s %s\n' "${entry%%|*}" "${entry#*|}"
-            done
-        fi
-        [ "$found" -eq 1 ] || echo "No SMB mounts"
-        ;;
+    fi
+    [ "$found" -eq 1 ] || echo "No SMB mounts"
+}
 
-    persist)
-        what="${2:-}"
-        where="${3:-}"
-        user="${4:-}"
-        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share smb-client persist <//server/share> <local-dir> [user]"
-        validate_share "$what"
-        validate_dir "$where"
-        split_share "$what"
+cmd_persist() { # <//server/share> <local-dir> [user]
+    local what="$1" where="$2" user="${3:-}"
+    local src unit auto_unit unit_file auto_file opts creds_file tmp out verified
+    validate_share "$what"
+    validate_dir "$where"
+    split_share "$what"
 
-        probe_server "$SERVER"
+    probe_server "$SERVER"
 
-        if src="$(mounted_src "$where")"; [ -n "$src" ]; then
-            err "$where is already mounted (source: ${src:-unknown}) — nothing done.
+    if src="$(mounted_src "$where")"; [ -n "$src" ]; then
+        err "$where is already mounted (source: ${src:-unknown}) — nothing done.
   Active mount + automount units conflict; unmount first:
     pos share smb-client unmount $where"
-        fi
+    fi
 
-        unit="$(systemd-escape --path --suffix=mount "$where")"
-        auto_unit="${unit%.mount}.automount"
-        unit_file="${UNIT_DIR}/${unit}"
-        auto_file="${UNIT_DIR}/${auto_unit}"
+    unit="$(systemd-escape --path --suffix=mount "$where")"
+    auto_unit="${unit%.mount}.automount"
+    unit_file="${UNIT_DIR}/${unit}"
+    auto_file="${UNIT_DIR}/${auto_unit}"
 
-        if [ -e "$unit_file" ] || [ -e "$auto_file" ]; then
-            warn "Units for $where already exist — they will be REPLACED:"
-            if [ -e "$unit_file" ]; then warn "  ${unit_file}"; fi
-            if [ -e "$auto_file" ]; then warn "  ${auto_file}"; fi
-            confirm "Replace them?" n || err "Aborted — units left untouched"
-        fi
+    if [ -e "$unit_file" ] || [ -e "$auto_file" ]; then
+        warn "Units for $where already exist — they will be REPLACED:"
+        if [ -e "$unit_file" ]; then warn "  ${unit_file}"; fi
+        if [ -e "$auto_file" ]; then warn "  ${auto_file}"; fi
+        confirm "Replace them?" n || err "Aborted — units left untouched"
+    fi
 
-        opts="$(mount_opts),_netdev,noexec"
-        creds_file=""
-        if [ -n "$user" ]; then
-            creds_file="$SMB_CREDS_DIR/$(basename "$where")"
-            sudo mkdir -p "$SMB_CREDS_DIR"
-            tmp="$(make_creds "$user")"
-            sudo install -m 600 "$tmp" "$creds_file"
-            rm -f "$tmp"
-            opts="credentials=$creds_file,$opts"
-        else
-            warn "No user — persisting a guest mount (works only if the server allows guest access)"
-            opts="guest,$opts"
-        fi
+    opts="$(mount_opts),_netdev,noexec"
+    creds_file=""
+    if [ -n "$user" ]; then
+        creds_file="$SMB_CREDS_DIR/$(basename "$where")"
+        sudo mkdir -p "$SMB_CREDS_DIR"
+        tmp="$(make_creds "$user")"
+        sudo install -m 600 "$tmp" "$creds_file"
+        rm -f "$tmp"
+        opts="credentials=$creds_file,$opts"
+    else
+        warn "No user — persisting a guest mount (works only if the server allows guest access)"
+        opts="guest,$opts"
+    fi
 
-        rollback_persist() {
-            warn "Rolling back everything this command created…"
-            sudo systemctl disable "$auto_unit" 2>/dev/null || true
-            sudo systemctl stop "$auto_unit" 2>/dev/null || true
-            sudo systemctl disable "$unit" 2>/dev/null || true
-            sudo systemctl stop "$unit" 2>/dev/null || true
-            sudo rm -f "$unit_file" "$auto_file"
-            if [ -n "$creds_file" ]; then sudo rm -f "$creds_file"; fi
-            sudo systemctl daemon-reload 2>/dev/null || true
-        }
+    rollback_persist() {
+        warn "Rolling back everything this command created…"
+        sudo systemctl disable "$auto_unit" 2>/dev/null || true
+        sudo systemctl stop "$auto_unit" 2>/dev/null || true
+        sudo systemctl disable "$unit" 2>/dev/null || true
+        sudo systemctl stop "$unit" 2>/dev/null || true
+        sudo rm -f "$unit_file" "$auto_file"
+        if [ -n "$creds_file" ]; then sudo rm -f "$creds_file"; fi
+        sudo systemctl daemon-reload 2>/dev/null || true
+    }
 
-        if [ "${DRY_RUN:-0}" -eq 1 ]; then
-            log "(dry-run) write $unit_file + $auto_file (Type=cifs, Options=$opts)"
-            log "(dry-run) daemon-reload + enable --now $auto_unit"
-            exit 0
-        fi
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) write $unit_file + $auto_file (Type=cifs, Options=$opts)"
+        log "(dry-run) daemon-reload + enable --now $auto_unit"
+        exit 0
+    fi
 
-        cat <<UNIT | sudo tee "$unit_file" >/dev/null
+    cat <<UNIT | sudo tee "$unit_file" >/dev/null
 [Unit]
 Description=SMB mount of ${what} at ${where}
 After=network-online.target
@@ -361,7 +355,7 @@ Where=${where}
 Type=cifs
 Options=${opts}
 UNIT
-        cat <<UNIT | sudo tee "$auto_file" >/dev/null
+    cat <<UNIT | sudo tee "$auto_file" >/dev/null
 [Unit]
 Description=Automount of SMB share ${what} at ${where}
 
@@ -371,70 +365,212 @@ Where=${where}
 [Install]
 WantedBy=multi-user.target
 UNIT
-        sudo systemctl daemon-reload
+    sudo systemctl daemon-reload
 
-        # Enable, then prove the automount actually serves the share before
-        # declaring victory — a broken unit here would bite months later.
-        if ! out="$(sudo systemctl enable --now "$auto_unit" 2>&1)"; then
-            rollback_persist
-            err "Could not enable $auto_unit: $out"
-        fi
+    # Enable, then prove the automount actually serves the share before
+    # declaring victory — a broken unit here would bite months later.
+    if ! out="$(sudo systemctl enable --now "$auto_unit" 2>&1)"; then
+        rollback_persist
+        err "Could not enable $auto_unit: $out"
+    fi
 
-        ls "$where" >/dev/null 2>&1 || true   # poke the automount
-        verified=0
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if [ -n "$(mounted_src "$where")" ]; then verified=1; break; fi
-            sleep 0.5
-        done
-        if [ "$verified" -ne 1 ]; then
-            rollback_persist
-            err "Automount did not trigger for $where — units removed again.
+    ls "$where" >/dev/null 2>&1 || true   # poke the automount
+    verified=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if [ -n "$(mounted_src "$where")" ]; then verified=1; break; fi
+        sleep 0.5
+    done
+    if [ "$verified" -ne 1 ]; then
+        rollback_persist
+        err "Automount did not trigger for $where — units removed again.
   Check: systemctl status $auto_unit"
-        fi
+    fi
 
-        # Same read-proof as one-shot mounts: catch permission problems now.
-        if ! timeout 5 ls -A "$where" >/dev/null 2>&1; then
-            rollback_persist
-            err "Automount triggered but $where is not readable — units + credentials removed.
+    # Same read-proof as one-shot mounts: catch permission problems now.
+    if ! timeout 5 ls -A "$where" >/dev/null 2>&1; then
+        rollback_persist
+        err "Automount triggered but $where is not readable — units + credentials removed.
   Login works but file permissions don't — fix unix perms on the server
   (the shared folder itself needs r-x for the connecting user).
   Details: DOC/howto/share.md (SMB troubleshooting)"
-        fi
+    fi
 
-        log "Persistent SMB mount (automount): ${what} → ${where} (${auto_unit})"
-        log "Verified: automount triggers and the share is readable"
-        notify_send "SMB mount persisted: ${what} → ${where}"
+    log "Persistent SMB mount (automount): ${what} → ${where} (${auto_unit})"
+    log "Verified: automount triggers and the share is readable"
+    notify_send "SMB mount persisted: ${what} → ${where}"
+}
+
+cmd_unpersist() { # <local-dir>
+    local where="$1" unit auto_unit unit_file auto_file
+    validate_dir "$where"
+
+    unit="$(systemd-escape --path --suffix=mount "$where")"
+    auto_unit="${unit%.mount}.automount"
+    unit_file="${UNIT_DIR}/${unit}"
+    auto_file="${UNIT_DIR}/${auto_unit}"
+
+    if [ ! -f "$unit_file" ] && [ ! -f "$auto_file" ]; then
+        log "No persistent SMB mount for $where — nothing to do"
+        exit 0
+    fi
+
+    sudo systemctl disable "$auto_unit" 2>/dev/null || true
+    sudo systemctl stop "$auto_unit" 2>/dev/null || true
+    sudo systemctl disable "$unit" 2>/dev/null || true
+    sudo systemctl stop "$unit" 2>/dev/null || true
+    sudo rm -f "$unit_file" "$auto_file"
+    sudo rm -f "$SMB_CREDS_DIR/$(basename "$where")"
+    sudo rmdir "$SMB_CREDS_DIR" 2>/dev/null || true
+    sudo systemctl daemon-reload
+
+    if [ -n "$(mounted_src "$where")" ]; then
+        warn "$where is still mounted (something holds it open)"
+        if confirm "Force a lazy unmount now?" y; then run sudo umount -l "$where"; fi
+    fi
+    log "Removed persistent SMB mount: $where"
+    notify_send "SMB persistent mount removed: $where"
+}
+
+# ── Interactive menu flows ─────────────────────────────────────
+menu_ask_mountpoint() { # stdout: absolute path · rc 1 cancelled
+    local idx dir cand
+    local -a cands=()
+    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
+        if idx="$(share_pick "Mountpoint" "${cands[@]}")"; then
+            cand="${cands[$((idx - 1))]}"
+            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+            case "$dir" in
+                /etc|/boot|/bin|/sbin|/lib|/lib64|/usr|/var|/root|/home/*/.ssh*)
+                    warn "Refusing system path as mountpoint"
+                    return 1
+                    ;;
+                *)
+                    echo "$dir"
+                    return 0
+                    ;;
+            esac
+        fi
+    fi
+    dir="$(share_ask_value "Mountpoint (absolute path)")" || return 1
+    [ -n "$dir" ] || { warn "No mountpoint given"; return 1; }
+    echo "$dir"
+}
+
+menu_mount() { # ephemeral|persist
+    local mode="$1" host idx share what where
+    host="$(share_ask_value "SMB server (host or IP)")" || return 1
+    [ -n "$host" ] || { warn "No server given"; return 1; }
+
+    # Empty answer = guest enumeration (with an interactive auth retry inside
+    # the helper); a named user authenticates right away. SMB_AUTH_USER tells
+    # us which account ended up being used so the mount reuses it.
+    local user=""
+    read -rp "Samba user (empty = try guest): " user || return 1
+    SMB_AUTH_USER=""
+
+    local -a shares=()
+    if mapfile -t shares < <(share_smb_shares "$host" "$user") && [ "${#shares[@]}" -gt 0 ]; then
+        idx="$(share_pick "Pick share on ${host}" "${shares[@]}")" || return 1
+        share="${shares[$((idx - 1))]}"
+    else
+        share="$(share_ask_value "Share name on ${host} (e.g. media)")" || return 1
+        [ -n "$share" ] || { warn "No share name given"; return 1; }
+    fi
+    user="${SMB_AUTH_USER:-$user}"
+
+    what="//${host}/${share}"
+    where="$(menu_ask_mountpoint)" || return 1
+
+    if [ "$mode" = "persist" ]; then
+        cmd_persist "$what" "$where" "$user"
+    else
+        cmd_mount "$what" "$where" "$user"
+    fi
+}
+
+menu_unmount() {
+    local idx row where
+    local -a targets=()
+    if mapfile -t rows < <(findmnt -rnf -t cifs -o SOURCE,TARGET 2>/dev/null) &&
+        [ "${#rows[@]}" -gt 0 ]; then
+        for row in "${rows[@]}"; do
+            targets+=("${row##* }")     # last field of raw mode = TARGET
+        done
+        idx="$(share_pick "Unmount which SMB mount?" "${targets[@]}")" || return 1
+        where="${targets[$((idx - 1))]}"
+    else
+        where="$(share_ask_value "Local mountpoint to unmount")" || return 1
+        [ -n "$where" ] || return 1
+    fi
+    cmd_unmount "$where"
+}
+
+menu_unpersist() {
+    local idx uf where unit_w
+    local -a paths=()
+    for uf in "${UNIT_DIR}"/*.mount; do
+        grep -q '^Type=cifs$' "$uf" 2>/dev/null || continue
+        unit_w="$(sed -n 's/^Where=//p' "$uf")"
+        [ -n "$unit_w" ] || continue
+        paths+=("$unit_w")
+    done
+    if [ "${#paths[@]}" -gt 0 ]; then
+        idx="$(share_pick "Remove which persistent SMB mount?" "${paths[@]}")" || return 1
+        where="${paths[$((idx - 1))]}"
+    else
+        where="$(share_ask_value "Local mountpoint whose units to remove")" || return 1
+        [ -n "$where" ] || return 1
+    fi
+    cmd_unpersist "$where"
+}
+
+run_menu() {
+    share_menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(share_menu_run "SMB client" \
+            "Mount a share (one-shot)" \
+            "Persist a share (automount units)" \
+            "List active + persistent mounts" \
+            "Unmount a mounted share" \
+            "Remove a persistent mount")" || return 0
+        case "$choice" in
+            1) menu_mount ephemeral ;;
+            2) menu_mount persist ;;
+            3) cmd_list ;;
+            4) menu_unmount ;;
+            5) menu_unpersist ;;
+        esac
+    done
+}
+
+case "$cmd" in
+    ""|menu)
+        run_menu
+        exit 0
+        ;;
+
+    mount)
+        [ $# -ge 3 ] || err "Usage: pos share smb-client mount <//server/share> <local-dir> [user]"
+        cmd_mount "$2" "$3" "${4:-}"
+        ;;
+
+    unmount)
+        [ $# -ge 2 ] || err "Usage: pos share smb-client unmount <local-dir>"
+        cmd_unmount "$2"
+        ;;
+
+    list)
+        cmd_list
+        ;;
+
+    persist)
+        [ $# -ge 3 ] || err "Usage: pos share smb-client persist <//server/share> <local-dir> [user]"
+        cmd_persist "$2" "$3" "${4:-}"
         ;;
 
     unpersist)
-        where="${2:-}"
-        [ -n "$where" ] || err "Usage: pos share smb-client unpersist <local-dir>"
-        validate_dir "$where"
-
-        unit="$(systemd-escape --path --suffix=mount "$where")"
-        auto_unit="${unit%.mount}.automount"
-        unit_file="${UNIT_DIR}/${unit}"
-        auto_file="${UNIT_DIR}/${auto_unit}"
-
-        if [ ! -f "$unit_file" ] && [ ! -f "$auto_file" ]; then
-            log "No persistent SMB mount for $where — nothing to do"
-            exit 0
-        fi
-
-        sudo systemctl disable "$auto_unit" 2>/dev/null || true
-        sudo systemctl stop "$auto_unit" 2>/dev/null || true
-        sudo systemctl disable "$unit" 2>/dev/null || true
-        sudo systemctl stop "$unit" 2>/dev/null || true
-        sudo rm -f "$unit_file" "$auto_file"
-        sudo rm -f "$SMB_CREDS_DIR/$(basename "$where")"
-        sudo rmdir "$SMB_CREDS_DIR" 2>/dev/null || true
-        sudo systemctl daemon-reload
-
-        if [ -n "$(mounted_src "$where")" ]; then
-            warn "$where is still mounted (something holds it open)"
-            if confirm "Force a lazy unmount now?" y; then run sudo umount -l "$where"; fi
-        fi
-        log "Removed persistent SMB mount: $where"
-        notify_send "SMB persistent mount removed: $where"
+        [ $# -ge 2 ] || err "Usage: pos share smb-client unpersist <local-dir>"
+        cmd_unpersist "$2"
         ;;
 esac

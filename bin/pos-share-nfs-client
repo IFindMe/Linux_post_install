@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share nfs-client — Mount NFS shares (ephemeral or persistent systemd mount units)
+# POS_SUBCMDS: mount unmount list persist unpersist menu
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$0")/share-lib.sh"
+
+# Env seam (testable): where persistent .mount units are written.
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 
 command -v mount.nfs &>/dev/null || err "mount.nfs not found (install nfs-common)"
 command -v systemd-escape &>/dev/null || err "systemd-escape not found"
@@ -21,23 +26,19 @@ Commands:
   persist <server:export> <local-dir>   Persistent mount via a systemd .mount unit
                                         (ordered after network-online.target)
   unpersist <local-dir>                 Stop, disable and remove the mount unit
+  menu                                  Interactive browser (server → export → mountpoint)
+
+Run without arguments to open the interactive menu.
 
 Examples:
   pos share nfs-client mount 100.100.100.1:/srv/media /mnt/nfs/media
   pos share nfs-client persist 100.100.100.1:/srv/media /mnt/nfs/media
   pos share nfs-client list
   pos share nfs-client unmount /mnt/nfs/media
+  pos share nfs-client menu
 EOF
     exit 0
 }
-
-cmd="${1:-}"
-case "$cmd" in
-    -h|--help) usage ;;
-    mount|unmount|list|persist|unpersist) ;;
-    "") err "Missing command (mount|unmount|list|persist|unpersist)" ;;
-    *) err "Unknown command '$cmd' (see --help)" ;;
-esac
 
 validate_share() {
     local what="$1"
@@ -56,83 +57,287 @@ validate_dir() {
     esac
 }
 
-case "$cmd" in
-    mount)
-        what="${2:-}"
-        where="${3:-}"
-        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share nfs-client mount <server:export> <local-dir>"
-        validate_share "$what"
-        validate_dir "$where"
+cmd_mount() {
+    local what="$1" where="$2"
+    validate_share "$what"
+    validate_dir "$where"
 
-        sudo mkdir -p "$where"
-        sudo mount -t nfs -o rw,noatime "$what" "$where"
-        log "Mounted $what at $where"
-        ;;
+    sudo mkdir -p "$where"
+    sudo mount -t nfs -o rw,noatime "$what" "$where"
+    log "Mounted $what at $where"
+}
 
-    unmount)
-        where="${2:-}"
-        [ -n "$where" ] || err "Usage: pos share nfs-client unmount <local-dir>"
-        validate_dir "$where"
+cmd_unmount() {
+    local where="$1"
+    validate_dir "$where"
 
-        sudo umount "$where"
-        log "Unmounted $where"
-        ;;
+    if ! findmnt -r -n -o TARGET -t nfs,nfs4 2>/dev/null | grep -qxF "$where"; then
+        log "$where is not mounted as NFS — nothing to do"
+        return 0
+    fi
+    sudo umount "$where"
+    log "Unmounted $where"
+}
 
-    list)
-        if findmnt -t nfs,nfs4 >/dev/null 2>&1; then
-            findmnt -t nfs,nfs4
-        else
-            echo "No NFS mounts"
-        fi
-        ;;
+cmd_list() {
+    local out
+    if out="$(findmnt -t nfs,nfs4 2>/dev/null)" && [ "$(grep -c . <<<"$out")" -gt 1 ]; then
+        printf '%s\n' "$out"
+    else
+        echo "No NFS mounts"
+    fi
+}
 
-    persist)
-        what="${2:-}"
-        where="${3:-}"
-        [ -n "$what" ] && [ -n "$where" ] || err "Usage: pos share nfs-client persist <server:export> <local-dir>"
-        validate_share "$what"
-        validate_dir "$where"
-
-        unit="$(systemd-escape --path --suffix=mount "$where")"
-        unit_file="/etc/systemd/system/${unit}"
-
-        sudo mkdir -p "$where"
-        cat <<UNIT | sudo tee "$unit_file" >/dev/null
+write_mount_unit() { # <unit_file> <what> <where>
+    cat <<UNIT | sudo tee "$1" >/dev/null
 [Unit]
-Description=NFS mount of ${what} at ${where}
+Description=NFS mount of ${2} at ${3}
 After=network-online.target
 Wants=network-online.target
 
 [Mount]
-What=${what}
-Where=${where}
+What=${2}
+Where=${3}
 Type=nfs
 Options=defaults,_netdev,rw,noatime
 UNIT
+}
+
+show_mount_unit() { # <what> <where>  (dry-run preview)
+    cat <<UNIT
+[Unit]
+Description=NFS mount of ${1} at ${2}
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=${1}
+Where=${2}
+Type=nfs
+Options=defaults,_netdev,rw,noatime
+UNIT
+}
+
+cmd_persist() {
+    local what="$1" where="$2"
+    validate_share "$what"
+    validate_dir "$where"
+
+    unit="$(systemd-escape --path --suffix=mount "$where")"
+    unit_file="${UNIT_DIR}/${unit}"
+
+    if [ -f "$unit_file" ]; then
+        if [ -t 0 ]; then
+            # FLAGGED DELTA: interactive overwrite now confirms first.
+            confirm "Unit ${unit} already exists — overwrite?" n ||
+                { warn "Aborted — ${unit_file} left untouched"; return 1; }
+        else
+            warn "Overwriting existing unit ${unit}"
+        fi
+    fi
+
+    sudo mkdir -p "$where"
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) would write ${unit_file}:"
+        show_mount_unit "$what" "$where"
+    else
+        write_mount_unit "$unit_file" "$what" "$where"
         sudo systemctl daemon-reload
         sudo systemctl enable --now "$unit"
-        log "Persistent NFS mount: ${what} → ${where} (${unit})"
-        notify_send "NFS mount persisted: ${what} → ${where}"
+
+        # Verify the export actually mounted; roll back the unit if not.
+        local i mounted=1
+        for i in 1 2 3 4 5; do
+            if findmnt -r -n -o TARGET -t nfs,nfs4 2>/dev/null | grep -qxF "$where"; then
+                mounted=0
+                break
+            fi
+            sleep 1
+        done
+        if [ "$mounted" -ne 0 ]; then
+            warn "Unit enabled but ${where} never appeared among NFS mounts — rolling back"
+            sudo systemctl disable "$unit" 2>/dev/null || true
+            sudo systemctl stop "$unit" 2>/dev/null || true
+            sudo rm -f "$unit_file"
+            sudo systemctl daemon-reload
+            err "Persistent mount failed — unit removed (${unit})"
+        fi
+    fi
+    log "Persistent NFS mount: ${what} → ${where} (${unit})"
+    notify_send "NFS mount persisted: ${what} → ${where}"
+}
+
+cmd_unpersist() {
+    local where="$1"
+    validate_dir "$where"
+
+    unit="$(systemd-escape --path --suffix=mount "$where")"
+    unit_file="${UNIT_DIR}/${unit}"
+
+    if [ ! -f "$unit_file" ]; then
+        warn "No systemd mount unit for $where (${unit})"
+        exit 0
+    fi
+
+    sudo systemctl disable "$unit" 2>/dev/null || true
+    sudo systemctl stop "$unit" 2>/dev/null || true
+    sudo rm -f "$unit_file"
+    sudo systemctl daemon-reload
+    log "Removed persistent NFS mount: $where"
+    notify_send "NFS persistent mount removed: $where"
+}
+
+# ── Interactive menu flows ─────────────────────────────────────
+menu_pick_export() { # <host> — stdout: server:export · rc 1 cancelled
+    local host="$1" idx exp
+    local -a exports=()
+    if mapfile -t exports < <(share_nfs_exports "$host") && [ "${#exports[@]}" -gt 0 ]; then
+        if idx="$(share_pick "Pick export on ${host}" "${exports[@]}")"; then
+            exp="${exports[$((idx - 1))]}"
+        else
+            return 1
+        fi
+    else
+        exp="$(share_ask_value "Export path on ${host} (e.g. /srv/media)")" || return 1
+        [ -n "$exp" ] || { warn "No export path given"; return 1; }
+    fi
+    case "$exp" in
+        /*) echo "${host}:${exp}" ;;
+        *) echo "${host}:/${exp}" ;;
+    esac
+}
+
+menu_ask_mountpoint() { # stdout: absolute path · rc 1 cancelled
+    local idx dir cand
+    local -a cands=()
+    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
+        if idx="$(share_pick "Mountpoint" "${cands[@]}")"; then
+            cand="${cands[$((idx - 1))]}"
+            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+            case "$dir" in
+                /etc|/boot|/bin|/sbin|/lib|/lib64|/usr|/var|/root|/home/*/.ssh*)
+                    warn "Refusing system path as mountpoint"
+                    return 1
+                    ;;
+                *)
+                    echo "$dir"
+                    return 0
+                    ;;
+            esac
+        fi
+    fi
+    dir="$(share_ask_value "Mountpoint (absolute path)")" || return 1
+    [ -n "$dir" ] || { warn "No mountpoint given"; return 1; }
+    echo "$dir"
+}
+
+menu_mount() {
+    local mode="$1" host what where
+    host="$(share_ask_value "NFS server (host or IP)")" || return 1
+    [ -n "$host" ] || { warn "No server given"; return 1; }
+
+    if ! share_port_probe "$host" 2049; then
+        warn "${host} does not answer on TCP/2049 (nfsd down, or a firewall blocks it)."
+        confirm "Try anyway?" n || return 1
+    fi
+
+    what="$(menu_pick_export "$host")" || return 1
+    where="$(menu_ask_mountpoint)" || return 1
+
+    if [ "$mode" = "persist" ]; then
+        cmd_persist "$what" "$where"
+    else
+        cmd_mount "$what" "$where"
+    fi
+}
+
+menu_unmount() {
+    local idx where
+    local -a targets=()
+    if mapfile -t targets < <(findmnt -r -n -o TARGET -t nfs,nfs4 2>/dev/null | tail -n +2) &&
+        [ "${#targets[@]}" -gt 0 ]; then
+        idx="$(share_pick "Unmount which NFS mount?" "${targets[@]}")" || return 1
+        where="${targets[$((idx - 1))]}"
+    else
+        where="$(share_ask_value "Local mountpoint to unmount")" || return 1
+        [ -n "$where" ] || return 1
+    fi
+    cmd_unmount "$where"
+}
+
+menu_unpersist() {
+    local idx uf where unit
+    local -a items=() paths=()
+    for uf in "${UNIT_DIR}"/*.mount; do
+        grep -q '^Type=nfs' "$uf" 2>/dev/null || continue
+        where="$(sed -n 's/^Where=//p' "$uf")"
+        [ -n "$where" ] || continue
+        paths+=("$where")
+        items+=("$where")
+    done
+    if [ "${#items[@]}" -gt 0 ]; then
+        idx="$(share_pick "Remove which persistent NFS mount?" "${items[@]}")" || return 1
+        where="${paths[$((idx - 1))]}"
+    else
+        where="$(share_ask_value "Local mountpoint whose unit to remove")" || return 1
+        [ -n "$where" ] || return 1
+    fi
+    cmd_unpersist "$where"
+}
+
+run_menu() {
+    share_menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(share_menu_run "NFS client" \
+            "Mount an export (one-shot)" \
+            "Persist an export (systemd .mount unit)" \
+            "List active NFS mounts" \
+            "Unmount a mounted share" \
+            "Remove a persistent mount")" || return 0
+        case "$choice" in
+            1) menu_mount ephemeral ;;
+            2) menu_mount persist ;;
+            3) cmd_list ;;
+            4) menu_unmount ;;
+            5) menu_unpersist ;;
+        esac
+    done
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    -h|--help) usage ;;
+    ""|menu)
+        run_menu
+        exit 0
+        ;;
+    mount|unmount|list|persist|unpersist) ;;
+    *) err "Unknown command '$cmd' (see --help)" ;;
+esac
+
+case "$cmd" in
+    mount)
+        [ $# -ge 3 ] || err "Usage: pos share nfs-client mount <server:export> <local-dir>"
+        cmd_mount "$2" "$3"
+        ;;
+
+    unmount)
+        [ $# -ge 2 ] || err "Usage: pos share nfs-client unmount <local-dir>"
+        cmd_unmount "$2"
+        ;;
+
+    list)
+        cmd_list
+        ;;
+
+    persist)
+        [ $# -ge 3 ] || err "Usage: pos share nfs-client persist <server:export> <local-dir>"
+        cmd_persist "$2" "$3"
         ;;
 
     unpersist)
-        where="${2:-}"
-        [ -n "$where" ] || err "Usage: pos share nfs-client unpersist <local-dir>"
-        validate_dir "$where"
-
-        unit="$(systemd-escape --path --suffix=mount "$where")"
-        unit_file="/etc/systemd/system/${unit}"
-
-        if [ ! -f "$unit_file" ]; then
-            warn "No systemd mount unit for $where (${unit})"
-            exit 0
-        fi
-
-        sudo systemctl disable "$unit" 2>/dev/null || true
-        sudo systemctl stop "$unit" 2>/dev/null || true
-        sudo rm -f "$unit_file"
-        sudo systemctl daemon-reload
-        log "Removed persistent NFS mount: $where"
-        notify_send "NFS persistent mount removed: $where"
+        [ $# -ge 2 ] || err "Usage: pos share nfs-client unpersist <local-dir>"
+        cmd_unpersist "$2"
         ;;
 esac

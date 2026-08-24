@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share usb-server — USB Redirector server control (--ls, --share; prompts when args omitted)
-# POS_FLAGS: --ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version
+# POS_FLAGS: --ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version menu
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$0")/share-lib.sh"
 
 usage() {
     cat <<EOF
@@ -188,18 +189,161 @@ cmd_port() {
 command -v usbsrv &>/dev/null \
     || err "usbsrv not found — install the USB Redirector server (https://www.incentivespro.com/usb-server.html)"
 
+# ── Interactive menu flows ─────────────────────────────────────
+# Picker-first prompting: parsed listings feed the filtered picker; when the
+# server is unreachable or nothing parses, fall back to the same raw-listing +
+# manual-entry prompts the explicit commands have always used.
+menu_pick_from_records() { # <prompt> <records-cmd...> — stdout: chosen ID · rc 1 cancel/fallback
+    local prompt="$1"; shift
+    local idx rec
+    local -a ids=()
+    if recs="$("$@")" && [ -n "$recs" ]; then
+        while IFS= read -r rec; do
+            [ -n "$rec" ] || continue
+            ids+=("${rec%%|*}")
+        done <<<"$recs"
+        if [ "${#ids[@]}" -gt 0 ]; then
+            if idx="$(share_pick "$prompt" "${ids[@]}")"; then
+                echo "${ids[$((idx - 1))]}"
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+menu_share() {
+    local dev client
+    if ! dev="$(menu_pick_from_records "Share which USB device?" share_usb_devices)"; then
+        cmd_ls >/dev/null 2>&1 || true
+        read -rp "Enter device ID to share: " dev
+        [ -n "$dev" ] || { warn "Cancelled"; return 1; }
+    fi
+    if ! client="$(menu_pick_from_records "Connect to which client?" share_usb_clients)"; then
+        read -rp "Enter client ID to connect to: " client
+        [ -n "$client" ] || { warn "Cancelled"; return 1; }
+    fi
+    cmd_share "$dev" "$client"
+}
+
+menu_unshare() {
+    local dev
+    if ! dev="$(menu_pick_from_records "Stop sharing which device?" share_usb_devices)"; then
+        cmd_ls_shared >/dev/null 2>&1 || true
+        read -rp "Enter device ID to unshare: " dev
+        [ -n "$dev" ] || { warn "Cancelled"; return 1; }
+    fi
+    cmd_unshare "$dev"
+}
+
+menu_callback() {
+    local addr
+    addr="$(share_ask_value "Client address:port for callback (e.g. 192.168.1.100:32032)")" || return 1
+    [ -n "$addr" ] || { warn "Cancelled"; return 1; }
+    cmd_callback "$addr"
+}
+
+menu_close_callback() {
+    local target
+    if ! target="$(menu_pick_from_records "Close callback of which client?" share_usb_clients)"; then
+        target="$(share_ask_value "Client, client id or 'all' to close callback")" || return 1
+        [ -n "$target" ] || { warn "Cancelled"; return 1; }
+    fi
+    cmd_close_callback "$target"
+}
+
+menu_auto_connect() {
+    local mode client
+    mode="$(share_ask_value "Remote auto-connect on or off?" "on")" || return 1
+    case "$mode" in on|off) ;; *) warn "must be on/off"; return 1 ;; esac
+    if ! client="$(menu_pick_from_records "Toggle auto-connect for which client?" share_usb_clients)"; then
+        client="$(share_ask_value "Client or client id")" || return 1
+        [ -n "$client" ] || { warn "Cancelled"; return 1; }
+    fi
+    cmd_auto_connect "$mode" "$client"
+}
+
+menu_disconnect() {
+    local dev
+    if ! dev="$(menu_pick_from_records "Disconnect which device?" share_usb_devices)"; then
+        dev="$(share_ask_value "Device ID or 'all' to disconnect from clients")" || return 1
+        [ -n "$dev" ] || { warn "Cancelled"; return 1; }
+    fi
+    cmd_disconnect "$dev"
+}
+
+menu_nickname() {
+    local dev nick
+    if ! dev="$(menu_pick_from_records "Nickname which device?" share_usb_devices)"; then
+        dev="$(share_ask_value "Device ID")" || return 1
+        [ -n "$dev" ] || { warn "Cancelled"; return 1; }
+    fi
+    nick="$(share_ask_value "Nickname (empty removes it)")" || return 1
+    cmd_nickname "$dev" "$nick"
+}
+
+menu_timeout() {
+    local dev sec
+    if ! dev="$(menu_pick_from_records "Set inactivity timeout for which device?" share_usb_devices)"; then
+        dev="$(share_ask_value "Device ID")" || return 1
+        [ -n "$dev" ] || { warn "Cancelled"; return 1; }
+    fi
+    sec="$(share_ask_value "Timeout in seconds (0 disables)" "0")" || return 1
+    cmd_timeout "$dev" "$sec"
+}
+
+menu_port() {
+    local port
+    port="$(share_ask_value "New TCP port")" || return 1
+    [ -n "$port" ] || { warn "Cancelled"; return 1; }
+    cmd_port "$port"
+}
+
+run_menu() {
+    share_menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(share_menu_run "USB Redirector server" \
+            "List host devices and connected clients" \
+            "Share a device with a client" \
+            "Stop sharing a device" \
+            "Disconnect device(s) from clients" \
+            "Auto-share on/off" \
+            "Create a callback connection" \
+            "Close a client callback" \
+            "Client remote auto-connect on/off" \
+            "Set a device nickname" \
+            "Set a device inactivity timeout" \
+            "Set the TCP port")" || return 0
+        case "$choice" in
+            1) cmd_ls ;;
+            2) menu_share ;;
+            3) menu_unshare ;;
+            4) menu_disconnect ;;
+            5) cmd_auto_share ;;
+            6) menu_callback ;;
+            7) menu_close_callback ;;
+            8) menu_auto_connect ;;
+            9) menu_nickname ;;
+            10) menu_timeout ;;
+            11) menu_port ;;
+        esac
+    done
+}
+
 cmd="${1:-}"
 
 case "$cmd" in
-    -h|--help|"") usage ;;
+    -h|--help) usage ;;
 esac
 
 case "$cmd" in
-    --ls|--ls-shared|--share|--unshare|--auto-share|--callback|--close-callback|--auto-connect|--disconnect|--nickname|--timeout|--port|--info|--version) ;;
+    ""|menu|--ls|--ls-shared|--share|--unshare|--auto-share|--callback|--close-callback|--auto-connect|--disconnect|--nickname|--timeout|--port|--info|--version) ;;
     *) err "Unknown flag '$cmd'" ;;
 esac
 
 case "$cmd" in
+    ""|menu)        run_menu ;;
     --ls)           cmd_ls ;;
     --ls-shared)    cmd_ls_shared ;;
     --share)        shift; cmd_share "$@" ;;

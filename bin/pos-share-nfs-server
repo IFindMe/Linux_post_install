@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: share nfs-server — Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+# POS_SUBCMDS: status share unshare list reload enable disable menu
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$0")/share-lib.sh"
 
 command -v exportfs &>/dev/null || err "exportfs not found (install nfs-kernel-server)"
+
+# Env seam (testable): which exports file is managed.
+EXPORTS_FILE="${EXPORTS_FILE:-/etc/exports}"
 
 usage() {
     cat <<EOF
@@ -22,6 +27,9 @@ Commands:
   reload              Re-apply /etc/exports after hand edits
   enable              Start nfs-server and enable it on boot
   disable             Stop nfs-server and disable it on boot
+  menu                Interactive browser (folder → client preset → share)
+
+Run without arguments to open the interactive menu.
 
 Clients are /etc/exports entries — restrict them to your trusted network:
   pos share nfs-server share /mnt/hdd '100.64.0.0/10(rw,sync,no_subtree_check)'   # Tailscale CGNAT
@@ -33,6 +41,7 @@ Examples:
   pos share nfs-server share /mnt/hdd
   pos share nfs-server list
   pos share nfs-server unshare /mnt/hdd
+  pos share nfs-server menu
 EOF
     exit 0
 }
@@ -40,12 +49,9 @@ EOF
 cmd="${1:-}"
 case "$cmd" in
     -h|--help) usage ;;
-    status|share|unshare|list|reload|enable|disable) ;;
-    "") err "Missing command (status|share|unshare|list|reload|enable|disable)" ;;
+    ""|menu|status|share|unshare|list|reload|enable|disable) ;;
     *) err "Unknown command '$cmd' (see --help)" ;;
 esac
-
-EXPORTS_FILE=/etc/exports
 
 require_root_dir() {
     local path="$1"
@@ -56,79 +62,184 @@ require_root_dir() {
     [ -d "$path" ] || err "Path not found: $path"
 }
 
-case "$cmd" in
-    status)
-        if systemctl is-active --quiet nfs-server 2>/dev/null; then
-            ok "nfs-server: running"
-        else
-            warn "nfs-server: not running (enable with 'pos share nfs-server enable')"
-        fi
+cmd_status() {
+    if systemctl is-active --quiet nfs-server 2>/dev/null; then
+        ok "nfs-server: running"
+    else
+        warn "nfs-server: not running (enable with 'pos share nfs-server enable')"
+    fi
+    echo
+    section "Exports"
+    exportfs -v 2>/dev/null || echo " (none)"
+}
+
+cmd_share() {
+    local path="$1" client="${2:-*(rw,sync,no_subtree_check)}"
+    require_root_dir "$path"
+    if [ "$client" = "*(rw,sync,no_subtree_check)" ]; then
+        warn "Generic export '$client' — ANY client can mount $path. Restrict it, e.g.:"
+        echo "  pos share nfs-server share $path '100.64.0.0/10(rw,sync,no_subtree_check)'"
+        echo "  pos share nfs-server share $path '10.10.0.0/24(rw,sync,no_subtree_check)'"
         echo
-        section "Exports"
-        exportfs -v 2>/dev/null || echo " (none)"
-        ;;
+    fi
 
+    local tmp
+    tmp="$(mktemp)"
+    awk -v p="$path" '$1 != p' "$EXPORTS_FILE" > "$tmp"
+    echo "$path $client" >> "$tmp"
+    sudo cp "$tmp" "$EXPORTS_FILE"
+    rm -f "$tmp"
+
+    sudo exportfs -ra
+    log "Exported: $path $client"
+    notify_send "NFS share added: $path $client"
+
+    # Advisory post-checks (never abort the share operation).
+    if ! share_service_active nfs-server; then
+        share_offer_fix "The nfs-server service is not running" \
+            sudo systemctl enable --now nfs-server
+    fi
+    if share_ufw_blocks_ports '2049|111|\bnfs\b'; then
+        warn "ufw is active but has no NFS rule — clients will be blocked."
+        share_offer_fix "Allow NFS through ufw" sudo ufw allow 2049/tcp
+    fi
+}
+
+cmd_unshare() {
+    local path="$1"
+    require_root_dir "$path"
+
+    if ! awk -v p="$path" '$1 == p {found=1} END {exit !found}' "$EXPORTS_FILE"; then
+        warn "No export for $path in $EXPORTS_FILE"
+        exit 0
+    fi
+
+    local tmp
+    tmp="$(mktemp)"
+    awk -v p="$path" '$1 != p' "$EXPORTS_FILE" > "$tmp"
+    sudo cp "$tmp" "$EXPORTS_FILE"
+    rm -f "$tmp"
+
+    sudo exportfs -ra
+    log "Removed export: $path"
+    notify_send "NFS share removed: $path"
+}
+
+cmd_list() {
+    exportfs -v 2>/dev/null || echo "No exports"
+}
+
+cmd_reload() {
+    sudo exportfs -ra
+    log "NFS exports reloaded"
+}
+
+cmd_enable() {
+    sudo systemctl enable --now nfs-server
+    log "nfs-server enabled (starts on boot)"
+    notify_send "NFS server enabled"
+}
+
+cmd_disable() {
+    sudo systemctl disable --now nfs-server
+    log "nfs-server disabled (will not start on boot)"
+    notify_send "NFS server disabled"
+}
+
+# ── Interactive menu flows ─────────────────────────────────────
+menu_pick_folder() { # stdout: folder path · rc 1 cancelled
+    local idx dir cand
+    local -a cands=()
+    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
+        if idx="$(share_pick "Share which folder?" "${cands[@]}")"; then
+            cand="${cands[$((idx - 1))]}"
+            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+            [ -d "$dir" ] || { warn "Folder vanished: $dir"; return 1; }
+            echo "$dir"
+            return 0
+        fi
+        return 1
+    fi
+    dir="$(share_ask_value "Folder to share (absolute path)")" || return 1
+    [ -n "$dir" ] || { warn "No folder given"; return 1; }
+    echo "$dir"
+}
+
+menu_share() {
+    local dir idx spec
+    dir="$(menu_pick_folder)" || return 1
+
+    local -a specs=(
+        "100.64.0.0/10(rw,sync,no_subtree_check)  — Tailscale CGNAT range"
+        "10.10.0.0/24(rw,sync,no_subtree_check)   — WireGuard subnet"
+        "192.168.1.0/24(rw,sync,no_subtree_check) — LAN subnet"
+        "192.168.1.0/24(ro,sync,no_subtree_check) — LAN read-only"
+        "* (rw,sync,no_subtree_check)             — ANY client (unsafe)"
+    )
+    if idx="$(share_pick "Client access for ${dir}" "${specs[@]}")"; then
+        spec="$(sed 's/[[:space:]]*—.*//' <<<"${specs[$((idx - 1))]}")"
+        [ "$spec" = "*" ] && spec="*(rw,sync,no_subtree_check)"
+    else
+        spec="$(share_ask_value "Client spec (e.g. 10.10.0.0/24(rw,sync))" "")" || return 1
+        [ -n "$spec" ] || spec="*(rw,sync,no_subtree_check)"
+    fi
+    cmd_share "$dir" "$spec"
+}
+
+menu_unshare() {
+    local idx path
+    local -a paths=()
+    if mapfile -t paths < <(awk 'NF > 0 && $1 !~ /^#/ {print $1}' "$EXPORTS_FILE" 2>/dev/null) &&
+        [ "${#paths[@]}" -gt 0 ]; then
+        idx="$(share_pick "Remove which export?" "${paths[@]}")" || return 1
+        path="${paths[$((idx - 1))]}"
+    else
+        path="$(share_ask_value "Exported path to remove")" || return 1
+        [ -n "$path" ] || return 1
+    fi
+    cmd_unshare "$path"
+}
+
+run_menu() {
+    share_menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(share_menu_run "NFS server" \
+            "Show status (service + exports)" \
+            "Share a folder" \
+            "Remove an export" \
+            "List current exports" \
+            "Reload exports after hand edits" \
+            "Enable service on boot" \
+            "Disable service")" || return 0
+        case "$choice" in
+            1) cmd_status ;;
+            2) menu_share ;;
+            3) menu_unshare ;;
+            4) cmd_list ;;
+            5) cmd_reload ;;
+            6) cmd_enable ;;
+            7) cmd_disable ;;
+        esac
+    done
+}
+
+case "$cmd" in
+    ""|menu)
+        run_menu
+        exit 0
+        ;;
+    status)  cmd_status ;;
     share)
-        path="${2:-}"
-        client="${3:-*(rw,sync,no_subtree_check)}"
-        [ -n "$path" ] || err "Usage: pos share nfs-server share <path> [client]"
-        require_root_dir "$path"
-        if [ "$client" = "*(rw,sync,no_subtree_check)" ]; then
-            warn "Generic export '$client' — ANY client can mount $path. Restrict it, e.g.:"
-            echo "  pos share nfs-server share $path '100.64.0.0/10(rw,sync,no_subtree_check)'"
-            echo "  pos share nfs-server share $path '10.10.0.0/24(rw,sync,no_subtree_check)'"
-            echo
-        fi
-
-        tmp="$(mktemp)"
-        awk -v p="$path" '$1 != p' "$EXPORTS_FILE" > "$tmp"
-        echo "$path $client" >> "$tmp"
-        sudo cp "$tmp" "$EXPORTS_FILE"
-        rm -f "$tmp"
-
-        sudo exportfs -ra
-        log "Exported: $path $client"
-        notify_send "NFS share added: $path $client"
+        [ $# -ge 2 ] || err "Usage: pos share nfs-server share <path> [client]"
+        cmd_share "$2" "${3:-*(rw,sync,no_subtree_check)}"
         ;;
-
     unshare)
-        path="${2:-}"
-        [ -n "$path" ] || err "Usage: pos share nfs-server unshare <path>"
-        require_root_dir "$path"
-
-        if ! awk -v p="$path" '$1 == p {found=1} END {exit !found}' "$EXPORTS_FILE"; then
-            warn "No export for $path in $EXPORTS_FILE"
-            exit 0
-        fi
-
-        tmp="$(mktemp)"
-        awk -v p="$path" '$1 != p' "$EXPORTS_FILE" > "$tmp"
-        sudo cp "$tmp" "$EXPORTS_FILE"
-        rm -f "$tmp"
-
-        sudo exportfs -ra
-        log "Removed export: $path"
-        notify_send "NFS share removed: $path"
+        [ $# -ge 2 ] || err "Usage: pos share nfs-server unshare <path>"
+        cmd_unshare "$2"
         ;;
-
-    list)
-        exportfs -v 2>/dev/null || echo "No exports"
-        ;;
-
-    reload)
-        sudo exportfs -ra
-        log "NFS exports reloaded"
-        ;;
-
-    enable)
-        sudo systemctl enable --now nfs-server
-        log "nfs-server enabled (starts on boot)"
-        notify_send "NFS server enabled"
-        ;;
-
-    disable)
-        sudo systemctl disable --now nfs-server
-        log "nfs-server disabled (will not start on boot)"
-        notify_send "NFS server disabled"
-        ;;
+    list)    cmd_list ;;
+    reload)  cmd_reload ;;
+    enable)  cmd_enable ;;
+    disable) cmd_disable ;;
 esac
