@@ -38,7 +38,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -211,6 +211,20 @@ Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib
 
 **File:** `lib/usb-lib.sh` (installed to `/usr/local/bin/usb-lib.sh`)
 **Purpose:** the one copy of the USB-storage machinery shared by `pos system backup`'s post-verify USB copy and `pos media sync` — `usb_detect` (lsblk JSON, TRAN + lsusb/by-id cross-check → `USB_MOUNTED` as `mp|label|size|model|fs` entries and `USB_UNMOUNTED` as `path|label|size|model`; EFI system partitions — Ventoy `VTOYEFI`, `/boot/efi` — are excluded from both), `usb_related_present`, `usb_mount_offer` (mount an unmounted stick at `/media/<label>`, `usb-automount` scheme), and `usb_pick_root` (detect → mount-offer → single-confirm or multi-picker, rows showing size/label/fs → `USB_ROOT` set to the bare mountpoint). Defines only `usb_*`; seams `USB_MOUNT_BASE` (default `/media`, alias `BACKUP_MOUNT_BASE`) and `USB_BYID` (default `/dev/disk/by-id`, alias `BACKUP_USB_BYID`) keep existing config lines working.
+
+---
+
+## lib/share-lib.sh — share-suite domain layer + compat shims
+
+**File:** `lib/share-lib.sh` (installed to `/usr/local/bin/share-lib.sh`)
+**Purpose:** the domain probes/listings behind the five share tools (`pos share nfs server`, `pos share nfs client`, `pos share smb client`, `pos share smb server`, `pos share usb server`) — rc-only probes `share_require_bin`/`share_port_probe`/`share_service_active`/`share_path_probe`, remote listings `share_nfs_exports` (showmount) / `share_smb_shares` (smbclient `-g` Disk enumeration incl. guest→auth retry) / `share_usb_records` + `share_usb_devices`/`share_usb_clients` (blank-line-record usbsrv parsers), `share_folder_candidates` (bounded-probe scan — findmnt targets minus pseudo-fs/ro plus immediate dirs under `/mnt` `/srv` `/media` `/export`, annotated + byte-order sorted; the client tools layer their own mountpoint pickers on top), and advisories (`share_ufw_blocks_ports` for firewall conflicts + `share_offer_fix`, which also uses `share_service_active` to offer starting inactive services). Also sources `lib/menu-lib.sh` and re-exports its primitives under the historical names (`share_menu_guard`, `share_menu_run`, `share_pick`, `share_ask_value`) so the five tools' menus need no changes. Defines only `share_*`; never exits, writes nothing of its own, display→stderr/result→stdout; no seams of its own — the tools own their file/service seams.
+
+---
+
+## lib/menu-lib.sh — category-neutral menu primitives
+
+**File:** `lib/menu-lib.sh` (installed to `/usr/local/bin/menu-lib.sh`)
+**Purpose:** the generic interactive half extracted from the former share-lib interactive layer, open to any category's tool — `menu_guard` (non-tty guard: one-line hint instead of a hanging menu), `menu_run` (looping numbered boxed menu, quits on EOF), `menu_pick` (numbered picker with type-to-filter `/filter`, `0` cancel, EOF-safe), and `menu_ask_value` (prompted string with optional default). Sourced by `lib/share-lib.sh` (compat shims keep the `share_*` names working); defines only `menu_*`. Display→stderr / result→stdout, reads fail closed on EOF or non-tty, so the functions are safe under the dispatcher's logging tee and inside command substitution; standalone-sourced it degrades to plain text via guarded `CYAN`/`RESET` fallbacks.
 
 ---
 

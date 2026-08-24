@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: docker compose — Docker Compose service manager (ls/up/down/restart/logs/update/config)
-# POS_SUBCMDS: ls installed up down restart logs update config
+# POS_SUBCMDS: ls installed up down restart logs update config menu
 # POS_CONFIG: compose | compose.env | TS_AUTHKEY=secret:Tailscale auth key for the sidecar | TZ=:Service timezone (default Europe/Amsterdam) | DNS_SERVER=:Custom DNS server (default 9.9.9.9) | SERVICES_BASE=:Deployment root (default /srv)
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
 SCALE_DIR="${SCALE_DIR:-/usr/local/share/linux_post_install/scale-tail/services}"
 CONFIG_ENV="${CONFIG_ENV:-${HOME}/.config/linux_post_install/compose.env}"
@@ -11,6 +12,9 @@ CONFIG_ENV="${CONFIG_ENV:-${HOME}/.config/linux_post_install/compose.env}"
 usage() {
     cat <<EOF
 Usage: pos docker compose <command> [args]
+
+Bare \`pos docker compose\` on a terminal (or \`pos docker compose menu\`) opens
+an interactive menu wrapping these commands; arguments stay scriptable.
 
 Commands:
   ls                          List all available ScaleTail service templates
@@ -341,8 +345,125 @@ EOF
 }
 
 ###############################################################################
+# Interactive menu (opt-in front door, Pattern B via lib/menu-lib.sh)
+###############################################################################
+
+menu_list_templates() {   # available ScaleTail template names, one per line
+    local d
+    for d in "$SCALE_DIR"/*/; do
+        [ -d "$d" ] || continue
+        basename "$d"
+    done | LC_ALL=C sort
+}
+
+menu_list_deployed() {   # deployed stack names under $SERVICES_BASE, one per line
+    local d
+    [ -d "$SERVICES_BASE" ] || return 0
+    for d in "$SERVICES_BASE"/*/; do
+        [ -d "$d" ] || continue
+        basename "$d"
+    done | LC_ALL=C sort
+}
+
+# $1 = prompt · $2 = listing function · $3 = empty-state hint → picked name
+menu_pick_stack() {
+    local -a items=()
+    mapfile -t items < <("$2")
+    if [ ${#items[@]} -eq 0 ]; then
+        warn "$3"
+        return 1
+    fi
+    local idx
+    idx="$(menu_pick "$1" "${items[@]}")" || return 1
+    printf '%s\n' "${items[$((idx - 1))]}"
+}
+
+menu_up() {
+    local svc
+    svc="$(menu_pick_stack "Deploy / start which template?" menu_list_templates \
+        "No ScaleTail templates found at $SCALE_DIR — run install.sh to set them up")" || return 0
+    cmd_up "$svc"   # first-deploy .env/TS_AUTHKEY prompts fold in here
+}
+
+menu_down() {
+    local svc
+    load_global_config
+    svc="$(menu_pick_stack "Stop and remove which stack?" menu_list_deployed \
+        "Nothing deployed under $SERVICES_BASE — deploy a template first ('up')")" || return 0
+    confirm "Stop and remove stack '$svc' (docker compose down)?" n || { log "Cancelled"; return 0; }
+    cmd_down "$svc"
+}
+
+menu_restart() {
+    local svc
+    load_global_config
+    svc="$(menu_pick_stack "Restart which stack?" menu_list_deployed \
+        "Nothing deployed under $SERVICES_BASE — deploy a template first ('up')")" || return 0
+    confirm "Restart stack '$svc'?" n || { log "Cancelled"; return 0; }
+    cmd_restart "$svc"
+}
+
+menu_logs() {
+    local svc
+    load_global_config
+    svc="$(menu_pick_stack "Logs of which stack?" menu_list_deployed \
+        "Nothing deployed under $SERVICES_BASE — deploy a template first ('up')")" || return 0
+    log "Following logs of '$svc' — Ctrl-C returns to the menu"
+    if ! cmd_logs "$svc" -f; then
+        log "Returned from logs of '$svc'"
+    fi
+}
+
+menu_update() {
+    load_global_config
+    confirm "Update ALL stacks: pull latest ScaleTail templates and overwrite deployed compose files under $SERVICES_BASE (.env preserved)?" n \
+        || { log "Cancelled"; return 0; }
+    cmd_update
+}
+
+run_menu() {
+    menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(menu_run "Docker Compose (ScaleTail)" \
+            "List available service templates" \
+            "List deployed stacks (+ status)" \
+            "Deploy / start a stack (up)" \
+            "Stop and remove a deployed stack (down)" \
+            "Restart a deployed stack" \
+            "Follow a stack's logs (-f; Ctrl-C returns)" \
+            "Update templates + refresh deployed compose files" \
+            "Show global config" \
+            "Edit global config (\$EDITOR)")" || return 0
+        case "$choice" in
+            1) cmd_ls ;;
+            2) cmd_installed ;;
+            3) menu_up ;;
+            4) menu_down ;;
+            5) menu_restart ;;
+            6) menu_logs ;;
+            7) menu_update ;;
+            8) cmd_config show ;;
+            9) cmd_config edit ;;
+        esac
+    done
+}
+
+###############################################################################
 # CLI dispatch
 ###############################################################################
+
+# Menu door: explicit verb, or zero args on a terminal. Everything below —
+# including zero args without a terminal — stays byte-compatible with the
+# pre-menu CLI.
+if [ "${1:-}" = "menu" ]; then
+    run_menu
+    exit 0
+fi
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    run_menu
+    exit 0
+fi
 
 [ $# -eq 0 ] && usage
 

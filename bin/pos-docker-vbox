@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: docker vbox — Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
-# POS_SUBCMDS: create enter stop start rm ls
+# POS_SUBCMDS: create enter stop start rm ls menu
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
 usage() {
     cat <<EOF
@@ -15,6 +16,9 @@ Usage:
   pos docker vbox ls
 
 Manage disposable Docker containers as lightweight VMs.
+
+Bare \`pos docker vbox\` on a terminal (or \`pos docker vbox menu\`) opens an
+interactive menu wrapping these verbs; arguments stay scriptable.
 
 Each container gets a bind-mounted host directory so files persist
 on the host even after the container is removed.
@@ -36,6 +40,105 @@ Examples:
 EOF
     exit 0
 }
+
+# ── Interactive menu (opt-in front door, Pattern B via lib/menu-lib.sh) ──
+# Every item re-enters the existing CLI verbs below unchanged — the menu adds
+# picks/prompts/confirms only (same self-invocation the tool itself uses for
+# tmux handovers). 'enter' hands the terminal to the container shell and
+# returns to the loop when the shell exits.
+menu_self() {   # run this tool's own verb as a child process
+    "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" "$@"
+}
+
+menu_list_vms() {   # vbox VM names, one per line (same label filter as 'ls')
+    docker ps -a --filter label=linux_post_install.vbox=true --format '{{.Names}}' | LC_ALL=C sort
+}
+
+menu_pick_vm() {   # $1 = prompt → picked VM name on stdout · rc 1 = cancelled / none
+    local -a vms=()
+    mapfile -t vms < <(menu_list_vms 2>/dev/null)
+    if [ ${#vms[@]} -eq 0 ]; then
+        if docker info &>/dev/null; then
+            warn "no vbox VMs found — create one first ('pos docker vbox create <name>')"
+        else
+            warn "docker daemon not reachable — start Docker first"
+        fi
+        return 1
+    fi
+    local idx
+    idx="$(menu_pick "$1" "${vms[@]}")" || return 1
+    printf '%s\n' "${vms[$((idx - 1))]}"
+}
+
+menu_vbox_create() {
+    local name image dir
+    name="$(menu_ask_value "VM name")" || return 0
+    image="$(menu_ask_value "Image" "ubuntu:22.04")" || return 0
+    dir="$(menu_ask_value "Host directory (empty = ~/$name)")" || true
+    if [ -n "${dir:-}" ]; then
+        confirm "Create VM '$name' from $image (host dir: $dir)?" n \
+            || { log "Cancelled"; return 0; }
+        menu_self create "$name" "$image" --dir "$dir"
+    else
+        confirm "Create VM '$name' from $image?" n || { log "Cancelled"; return 0; }
+        menu_self create "$name" "$image"
+    fi
+}
+
+menu_vbox_enter() {
+    local vm
+    vm="$(menu_pick_vm "Enter which VM?")" || return 0
+    log "Entering '$vm' — exit its shell to return to the menu"
+    menu_self enter "$vm"
+}
+
+menu_vbox_verb() {   # $1 = start|stop — pick a VM, run the verb
+    local verb="$1" vm
+    vm="$(menu_pick_vm "${verb} which VM?")" || return 0
+    menu_self "$verb" "$vm"
+}
+
+menu_vbox_remove() {
+    local vm
+    vm="$(menu_pick_vm "Remove which VM?")" || return 0
+    confirm "Permanently remove VM '$vm' (docker rm -f; the host folder is kept)?" n \
+        || { log "Cancelled — '$vm' kept"; return 0; }
+    menu_self rm "$vm"
+}
+
+run_menu() {
+    menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(menu_run "Docker VBox — disposable VMs" \
+            "List VMs" \
+            "Create a VM" \
+            "Enter a VM (interactive shell)" \
+            "Start a VM" \
+            "Stop a VM" \
+            "Remove a VM (permanent)")" || return 0
+        case "$choice" in
+            1) menu_self ls ;;
+            2) menu_vbox_create ;;
+            3) menu_vbox_enter ;;
+            4) menu_vbox_verb start ;;
+            5) menu_vbox_verb stop ;;
+            6) menu_vbox_remove ;;
+        esac
+    done
+}
+
+# Menu door: explicit verb, or zero args on a terminal. Everything below —
+# including zero args without a terminal — stays byte-compatible with the
+# pre-menu CLI.
+if [ "${1:-}" = "menu" ]; then
+    run_menu
+    exit 0
+fi
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    run_menu
+    exit 0
+fi
 
 case "${1:-}" in
     -h|--help) usage ;;

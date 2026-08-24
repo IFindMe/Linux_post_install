@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: system schedule — Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
-# POS_SUBCMDS: run list config enable disable status migrate
+# POS_SUBCMDS: run list config enable disable status migrate menu
 # POS_FLAGS: --dry-run
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/scheduler-lib.sh" 2>/dev/null || source "$(dirname "$0")/scheduler-lib.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
 usage() {
     cat <<EOF
@@ -28,6 +29,10 @@ NOTIFY policies:
              false→true plus one recovery message
   never      run only — no notification (side-effect jobs)
 Default: threshold if RULE is set, otherwise onchange.
+
+Bare \`pos system schedule\` on a terminal (or \`pos system schedule menu\`)
+opens an interactive menu wrapping these subcommands; arguments stay
+scriptable — the systemd timers keep calling 'run <name>' directly.
 
 Subcommands:
   run [name|all]      Execute job(s) now (the systemd timers call 'run <name>')
@@ -52,6 +57,71 @@ Examples:
 EOF
     exit 0
 }
+
+# ── Interactive menu (opt-in front door, Pattern B via lib/menu-lib.sh) ──
+# Every item maps onto an existing subcommand implementation. Run-now goes
+# through the same sched_run the systemd timers invoke (`run <name>`),
+# behind an explicit y/N confirm.
+
+menu_pick_job() {   # $1 = prompt → picked job name on stdout · rc 1 = cancelled
+    local -a jobs=()
+    mapfile -t jobs < <(sched_list_jobs)
+    if [ ${#jobs[@]} -eq 0 ]; then
+        warn "no jobs in $SCHEDULE_DIR — add one with 'pos system schedule config'"
+        return 1
+    fi
+    local idx
+    idx="$(menu_pick "$1" "${jobs[@]}")" || return 1
+    printf '%s\n' "${jobs[$((idx - 1))]}"
+}
+
+menu_job_action() {   # $1 = run|enable|disable — pick a job, call the verb
+    local name
+    name="$(menu_pick_job "${1} which job?")" || return 0
+    case "$1" in
+        run)
+            confirm "Run job '$name' now (executes its COMMAND, applies its NOTIFY policy)?" n \
+                || { log "Cancelled"; return 0; }
+            sched_run "$name"
+            ;;
+        enable)  sched_enable "$name" ;;
+        disable) sched_disable "$name" ;;
+    esac
+}
+
+run_menu() {
+    menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(menu_run "Scheduled jobs ($SCHEDULE_DIR)" \
+            "List jobs" \
+            "Timer status (+ next run)" \
+            "Run a job now" \
+            "Enable a job" \
+            "Disable a job" \
+            "Open the interactive job editor")" || return 0
+        case "$choice" in
+            1) sched_list ;;
+            2) sched_status ;;
+            3) menu_job_action run ;;
+            4) menu_job_action enable ;;
+            5) menu_job_action disable ;;
+            6) sched_config_editor ;;
+        esac
+    done
+}
+
+# Menu door: explicit verb, or zero args on a terminal. Everything below —
+# including zero args without a terminal — stays byte-compatible with the
+# pre-menu CLI; timer invocations (`run <name>`) never enter the menu.
+if [ "${1:-}" = "menu" ]; then
+    run_menu
+    exit 0
+fi
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    run_menu
+    exit 0
+fi
 
 case "${1:-}" in
     -h|--help|"") usage ;;

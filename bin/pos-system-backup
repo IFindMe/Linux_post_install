@@ -2,11 +2,13 @@
 set -euo pipefail
 # POS: system backup — Encrypted (AES-256) folder snapshots (tar + gpg)
 # POS_FLAGS: --service --no-encrypt
+# POS_SUBCMDS: menu
 # POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram) — shared by backup, firewall, share nfs client/server
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 source "$(dirname "$0")/../lib/usb-lib.sh" 2>/dev/null || source "$(dirname "$0")/usb-lib.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
 load_system_env
 EFF_ROOTS="${BACKUP_SERVICE_ROOTS:-/srv $HOME/srv}"
@@ -28,6 +30,9 @@ Modes:
   <folder-path>   Back up that folder directly.
   --no-encrypt    Skip encryption (no password prompt, artifact stays .tar.gz).
   --service       List folders under /srv and ~/srv, pick one, back it up.
+
+Bare \`pos system backup\` on a terminal (or \`pos system backup menu\`)
+opens an interactive menu wrapping these modes; arguments stay scriptable.
 
 The final artifact <name>_<date>.tar.gz[.gpg] is written to the current directory.
 After it verifies, connected USB storage is offered: the copy lands in
@@ -112,17 +117,10 @@ usb_copy_offer() {
 SERVICE=0
 ENCRYPT=1
 [ "${BACKUP_ENCRYPT:-1}" = "0" ] && ENCRYPT=0
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help) usage ;;
-        --service) SERVICE=1 ;;
-        --no-encrypt) ENCRYPT=0 ;;
-        *) FOLDER="$arg" ;;
-    esac
-done
-{ [ "$SERVICE" -eq 1 ] || [ -n "${FOLDER:-}" ]; } || err "Missing folder path (or use --service)"
 
-if [ "$SERVICE" -eq 1 ]; then
+# ── Folder picker over the --service roots ──────────────────────
+# Sets $FOLDER; errors out when nothing can be offered (same as --service).
+pick_service_folder() {
     if [ -n "${BACKUP_SERVICE_ROOTS:-}" ]; then
         read -r -a roots <<< "$BACKUP_SERVICE_ROOTS"
     else
@@ -156,61 +154,139 @@ if [ "$SERVICE" -eq 1 ]; then
         err "Invalid selection: $choice"
     fi
     FOLDER="${names[$choice]}"
-fi
+}
 
-[ -d "$FOLDER" ] || err "Folder not found: $FOLDER"
+# ── Backup flow ($FOLDER → timestamped archive, then USB copy offer) ──
+run_backup() {
+    [ -d "$FOLDER" ] || err "Folder not found: $FOLDER"
 
-NAME="$(basename "$FOLDER")"
-DATE="$(date +%Y-%m-%d_%H-%M-%S)"
-ARCHIVE="${NAME}_${DATE}.tar.gz"
+    NAME="$(basename "$FOLDER")"
+    DATE="$(date +%Y-%m-%d_%H-%M-%S)"
+    ARCHIVE="${NAME}_${DATE}.tar.gz"
 
-echo
-log "Creating backup..."
-echo "Source : $FOLDER"
-echo "Output : $ARCHIVE"
+    echo
+    log "Creating backup..."
+    echo "Source : $FOLDER"
+    echo "Output : $ARCHIVE"
 
-sudo tar -czvf "$ARCHIVE" -C "$(dirname "$FOLDER")" "$NAME"
+    sudo tar -czvf "$ARCHIVE" -C "$(dirname "$FOLDER")" "$NAME"
 
-log "Verifying archive..."
-tar -tzf "$ARCHIVE" > /dev/null
-log "Archive verified"
+    log "Verifying archive..."
+    tar -tzf "$ARCHIVE" > /dev/null
+    log "Archive verified"
 
-if [ "$ENCRYPT" -eq 1 ]; then
-    command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
+    if [ "$ENCRYPT" -eq 1 ]; then
+        command -v gpg &>/dev/null || err "gpg not found (install gnupg)"
 
+        while true; do
+            read -s -rp "Enter backup password: " PASS
+            echo
+            read -s -rp "Confirm backup password: " CONFIRM
+            echo
+            if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
+                break
+            fi
+            warn "Passwords are empty or do not match — try again"
+        done
+        unset CONFIRM
+
+        log "Encrypting backup..."
+        gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
+
+        rm -f "$ARCHIVE"
+        ARCHIVE="${ARCHIVE}.gpg"
+        chmod 600 "$ARCHIVE"
+
+        log "Verifying encrypted backup..."
+        gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+
+        unset PASS
+    else
+        chmod 600 "$ARCHIVE"
+        log "No encryption requested — keeping $ARCHIVE"
+    fi
+    echo
+    log "Backup completed: $ARCHIVE"
+    notify_send "Backup completed: $ARCHIVE"
+
+    # Optional: detect a USB stick connected after the backup finished, offer to
+    # copy the archive to <usb>/backups/, and prove the transfer 100%. From here
+    # on a failure is a USB-copy problem, not a backup problem.
+    trap 'notify_send "USB copy FAILED: ${ARCHIVE:-unknown}"' ERR
+    usb_copy_offer "$ARCHIVE"
+}
+
+# ── Interactive menu (opt-in front door, Pattern B via lib/menu-lib.sh) ──
+menu_backup_folder() {
+    local enc="$1" val prompt
+    val="$(menu_ask_value "Folder to back up")" || return 0
+    if [ ! -d "$val" ]; then
+        warn "Not a folder: $val"
+        return 0
+    fi
+    FOLDER="$val"
+    if [ "$enc" -eq 1 ]; then
+        prompt="Create ENCRYPTED backup of $FOLDER?"
+    else
+        prompt="Create UNENCRYPTED backup of $FOLDER (plain .tar.gz, no password)?"
+    fi
+    confirm "$prompt" n || { log "Cancelled"; return 0; }
+    ENCRYPT="$enc"
+    run_backup
+}
+
+menu_backup_service() {
+    if ! pick_service_folder; then
+        warn "Cancelled — no folder selected"
+        return 0
+    fi
+    confirm "Create ENCRYPTED backup of $FOLDER?" n || { log "Cancelled"; return 0; }
+    ENCRYPT=1
+    run_backup
+}
+
+run_menu() {
+    menu_guard || exit 1
     while true; do
-        read -s -rp "Enter backup password: " PASS
-        echo
-        read -s -rp "Confirm backup password: " CONFIRM
-        echo
-        if [ -n "$PASS" ] && [ "$PASS" = "$CONFIRM" ]; then
-            break
-        fi
-        warn "Passwords are empty or do not match — try again"
+        local choice
+        choice="$(menu_run "System backup" \
+            "New encrypted backup (type/paste folder)" \
+            "New encrypted backup — pick from ${EFF_ROOTS}" \
+            "New backup WITHOUT encryption (type/paste folder)")" || return 0
+        case "$choice" in
+            1) menu_backup_folder 1 ;;
+            2) menu_backup_service ;;
+            3) menu_backup_folder 0 ;;
+        esac
     done
-    unset CONFIRM
+}
 
-    log "Encrypting backup..."
-    gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
-
-    rm -f "$ARCHIVE"
-    ARCHIVE="${ARCHIVE}.gpg"
-    chmod 600 "$ARCHIVE"
-
-    log "Verifying encrypted backup..."
-    gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
-
-    unset PASS
-else
-    chmod 600 "$ARCHIVE"
-    log "No encryption requested — keeping $ARCHIVE"
+# Menu door: explicit verb, or zero args on a terminal. Everything below —
+# including zero args without a terminal — stays byte-compatible with the
+# pre-menu CLI.
+if [ "${1:-}" = "menu" ]; then
+    run_menu
+    exit 0
 fi
-echo
-log "Backup completed: $ARCHIVE"
-notify_send "Backup completed: $ARCHIVE"
 
-# Optional: detect a USB stick connected after the backup finished, offer to
-# copy the archive to <usb>/backups/, and prove the transfer 100%. From here
-# on a failure is a USB-copy problem, not a backup problem.
-trap 'notify_send "USB copy FAILED: ${ARCHIVE:-unknown}"' ERR
-usb_copy_offer "$ARCHIVE"
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+        --service) SERVICE=1 ;;
+        --no-encrypt) ENCRYPT=0 ;;
+        *) FOLDER="$arg" ;;
+    esac
+done
+
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    run_menu
+    exit 0
+fi
+
+{ [ "$SERVICE" -eq 1 ] || [ -n "${FOLDER:-}" ]; } || err "Missing folder path (or use --service)"
+
+if [ "$SERVICE" -eq 1 ]; then
+    pick_service_folder
+fi
+
+run_backup

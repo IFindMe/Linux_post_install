@@ -11,18 +11,18 @@
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
 | ## 2. Directory Structure | 44–196 |
-| ## 3. Installation Flow | 197–248 |
-| ## 4. The `pos` CLI System | 249–322 |
-| ## 5. Shared Library — `lib/common.sh` | 323–354 |
-| ## 6. Docker Compose / ScaleTail | 355–397 |
-| ## 7. Optional Apps (`apps/`) | 398–427 |
-| ## 8. Entertainment Module | 428–441 |
-| ## 9. Systemd Services | 442–453 |
-| ## 10. Configuration Files | 454–480 |
-| ## 11. Coding Conventions | 481–513 |
-| ## 12. Development Workflow | 514–566 |
-| ## 13. Key File Quick Reference | 567–631 |
-| ## 14. Common Tasks for Agents | 632–665 |
+| ## 3. Installation Flow | 197–250 |
+| ## 4. The `pos` CLI System | 251–324 |
+| ## 5. Shared Library — `lib/common.sh` | 325–356 |
+| ## 6. Docker Compose / ScaleTail | 357–399 |
+| ## 7. Optional Apps (`apps/`) | 400–429 |
+| ## 8. Entertainment Module | 430–443 |
+| ## 9. Systemd Services | 444–455 |
+| ## 10. Configuration Files | 456–482 |
+| ## 11. Coding Conventions | 483–515 |
+| ## 12. Development Workflow | 516–568 |
+| ## 13. Key File Quick Reference | 569–635 |
+| ## 14. Common Tasks for Agents | 636–669 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -204,7 +204,9 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--step
 │
 ├─ Phase 2: install.sh           (requires root)
 │   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
-│   └─ Copies lib/common.sh + lib/flags.sh + lib/notify.sh + lib/entertainment-lib.sh → /usr/local/bin/ (chmod 644)
+│   └─ Copies lib/*.sh (common, flags, notify, entertainment-lib,
+│      scheduler-lib, config-ui, user-timers-lib, entertainment-plugin-lib,
+│      usb-lib, share-lib, menu-lib) → /usr/local/bin/ (chmod 644)
 │   └─ Copies x64_bin/* → /usr/local/bin/ on x86_64 (arm64_bin/ on aarch64)
 │   └─ [if --feature] Copies features/* → /usr/local/bin/ (asks before overwriting),
 │                      then sets the matching feature flag
@@ -579,6 +581,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
 | `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
 | `lib/usb-lib.sh` | 205 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`; EFI system partitions excluded; picker shows size/label/fs) — used by `pos system backup` + `pos media sync` |
+| `lib/share-lib.sh` | 318 | Domain layer for the share suite (usbsrv/smbclient record parsers, folder+mountpoint candidates, remote listings, service/firewall advisories; EOF-safe) + compat shims to `lib/menu-lib.sh` — used by all five `pos share *` tools |
+| `lib/menu-lib.sh` | 169 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -592,11 +596,11 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
-| `bin/pos-docker-compose` | 366 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
+| `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-stack` | 101 | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |
-| `bin/pos-docker-vbox` | 158 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
+| `bin/pos-docker-vbox` | 261 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
@@ -604,26 +608,26 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
-| `bin/pos-media-sync` | 164 | Incremental Music → USB sync (mp3/mp4, add/update only) |
-| `bin/pos-media-ytsync` | 1190 | Incrementally sync YouTube channels/playlists into ~/Videos |
+| `bin/pos-media-sync` | 216 | Incremental Music → USB sync (mp3/mp4, add/update only) |
+| `bin/pos-media-ytsync` | 1191 | Incrementally sync YouTube channels/playlists into ~/Videos |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 951 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 1104 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
-| `bin/pos-share-nfs-client` | 138 | Mount NFS shares (ephemeral or persistent systemd mount units) |
-| `bin/pos-share-nfs-server` | 134 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
-| `bin/pos-share-smb-client` | 440 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
-| `bin/pos-share-smb-server` | 311 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
-| `bin/pos-share-usb-server` | 218 | USB Redirector server control (--ls, --share; prompts when args omitted) |
+| `bin/pos-share-nfs-client` | 343 | Mount NFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-nfs-server` | 245 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| `bin/pos-share-smb-client` | 576 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
+| `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 216 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-firewall` | 308 | Interactive UFW management |
+| `bin/pos-system-backup` | 292 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
-| `bin/pos-system-schedule` | 81 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+| `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 298 | Dynamic bash completion |
+| `completions/pos.bash` | 302 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

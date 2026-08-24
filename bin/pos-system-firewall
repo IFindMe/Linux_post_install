@@ -39,10 +39,25 @@ log()  { echo "[+] $*"; }
 warn() { echo "[!] $*"; }
 err()  { echo "ERROR: $*" >&2; exit 1; }
 
+# Interactive input seam: every prompt reads the controlling terminal
+# (/dev/tty), so the menu survives stdout redirection / command substitution,
+# and fails closed on EOF or a missing TTY — it prints a pointer to the CLI
+# instead of hanging under cron/pipes (repo-standard menu mechanics; see
+# lib/menu-lib.sh contracts).
+tty_read() {
+    local prompt="$1"
+    shift
+    if ! read -rp "$prompt" "$@" < /dev/tty; then
+        printf '[!] Terminal closed or unavailable (EOF) — stopping; nothing more was executed.\n' >&2
+        printf '[!] Re-open interactively with: sudo pos system firewall (see --help)\n' >&2
+        exit 1
+    fi
+}
+
 run_cmd() {
     local -a cmd=("$@")
     printf "\n>>> %s\n" "${cmd[*]}"
-    read -rp "Execute this command? [y/N]: " confirm
+    tty_read "Execute this command? [y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
             echo "(dry-run) skipping execution"
@@ -101,9 +116,9 @@ build_ufw_cmd() {
 }
 
 prompt_ipver() {
-    local ver
-    read -rp "IP version (4 / 6 / both): " ver
-    echo "$ver"
+    # Assigns `ipver` in the caller's scope (bash dynamic scoping); direct call
+    # instead of command substitution so an EOF exits the whole tool gracefully.
+    tty_read "IP version (4 / 6 / both): " ipver
 }
 
 apply_for_versions() {
@@ -111,7 +126,7 @@ apply_for_versions() {
     local port="$6" onif="$7" logmode="$8" comment="$9"
     local insert_pos="${10:-}"
     local ipver
-    ipver=$(prompt_ipver)
+    prompt_ipver
 
     case "$ipver" in
         4)    build_ufw_cmd "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos" "" ;;
@@ -130,26 +145,26 @@ add_rule() {
     echo "1) Port/service (eg: port 8080 or 'ssh')"
     echo "2) IP-based (from X to Y)"
     echo "3) Directional port rule (in/out to any port ...)"
-    read -rp "Choice: " rtype
+    tty_read "Choice: " rtype
 
     case "$rtype" in
         1)
-            read -rp "Action (allow/deny/reject/limit) [allow]: " action
+            tty_read "Action (allow/deny/reject/limit) [allow]: " action
             action=${action:-allow}
-            read -rp "Enter port number or service name (eg 'ssh' or '8080'): " port_or_svc
+            tty_read "Enter port number or service name (eg 'ssh' or '8080'): " port_or_svc
 
             if [[ "$port_or_svc" =~ ^[0-9]+$ ]]; then
-                read -rp "Protocol (tcp/udp/any) [tcp]: " proto
+                tty_read "Protocol (tcp/udp/any) [tcp]: " proto
                 proto=${proto:-tcp}
                 [[ "$proto" == "any" ]] && proto=""
-                read -rp "Interface (leave empty for any): " onif
-                read -rp "Log? (none/log/log-all) [none]: " logmode
+                tty_read "Interface (leave empty for any): " onif
+                tty_read "Log? (none/log/log-all) [none]: " logmode
                 [[ "$logmode" == "none" ]] && logmode=""
-                read -rp "Comment (optional): " comment
+                tty_read "Comment (optional): " comment
 
                 apply_for_versions "$action" "" "$proto" "" "any" "$port_or_svc" "$onif" "$logmode" "$comment"
             else
-                read -rp "IP version (4 / 6 / both) [4]: " ipver
+                tty_read "IP version (4 / 6 / both) [4]: " ipver
                 ipver=${ipver:-4}
                 case "$ipver" in
                     4)    run_cmd ufw "$action" "$port_or_svc" ;;
@@ -162,41 +177,41 @@ add_rule() {
             ;;
 
         2)
-            read -rp "Action (allow/deny/reject) [deny]: " action
+            tty_read "Action (allow/deny/reject) [deny]: " action
             action=${action:-deny}
-            read -rp "From address/CIDR (eg 192.168.1.5 or 10.0.0.0/24): " from
-            read -rp "To address (leave empty for 'any') [any]: " to
+            tty_read "From address/CIDR (eg 192.168.1.5 or 10.0.0.0/24): " from
+            tty_read "To address (leave empty for 'any') [any]: " to
             to=${to:-any}
-            read -rp "Direction (in/out) [in]: " direction
+            tty_read "Direction (in/out) [in]: " direction
             direction=${direction:-in}
-            read -rp "Port (leave empty if not applicable): " port
-            read -rp "Protocol (tcp/udp/any) [any]: " proto
+            tty_read "Port (leave empty if not applicable): " port
+            tty_read "Protocol (tcp/udp/any) [any]: " proto
             [[ "$proto" == "any" ]] && proto=""
-            read -rp "Interface (leave empty for any): " onif
-            read -rp "Log? (none/log/log-all) [none]: " logmode
+            tty_read "Interface (leave empty for any): " onif
+            tty_read "Log? (none/log/log-all) [none]: " logmode
             [[ "$logmode" == "none" ]] && logmode=""
-            read -rp "Comment (optional): " comment
+            tty_read "Comment (optional): " comment
 
             apply_for_versions "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment"
             ;;
 
         3)
-            read -rp "Action (allow/deny/reject/limit) [allow]: " action
+            tty_read "Action (allow/deny/reject/limit) [allow]: " action
             action=${action:-allow}
-            read -rp "Direction (in/out) [in]: " direction
+            tty_read "Direction (in/out) [in]: " direction
             direction=${direction:-in}
-            read -rp "Port number: " port
-            read -rp "Protocol (tcp/udp/any) [tcp]: " proto
+            tty_read "Port number: " port
+            tty_read "Protocol (tcp/udp/any) [tcp]: " proto
             [[ "$proto" == "any" ]] && proto=""
-            read -rp "On interface (leave empty for any): " onif
-            read -rp "From address (optional): " from
+            tty_read "On interface (leave empty for any): " onif
+            tty_read "From address (optional): " from
             from=${from:-}
-            read -rp "To address [any]: " to
+            tty_read "To address [any]: " to
             to=${to:-any}
-            read -rp "Log? (none/log/log-all) [none]: " logmode
+            tty_read "Log? (none/log/log-all) [none]: " logmode
             [[ "$logmode" == "none" ]] && logmode=""
-            read -rp "Comment (optional): " comment
-            read -rp "Insert position (number/prepend/empty): " insert_pos
+            tty_read "Comment (optional): " comment
+            tty_read "Insert position (number/prepend/empty): " insert_pos
 
             apply_for_versions "$action" "$direction" "$proto" "$from" "$to" "$port" "$onif" "$logmode" "$comment" "$insert_pos"
             ;;
@@ -210,16 +225,16 @@ delete_rule() {
     echo "Delete rule by:"
     echo "1) rule number (use 'ufw status numbered' to see numbers)"
     echo "2) rule text (eg: 'allow 22/tcp')"
-    read -rp "Choice: " dch
+    tty_read "Choice: " dch
 
     case "$dch" in
         1)
             ufw status numbered
-            read -rp "Number to delete: " num
+            tty_read "Number to delete: " num
             run_cmd ufw delete "$num"
             ;;
         2)
-            read -rp "Exact rule text to delete (eg: deny 80/tcp): " ruletext
+            tty_read "Exact rule text to delete (eg: deny 80/tcp): " ruletext
             run_cmd ufw delete $ruletext
             ;;
         *)  echo "Unknown choice." ;;
@@ -231,7 +246,7 @@ show_status() {
     echo "1) Simple status"
     echo "2) Verbose status"
     echo "3) Numbered status (useful for delete)"
-    read -rp "Choice: " sc
+    tty_read "Choice: " sc
     case "$sc" in
         1) run_cmd ufw status ;;
         2) run_cmd ufw status verbose ;;
@@ -241,7 +256,8 @@ show_status() {
 }
 
 while true; do
-    cat <<'MENU'
+    {
+        cat <<'MENU'
 
 ==============================
    UFW POWER — human friendly
@@ -257,7 +273,8 @@ while true; do
 0) Exit
 ------------------------------
 MENU
-    read -rp "Choose: " opt
+    } >&2
+    tty_read "Choose: " opt
 
     case "$opt" in
         1) add_rule ;;
@@ -267,13 +284,13 @@ MENU
         5) run_cmd ufw disable ;;
         6)
             echo "WARNING: ufw reset will disable and remove all rules."
-            read -rp "Type 'RESET' to confirm: " c
+            tty_read "Type 'RESET' to confirm: " c
             [[ "$c" == "RESET" ]] && run_cmd ufw reset || echo "Reset aborted."
             ;;
         7)
-            read -rp "Default incoming policy (allow/deny/reject) [deny]: " defin
+            tty_read "Default incoming policy (allow/deny/reject) [deny]: " defin
             defin=${defin:-deny}
-            read -rp "Default outgoing policy (allow/deny/reject) [allow]: " defout
+            tty_read "Default outgoing policy (allow/deny/reject) [allow]: " defout
             defout=${defout:-allow}
             run_cmd ufw default "$defin" incoming
             run_cmd ufw default "$defout" outgoing
@@ -303,6 +320,6 @@ MENU
     esac
 
     echo
-    read -rp "Press Enter to continue..."
+    tty_read "Press Enter to continue..." REPLY
     clear
 done

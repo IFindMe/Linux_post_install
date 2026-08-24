@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: network download — aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
-# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace
+# POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace menu
 # POS_FLAGS: --dir --out --split --seed --force --upload --gid --tmux
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
 command -v aria2c &>/dev/null || err "aria2c not found (install aria2)"
 command -v jq &>/dev/null || err "jq not found (install jq)"
@@ -44,6 +45,9 @@ Usage: pos network download <command> [args]
 
 aria2 download daemon + queue control. Runs a persistent aria2c with JSON-RPC
 (systemd user service on localhost:$RPC_PORT) and drives it via the RPC API.
+
+Bare \`pos network download\` on a terminal (or \`pos network download menu\`)
+opens an interactive menu wrapping these commands; arguments stay scriptable.
 
 Commands:
   start                     Start the daemon (installs the systemd user service, generates RPC secret)
@@ -922,6 +926,142 @@ tmux_watch() {
     log "tmux session '$sname' started — attach: tmux attach -t '$sname'"
 }
 
+# ── Interactive menu (opt-in front door, Pattern B via lib/menu-lib.sh) ──
+# Top-verb map over the existing cmd_* implementations — picks/prompts/gates
+# only, no new RPC logic. Queue views are gated on a non-fatal RPC liveness
+# probe first: rpc() itself err-exits, so a dead daemon must be caught before
+# it can end the menu; the graceful hint points at the start-daemon item.
+# This tool deliberately stays OUTSIDE the dispatcher's INTERACTIVE_CMDS (its
+# verbs are pipe-friendly one-shots that keep their tee logs), so every prompt
+# here is a lib/menu-lib.sh primitive behind menu_guard's tty proof — no raw
+# stdin-read helpers.
+menu_ask_yn() {   # $1 = question · rc 0 iff answered yes (default n; EOF cancels)
+    local ans
+    ans="$(menu_ask_value "$1" "N")" || return 1
+    [[ "$ans" =~ ^[Yy] ]]
+}
+
+menu_rpc_ok() {   # cheap non-fatal liveness probe (same request shape as rpc())
+    curl -fsS --noproxy '*' -m 3 -H 'Content-Type: application/json' \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"aria2.getVersion\",\"params\":[\"token:${RPC_SECRET}\"]}" \
+        "$RPC_URL" >/dev/null 2>&1
+}
+
+menu_gate_daemon() {   # rc 0 iff the RPC answers · else graceful pointer
+    if menu_rpc_ok; then return 0; fi
+    warn "aria2 RPC unreachable on $RPC_URL — start the daemon first (menu item below, or 'pos network download start')"
+    return 1
+}
+
+menu_list_gids() {   # "full_gid<tab>status<tab>name" for active + waiting + stopped
+    { rpc aria2.tellActive; rpc aria2.tellWaiting 0 200; rpc aria2.tellStopped 0 200; } \
+        | jq -r --arg na '?' '.result[]? |
+            [ .gid, .status,
+              (.bittorrent.info.name // (.files[0].path // $na | split("/") | last)) ] | @tsv'
+}
+
+menu_pick_gid_row() {   # $1 = prompt → "<gid><tab>label" on stdout · rc 1 = cancelled / none
+    local -a rows=() gids=() labels=()
+    mapfile -t rows < <(menu_list_gids)
+    [ ${#rows[@]} -gt 0 ] || { warn "queue is empty — nothing to pick"; return 1; }
+    local r
+    for r in "${rows[@]}"; do
+        gids+=("${r%%$'\t'*}")
+        labels+=("$(printf '%s' "$r" | cut -f2- | tr '\t' ' ')")
+    done
+    local idx
+    idx="$(menu_pick "$1" "${labels[@]}")" || return 1
+    printf '%s\t%s\n' "${gids[$((idx - 1))]}" "${labels[$((idx - 1))]}"
+}
+
+menu_pick_gid() {   # $1 = prompt → full gid on stdout · rc 1 = cancelled / none
+    local row
+    row="$(menu_pick_gid_row "$1")" || return 1
+    printf '%s\n' "${row%%$'\t'*}"
+}
+
+menu_gid_action() {   # $1 = info|pause|resume|restart — pick a download, run the verb
+    local verb="$1" gid
+    menu_gate_daemon || return 0
+    gid="$(menu_pick_gid "$verb which download?")" || return 0
+    "cmd_$verb" "$gid"
+}
+
+menu_download_add() {   # ask for a URL, hand cmd_add the existing flags
+    local url
+    url="$(menu_ask_value "URL to add (download dir: $DOWNLOAD_DIR)")" || return 0
+    [ -n "$url" ] || return 0
+    if menu_ask_yn "Hand live progress to a tmux session (--tmux)?"; then
+        cmd_add --tmux "$url"
+    else
+        log "(watch it later with: pos network download watch)"
+        cmd_add "$url"
+    fi
+}
+
+menu_download_remove() {
+    menu_gate_daemon || return 0
+    local row gid label name
+    row="$(menu_pick_gid_row "Remove which download?")" || return 0
+    gid="${row%%$'\t'*}"
+    label="${row#*$'\t'}"
+    name="${label#* }"
+    menu_ask_yn "Remove download '$name' (${gid:0:8})? Its progress is discarded." \
+        || { log "Cancelled — kept"; return 0; }
+    cmd_remove "$gid"
+}
+
+menu_purge() {
+    menu_gate_daemon || return 0
+    warn "Purge clears ALL finished/error history from aria2."
+    local word
+    word="$(menu_ask_value "Type purge to clear finished/error history")" || return 0
+    [ "$word" = "purge" ] || { log "Cancelled — history kept"; return 0; }
+    cmd_purge
+}
+
+menu_daemon_stop() {
+    menu_ask_yn "Stop the aria2 daemon ($SERVICE)? Active downloads pause until it runs again." \
+        || { log "Cancelled"; return 0; }
+    cmd_stop
+}
+
+run_menu() {
+    menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(menu_run "Downloads — aria2 RPC queue" \
+            "Daemon status" \
+            "Overview — status + queue snapshot" \
+            "List downloads" \
+            "Add a download URL" \
+            "Download details (info)" \
+            "Pause a download" \
+            "Resume a download" \
+            "Remove a download" \
+            "Re-queue / restart a download" \
+            "Purge finished/error history (type purge)" \
+            "Watch live progress (Ctrl-C leaves the menu)" \
+            "Start the daemon" \
+            "Stop the daemon")" || return 0
+        case "$choice" in
+            1) cmd_status ;;
+            2) menu_gate_daemon && overview ;;
+            3) menu_gate_daemon && cmd_list ;;
+            4) menu_download_add ;;
+            5) menu_gid_action info ;;
+            6) menu_gid_action pause ;;
+            7) menu_gid_action resume ;;
+            8) menu_download_remove ;;
+            9) menu_gid_action restart ;;
+            10) menu_purge ;;
+            11) menu_gate_daemon && cmd_watch ;;
+            12) cmd_start ;;
+            13) menu_daemon_stop ;;
+        esac
+    done
+}
+
 # ── Dispatch ───────────────────────────────────────────────────
 overview() {
     cmd_status
@@ -947,5 +1087,18 @@ main() {
         *) err "unknown command: $cmd (see 'pos network download --help')" ;;
     esac
 }
+
+# Menu door: explicit verb, or zero args on a terminal. Everything below —
+# including zero args without a terminal — stays byte-compatible with the
+# pre-menu CLI; scripted verbs (and the healer timer's `retry … --once`)
+# never enter the menu.
+if [ "${1:-}" = "menu" ]; then
+    run_menu
+    exit 0
+fi
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    run_menu
+    exit 0
+fi
 
 main "$@"
