@@ -289,8 +289,9 @@ append_history_failed() {
 last_sync_of() {   # newest history line naming <display name>, date field only
     local name="$1" last=""
     if [ -f "$HIST_FILE" ]; then
-        last="$(grep -F " · $name · " "$HIST_FILE" 2>/dev/null | tail -n 1 | cut -d'·' -f1 || true)"
-        last="${last% }"
+        # grep may rc=1 on no match (pipefail) — || true keeps empty-string semantics
+        last="$(grep -F " · $name · " "$HIST_FILE" 2>/dev/null | tail -n 1 || true)"
+        last="${last%% ·*}"
     fi
     printf '%s' "${last:--}"
 }
@@ -298,8 +299,8 @@ last_sync_of() {   # newest history line naming <display name>, date field only
 last_run_overall() {
     local last=""
     if [ -f "$HIST_FILE" ]; then
-        last="$(tail -n 1 "$HIST_FILE" | cut -d'·' -f1 || true)"
-        last="${last% }"
+        last="$(tail -n 1 "$HIST_FILE" || true)"
+        last="${last%% ·*}"
     fi
     printf '%s' "$last"
 }
@@ -1050,7 +1051,7 @@ menu_render() {
         printf '  3) List channels\n'
         printf '  4) Remove a channel\n'
         printf '  0) Exit\n'
-        printf '--------------------------------------------\n'
+        printf '%s\n' '--------------------------------------------'
     } >&2
 }
 
