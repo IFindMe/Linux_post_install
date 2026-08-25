@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–198 |
-| ## 3. Installation Flow | 199–252 |
-| ## 4. The `pos` CLI System | 253–328 |
-| ## 5. Shared Library — `lib/common.sh` | 329–360 |
-| ## 6. Docker Compose / ScaleTail | 361–403 |
-| ## 7. Optional Apps (`apps/`) | 404–433 |
-| ## 8. Entertainment Module | 434–447 |
-| ## 9. Systemd Services | 448–459 |
-| ## 10. Configuration Files | 460–486 |
-| ## 11. Coding Conventions | 487–519 |
-| ## 12. Development Workflow | 520–572 |
-| ## 13. Key File Quick Reference | 573–641 |
-| ## 14. Common Tasks for Agents | 642–675 |
+| ## 2. Directory Structure | 44–199 |
+| ## 3. Installation Flow | 200–253 |
+| ## 4. The `pos` CLI System | 254–330 |
+| ## 5. Shared Library — `lib/common.sh` | 331–362 |
+| ## 6. Docker Compose / ScaleTail | 363–405 |
+| ## 7. Optional Apps (`apps/`) | 406–435 |
+| ## 8. Entertainment Module | 436–449 |
+| ## 9. Systemd Services | 450–461 |
+| ## 10. Configuration Files | 462–488 |
+| ## 11. Coding Conventions | 489–521 |
+| ## 12. Development Workflow | 522–574 |
+| ## 13. Key File Quick Reference | 575–644 |
+| ## 14. Common Tasks for Agents | 645–678 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -97,6 +97,7 @@ Linux_post_install/
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
+│   ├── pos-system-uninstall                # Remove pos toolkit binaries, services, shell integration, config, and data
 │   ├── pos-ai                              # AI assistant: ask, chat, sessions, capture, models, providers
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
@@ -305,6 +306,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+| system | uninstall | `pos-system-uninstall` | Remove pos toolkit binaries, services, shell integration, config, and data |
 |  | ai | `pos-ai` | AI assistant: ask, chat, sessions, capture, models, providers |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
@@ -630,10 +632,11 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
-| `bin/pos-ai` | 642 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-system-uninstall` | 415 | Remove pos toolkit binaries, services, shell integration, config, and data |
+| `bin/pos-ai` | 645 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 305 | Dynamic bash completion |
+| `completions/pos.bash` | 306 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

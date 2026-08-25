@@ -1,13 +1,14 @@
 # How-To: `pos system`
 
-Host care: encrypted backups, firewall, and the health dashboard. Tools:
-`backup`, `firewall`, `health`.
+Host care: encrypted backups, firewall, health dashboard, and uninstall. Tools:
+`backup`, `firewall`, `health`, `uninstall`.
 
 | Tool | What it does |
 |------|--------------|
 | `pos system health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker) |
 | `pos system backup` | gpg-encrypted (AES-256) folder snapshots |
 | `pos system firewall` | Interactive UFW ("UFW POWER") management |
+| `pos system uninstall` | Safe, interactive uninstaller for the pos toolkit |
 
 ---
 
@@ -203,6 +204,36 @@ not).
 - Accidentally locked yourself out of SSH → console into the host,
   `sudo ufw allow 22/tcp`, then `sudo ufw reload`.
 - `ufw reset` requires typing `RESET` — deliberate.
+
+## `pos system uninstall` — remove the pos toolkit
+
+```bash
+pos system uninstall                       # interactive scan + confirm tier 1
+pos system uninstall --yes                 # non-interactive, tier 1 only
+pos system uninstall --yes --config --data # remove everything (nuclear option)
+```
+
+Scans the system for installed pos components and removes them in three tiers:
+
+| Tier | What it removes | How to include |
+|------|----------------|----------------|
+| **Tier 1** | Binaries (`/usr/local/bin/pos*`, libs, entertainment plugins, prebuilt, features), systemd services (disable+remove), shell integration (`~/.bashrc` PATH/completion/pos-ai-hook entries), completion file | Always (default) |
+| **Tier 2** | Config files (`~/.config/linux_post_install/` — `.env` files, `schedule.d/`, `authorized_keys`, `rclone.conf`) | `--config` flag |
+| **Tier 3** | Session/log data (`~/.local/share/linux_post_install/` — AI sessions, logs, captured output) | `--data` flag |
+
+The default mode is interactive: it shows what will be removed and asks for
+confirmation. The git repo is **never** removed — delete it manually if desired.
+
+**Recipes:**
+- Quick cleanup: `pos system uninstall --yes`
+- Full wipe: `pos system uninstall --yes --config --data`
+- Safe preview: run `pos system uninstall` without `--yes` to see the plan first
+
+**Troubleshooting:**
+- "Nothing to remove" → pos toolkit is not installed (or already removed)
+- After uninstall, run `source ~/.bashrc` or restart your shell
+
+---
 
 ## Related
 

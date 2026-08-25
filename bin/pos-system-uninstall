@@ -1,0 +1,415 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system uninstall — Remove pos toolkit binaries, services, shell integration, config, and data
+# POS_FLAGS: --yes --config --data
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: pos system uninstall [--yes] [--config] [--data]
+
+Remove the pos toolkit from this machine. Scans for installed components
+and removes them interactively (or non-interactively with --yes).
+
+Tiers:
+  Tier 1 (always):  binaries, entertainment plugins, systemd services, shell integration
+  Tier 2 (--config): config files in ~/.config/linux_post_install/
+  Tier 3 (--data):   session/log/capture data in ~/.local/share/linux_post_install/
+
+Flags:
+  --yes     Skip confirmation prompts (removes defaults only; combine with --config/--data for more)
+  --config  Include config files (Tier 2) in removal
+  --data    Include session/log data (Tier 3) in removal
+
+Examples:
+  pos system uninstall                   # interactive, tier 1 only
+  pos system uninstall --yes             # non-interactive, tier 1 only
+  pos system uninstall --yes --config --data   # nuclear option
+EOF
+    exit 0
+}
+
+# ── Parse flags ─────────────────────────────────────────────────
+YES_MODE=0
+DEL_CONFIG=0
+DEL_DATA=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --yes)     YES_MODE=1; shift ;;
+        --config)  DEL_CONFIG=1; shift ;;
+        --data)    DEL_DATA=1; shift ;;
+        -*)        err "Unknown option '$1'" ;;
+        *)         err "Unexpected argument: $1 (no subcommands)" ;;
+    esac
+done
+
+# ── Scan functions ──────────────────────────────────────────────
+scan_tier1() {
+    local found=()
+
+    # ── Binaries in /usr/local/bin ──
+    # Main dispatcher
+    [ -f /usr/local/bin/pos ] && found+=("/usr/local/bin/pos")
+
+    # All pos-* tools (sorted for deterministic display)
+    local f
+    while IFS= read -r f; do
+        found+=("$f")
+    done < <(compgen -G /usr/local/bin/pos-* 2>/dev/null | sort || true)
+
+    # Lib files shipped by install.sh
+    for f in common.sh menu-lib.sh share-lib.sh; do
+        [ -f "/usr/local/bin/$f" ] && found+=("/usr/local/bin/$f")
+    done
+
+    # AI providers subdirectory
+    [ -d /usr/local/bin/ai-providers ] && found+=("/usr/local/bin/ai-providers/")
+
+    # Entertainment plugins installed by install.sh
+    while IFS= read -r f; do
+        found+=("$f")
+    done < <(for ep in weather.sh gold.sh joke.sh; do
+        [ -f "/usr/local/bin/$ep" ] && echo "/usr/local/bin/$ep"
+    done | sort)
+
+    # Legacy forwarders
+    for f in wr-* mp3 mp4 vbox ssh-load-all; do
+        if compgen -G "/usr/local/bin/$f" >/dev/null 2>&1; then
+            while IFS= read -r lf; do
+                found+=("$lf")
+            done < <(compgen -G "/usr/local/bin/$f" 2>/dev/null)
+        fi
+    done
+
+    # Prebuilt binaries (hotspot)
+    for f in wihotspot wihotspot-gui create_ap; do
+        [ -f "/usr/local/bin/$f" ] && found+=("/usr/local/bin/$f")
+    done
+
+    # Feature scripts installed by install.sh
+    for f in autostart.sh usb-automount.sh; do
+        [ -f "/usr/local/bin/$f" ] && found+=("/usr/local/bin/$f")
+    done
+
+    # User-local binaries
+    [ -f "$HOME/.local/bin/pos-ai-hook.sh" ] && found+=("$HOME/.local/bin/pos-ai-hook.sh")
+
+    # Completion file
+    [ -f /usr/local/share/bash-completion/completions/pos.bash ] && found+=("/usr/local/share/bash-completion/completions/pos.bash")
+
+    # ~/.bash_completion entries
+    if [ -f "$HOME/.bash_completion" ]; then
+        while IFS= read -r line; do
+            found+=("~/.bash_completion: $(echo "$line" | sed 's/^[[:space:]]*//' | cut -c1-70)")
+        done < <(grep -n 'pos' "$HOME/.bash_completion" 2>/dev/null || true)
+    fi
+
+    # ── Systemd services ──
+    for svc in autostart.service ssh-agent.service usb-automount.service; do
+        if systemctl is-enabled "$svc" &>/dev/null 2>&1; then
+            found+=("service: $svc")
+        elif [ -f "/etc/systemd/system/$svc" ]; then
+            found+=("service: $svc")
+        fi
+    done
+    # Catch any other linux_post_install-related services
+    while IFS= read -r line; do
+        local svc_name
+        svc_name=$(echo "$line" | awk '{print $1}')
+        # Skip already-listed services
+        local already=0
+        for listed in autostart.service ssh-agent.service usb-automount.service; do
+            [ "$svc_name" = "$listed" ] && already=1 && break
+        done
+        [ "$already" -eq 0 ] && found+=("service: $svc_name")
+    done < <(systemctl list-unit-files --type=service 2>/dev/null | grep -i 'linux_post_install\|pos-' || true)
+
+    # ── Shell integration (~/.bashrc) ──
+    if [ -f "$HOME/.bashrc" ]; then
+        while IFS= read -r line; do
+            found+=("~/.bashrc: $(echo "$line" | sed 's/^[[:space:]]*//' | cut -c1-70)")
+        done < <(grep -n 'source.*pos-ai-hook\|linux_post_install.*PATH\|source.*pos\.bash\|pos completion' "$HOME/.bashrc" 2>/dev/null || true)
+    fi
+
+    printf '%s\n' "${found[@]}"
+}
+
+scan_tier2() {
+    local found=()
+    local cfg="$HOME/.config/linux_post_install"
+    if [ -d "$cfg" ]; then
+        while IFS= read -r f; do
+            found+=("$f")
+        done < <(find "$cfg" -maxdepth 2 -type f 2>/dev/null | sort)
+    fi
+    printf '%s\n' "${found[@]}"
+}
+
+scan_tier3() {
+    local found=()
+    local data="$HOME/.local/share/linux_post_install"
+    if [ -d "$data" ]; then
+        while IFS= read -r f; do
+            found+=("$f")
+        done < <(find "$data" -maxdepth 2 \( -type f -o -type d \) 2>/dev/null | sort)
+    fi
+    printf '%s\n' "${found[@]}"
+}
+
+# ── Display function ────────────────────────────────────────────
+display_plan() {
+    local -a t1=() t2=() t3=()
+    # Collect non-empty entries from scan output
+    while IFS= read -r line; do
+        [ -n "$line" ] && t1+=("$line")
+    done <<< "${1:-}"
+    while IFS= read -r line; do
+        [ -n "$line" ] && t2+=("$line")
+    done <<< "${2:-}"
+    while IFS= read -r line; do
+        [ -n "$line" ] && t3+=("$line")
+    done <<< "${3:-}"
+
+    echo
+    echo "${BOLD}pos uninstall — what will be removed:${RESET}"
+    echo
+
+    local n=1
+
+    if [ "${#t1[@]}" -gt 0 ]; then
+        echo "${CYAN}Tier 1 (always):${RESET}"
+        for item in "${t1[@]}"; do
+            printf "  %3d) %s\n" "$n" "$item"
+            n=$((n + 1))
+        done
+    else
+        echo "${CYAN}Tier 1 (always):${RESET}  (nothing found)"
+    fi
+    echo
+
+    if [ "${#t2[@]}" -gt 0 ]; then
+        echo "${YELLOW}Tier 2 (--config to include):${RESET}"
+        for item in "${t2[@]}"; do
+            printf "  %3d) %s\n" "$n" "$item"
+            n=$((n + 1))
+        done
+    else
+        echo "${YELLOW}Tier 2 (--config to include):${RESET}  (nothing found)"
+    fi
+    echo
+
+    if [ "${#t3[@]}" -gt 0 ]; then
+        echo "${YELLOW}Tier 3 (--data to include):${RESET}"
+        for item in "${t3[@]}"; do
+            printf "  %3d) %s\n" "$n" "$item"
+            n=$((n + 1))
+        done
+    else
+        echo "${YELLOW}Tier 3 (--data to include):${RESET}  (nothing found)"
+    fi
+    echo
+}
+
+# ── Removal functions ───────────────────────────────────────────
+remove_tier1() {
+    local count=0
+
+    # ── Binaries ──
+    # Main dispatcher
+    [ -f /usr/local/bin/pos ] && { rm -f /usr/local/bin/pos && count=$((count+1)); }
+
+    # All pos-* tools
+    local f
+    while IFS= read -r f; do
+        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    done < <(compgen -G /usr/local/bin/pos-* 2>/dev/null | sort || true)
+
+    # Lib files
+    for f in /usr/local/bin/common.sh /usr/local/bin/menu-lib.sh /usr/local/bin/share-lib.sh; do
+        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    done
+
+    # AI providers directory
+    if [ -d /usr/local/bin/ai-providers ]; then
+        rm -rf /usr/local/bin/ai-providers && count=$((count+1))
+    fi
+
+    # Entertainment plugins
+    for f in /usr/local/bin/weather.sh /usr/local/bin/gold.sh /usr/local/bin/joke.sh; do
+        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    done
+
+    # Legacy forwarders
+    for pat in 'wr-*' mp3 mp4 vbox ssh-load-all; do
+        while IFS= read -r f; do
+            [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+        done < <(compgen -G "/usr/local/bin/$pat" 2>/dev/null || true)
+    done
+
+    # Prebuilt binaries
+    for f in /usr/local/bin/wihotspot /usr/local/bin/wihotspot-gui /usr/local/bin/create_ap; do
+        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    done
+
+    # Feature scripts
+    for f in /usr/local/bin/autostart.sh /usr/local/bin/usb-automount.sh; do
+        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    done
+
+    # User-local binaries
+    [ -f "$HOME/.local/bin/pos-ai-hook.sh" ] && { rm -f "$HOME/.local/bin/pos-ai-hook.sh" && count=$((count+1)); }
+
+    # Completion file
+    [ -f /usr/local/share/bash-completion/completions/pos.bash ] && { rm -f /usr/local/share/bash-completion/completions/pos.bash && count=$((count+1)); }
+
+    # ── Systemd services ──
+    for svc in autostart.service ssh-agent.service usb-automount.service; do
+        if systemctl is-enabled "$svc" &>/dev/null 2>&1; then
+            systemctl disable --now "$svc" 2>/dev/null || true
+            rm -f "/etc/systemd/system/$svc"
+            count=$((count+1))
+        elif [ -f "/etc/systemd/system/$svc" ]; then
+            rm -f "/etc/systemd/system/$svc"
+            count=$((count+1))
+        fi
+    done
+    # Additional linux_post_install services
+    while IFS= read -r svc_file; do
+        local svc_name
+        svc_name=$(basename "$svc_file" .service)
+        # Skip already-handled services
+        local already=0
+        for listed in autostart ssh-agent usb-automount; do
+            [ "$svc_name" = "$listed" ] && already=1 && break
+        done
+        if [ "$already" -eq 0 ]; then
+            systemctl disable --now "$svc_name.service" 2>/dev/null || true
+            rm -f "$svc_file"
+            count=$((count+1))
+        fi
+    done < <(find /etc/systemd/system/ -name '*linux_post_install*' -o -name 'pos-*' 2>/dev/null || true)
+
+    # Reload daemon after service changes
+    systemctl daemon-reload 2>/dev/null || true
+
+    # ── Shell integration (~/.bashrc) ──
+    if [ -f "$HOME/.bashrc" ]; then
+        local before
+        before=$(wc -l < "$HOME/.bashrc")
+        sed -i '/source.*pos-ai-hook/d' "$HOME/.bashrc"
+        sed -i '/linux_post_install.*PATH/d' "$HOME/.bashrc"
+        sed -i '/source.*pos\.bash/d' "$HOME/.bashrc"
+        local after
+        after=$(wc -l < "$HOME/.bashrc")
+        local removed=$((before - after))
+        count=$((count + removed))
+    fi
+
+    # ── Shell completion (~/.bash_completion) ──
+    if [ -f "$HOME/.bash_completion" ]; then
+        local before
+        before=$(wc -l < "$HOME/.bash_completion")
+        sed -i '/pos/d' "$HOME/.bash_completion"
+        local after
+        after=$(wc -l < "$HOME/.bash_completion")
+        local removed=$((before - after))
+        count=$((count + removed))
+    fi
+
+    ok "Removed $count items (tier 1)"
+}
+
+remove_tier2() {
+    local cfg="$HOME/.config/linux_post_install"
+    local count=0
+
+    if [ -d "$cfg" ]; then
+        local f
+        while IFS= read -r f; do
+            rm -f "$f" && count=$((count+1))
+        done < <(find "$cfg" -maxdepth 2 -type f 2>/dev/null)
+
+        # Remove empty directory tree
+        rmdir "$cfg/schedule.d" 2>/dev/null || true
+        rmdir "$cfg" 2>/dev/null || true
+    fi
+
+    ok "Removed $count items (tier 2)"
+}
+
+remove_tier3() {
+    local data="$HOME/.local/share/linux_post_install"
+    local count=0
+
+    if [ -d "$data" ]; then
+        # Remove files first
+        local f
+        while IFS= read -r f; do
+            rm -f "$f" && count=$((count+1))
+        done < <(find "$data" -maxdepth 2 -type f 2>/dev/null)
+
+        # Remove directories bottom-up
+        while IFS= read -r d; do
+            rmdir "$d" 2>/dev/null && count=$((count+1)) || true
+        done < <(find "$data" -mindepth 1 -depth -type d 2>/dev/null)
+
+        # Remove top-level directory if empty
+        rmdir "$data" 2>/dev/null || true
+    fi
+
+    ok "Removed $count items (tier 3)"
+}
+
+# ── Main ────────────────────────────────────────────────────────
+main() {
+    section "pos system uninstall"
+
+    # Scan all tiers
+    local scan1 scan2 scan3
+    scan1="$(scan_tier1)"
+    scan2="$(scan_tier2)"
+    scan3="$(scan_tier3)"
+
+    # Display the plan
+    display_plan "$scan1" "$scan2" "$scan3"
+
+    # Nothing to do at all?
+    if [ -z "$scan1" ] && [ -z "$scan2" ] && [ -z "$scan3" ]; then
+        ok "Nothing to remove — pos toolkit does not appear to be installed."
+        return 0
+    fi
+
+    # ── Tier 1: always remove (confirm unless --yes) ──
+    if [ -n "$scan1" ]; then
+        if [ "$YES_MODE" -eq 1 ]; then
+            log "Removing tier 1 items (--yes)..."
+        else
+            confirm "Remove tier 1 items (binaries, services, shell integration)?" || return 0
+        fi
+        remove_tier1
+    fi
+
+    # ── Tier 2: config files ──
+    if [ -n "$scan2" ]; then
+        if [ "$DEL_CONFIG" -eq 0 ] && [ "$YES_MODE" -eq 0 ]; then
+            confirm "Also remove config files (tier 2)?" && DEL_CONFIG=1 || true
+        fi
+        [ "$DEL_CONFIG" -eq 1 ] && remove_tier2
+    fi
+
+    # ── Tier 3: session/log data ──
+    if [ -n "$scan3" ]; then
+        if [ "$DEL_DATA" -eq 0 ] && [ "$YES_MODE" -eq 0 ]; then
+            confirm "Also remove session/log data (tier 3)?" && DEL_DATA=1 || true
+        fi
+        [ "$DEL_DATA" -eq 1 ] && remove_tier3
+    fi
+
+    echo
+    ok "Uninstall complete."
+    echo "  The git repo was NOT removed — delete it manually if desired."
+    echo "  Restart your shell or run: source ~/.bashrc"
+}
+
+main "$@"
