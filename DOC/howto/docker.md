@@ -136,12 +136,24 @@ pos docker vbox create lab1                        # default dir ~/lab1
 pos docker vbox create lab1 --dir .                # files land in cwd
 pos docker vbox create lab1 --dir /mnt/data/lab1
 pos docker vbox create kali kalilinux/kali-rolling # custom image
+pos docker vbox create ai --gpu --cpus 4 --memory 8g
+pos docker vbox create iot --device /dev/ttyUSB0 --port 8080:80
 pos docker vbox enter lab1
 pos docker vbox stop lab1
 pos docker vbox start lab1
 pos docker vbox rm lab1
 pos docker vbox ls
 ```
+
+**Interactive create:** bare `pos docker vbox` (or the menu's "Create a VM")
+walks a name prompt → category hub → review screen that renders the exact
+`docker create` plan before anything is pulled; confirming runs the same
+`create` verb as the CLI. Categories: image quick-picks, GPU/Nvidia (offers
+`--gpus all` when the Nvidia container toolkit is present, explicit device
+nodes otherwise, info line when no GPU exists), host devices (USB, serial,
+video/sound, disks — system disks labelled), extra host-dir mounts, port
+publishes, CPU/RAM limits. Quitting or EOF at any point discards — nothing is
+created without an explicit `y` at the review.
 
 **Recipe:** a disposable browsing/download box:
 ```bash
@@ -154,6 +166,8 @@ pos docker vbox rm dl          # container gone, files kept
 - `enter` needs a shell/SSH-capable image; `kalilinux/kali-rolling` works.
 - If files "disappear" after `rm`, check you used `--dir` on a real path — the
   container image changes are lost, only the mounted dir persists.
+- `--gpu` needs `nvidia-container-toolkit`; without it, pass explicit nodes
+  instead (`--device /dev/nvidia0 --device /dev/nvidiactl --device /dev/nvidia-uvm`).
 
 ---
 

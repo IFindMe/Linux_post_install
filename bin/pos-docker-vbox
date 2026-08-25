@@ -2,13 +2,14 @@
 set -euo pipefail
 # POS: docker vbox — Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
 # POS_SUBCMDS: create enter stop start rm ls menu
+# POS_FLAGS: --dir --gpu --device --port --cpus --memory --network
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
 usage() {
     cat <<EOF
 Usage:
-  pos docker vbox create <name> [image] [--dir <path>]
+  pos docker vbox create <name> [image] [options]
   pos docker vbox enter  <name>
   pos docker vbox stop   <name>
   pos docker vbox start  <name>
@@ -18,20 +19,33 @@ Usage:
 Manage disposable Docker containers as lightweight VMs.
 
 Bare \`pos docker vbox\` on a terminal (or \`pos docker vbox menu\`) opens an
-interactive menu wrapping these verbs; arguments stay scriptable.
+interactive menu wrapping these verbs; arguments stay scriptable. The
+interactive create flow picks image, GPU, host devices, dir mounts, ports
+and CPU/RAM from categorized menus, shows a review screen, then runs the
+same \`create\` verb shown below.
 
 Each container gets a bind-mounted host directory so files persist
 on the host even after the container is removed.
 
 Options:
-  --dir <path>   Use custom directory instead of default ~/<name>
-                 Use "." for current directory
+  --dir <path>           Bind-mount a host directory at the same path inside
+                         the VM (repeatable). The first --dir is the VM's
+                         working directory and defaults to ~/<name>;
+                         use "." for the current directory.
+  --gpu                  Full GPU access (--gpus all)
+  --device </dev/node>   Pass a host device through to the VM (repeatable)
+  --port HOST:CONTAINER  Publish a port mapping (repeatable, e.g. 8080:80)
+  --cpus N               Limit CPUs (e.g. 2 or 1.5; default: Docker default)
+  --memory SIZE          Limit memory (e.g. 512m, 2g; default: Docker default)
+  --network MODE         Docker network mode (bridge/host/none)
 
 Examples:
   pos docker vbox create lab1
   pos docker vbox create lab1 --dir .
   pos docker vbox create lab1 --dir /mnt/data/lab1
   pos docker vbox create kali kalilinux/kali-rolling
+  pos docker vbox create ai --gpu --cpus 4 --memory 8g
+  pos docker vbox create iot --device /dev/ttyUSB0 --port 8080:80
   pos docker vbox enter lab1
   pos docker vbox stop lab1
   pos docker vbox start lab1
@@ -70,19 +84,796 @@ menu_pick_vm() {   # $1 = prompt → picked VM name on stdout · rc 1 = cancelle
     printf '%s\n' "${vms[$((idx - 1))]}"
 }
 
-menu_vbox_create() {
-    local name image dir
-    name="$(menu_ask_value "VM name")" || return 0
-    image="$(menu_ask_value "Image" "ubuntu:22.04")" || return 0
-    dir="$(menu_ask_value "Host directory (empty = ~/$name)")" || true
-    if [ -n "${dir:-}" ]; then
-        confirm "Create VM '$name' from $image (host dir: $dir)?" n \
-            || { log "Cancelled"; return 0; }
-        menu_self create "$name" "$image" --dir "$dir"
+# ── Categorized interactive create ────────────────────────────────────────
+# Pure sugar over the scripted 'create' verb (single execution path): this
+# flow composes arguments through Name → category hub → Review, then re-enters
+# 'menu_self create …'. All state lives in C_*/CC_* globals for the lifetime
+# of the flow only.
+#
+# Quit/EOF discipline (binding): nothing is ever created unless the review
+# confirm is answered 'y', and EVERY teardown ends in ONE
+# "[!] setup discarded — nothing was created" line, back at the main vbox
+# menu, exit clean. Helpers never print the line themselves — they unwind
+# with rc 77, and the orchestrator converts that into the single print.
+# menu_run/menu_pick/confirm report a typed quit and a dead stream
+# identically (rc 1), and no probe can always tell them apart, so
+# arbitration is streak-based: TWO consecutive quit signals with no
+# successful interaction between them tear down (a vanished terminal fails
+# every read instantly; a live user quitting twice gets decisive teardown),
+# while a single quit keeps gentle per-site handling (hub quit asks first).
+# Raw `read` calls need no arbitration — their rc 1 IS a definitive EOF.
+# Confirmed discards (hub quit answered 'y') are self-explanatory and silent;
+# at the NAME prompt an empty answer and a dead stream are indistinguishable
+# (menu_ask_value has no default there), so both tear down loudly.
+C_discarded="setup discarded — nothing was created"
+
+cc_log() {   # stderr twin of log() — capture-safe inside $( )
+    printf '%s\n' "${GREEN}[+]${RESET} $*" >&2
+}
+
+cc_warn() {   # stderr twin of warn() — capture-safe inside $( )
+    printf '%s\n' "${YELLOW}[!]${RESET} $*" >&2
+}
+
+cc_info() {   # stderr [i] info line
+    printf '%s\n' "${CYAN:-}[i]${RESET} $*" >&2
+}
+
+cc_die() {   # print the discard line once; caller returns 77
+    # Best-effort emit: on a vanished terminal even this write fails (EIO)
+    # and must not trip set -e — the cleanup contract is exit-clean.
+    cc_warn "$C_discarded" || true
+}
+
+# Quit-vs-EOF arbitration: menu_run/menu_pick/confirm report a typed quit and
+# a dead input stream identically (rc 1), and no read/write probe can always
+# distinguish them (bash `read -t` reports success on a dead pty; write-EIO is
+# kernel-dependent). Rule instead: TWO consecutive quit signals with no
+# successful interaction in between tear the setup down — a dead terminal
+# fails every read instantly, so it tears down at once; a live user quitting
+# twice in a row gets the same decisive treatment; a single quit keeps the
+# gentle per-site handling. Successful interactions reset the streak.
+cc_quit_tick() {   # rc 0 = streak reached ⇒ caller tears down · rc 1 = keep going
+    C_quits=$(( ${C_quits:-0} + 1 ))
+    [ "${C_quits}" -ge 2 ]
+}
+cc_quit_reset() { C_quits=0; }
+
+cc_reset() {
+    C_image="ubuntu:22.04"
+    C_image_set=0          # 0 = Image never visited (hub shows "(default)")
+    C_gpu_mode=""          # "" | all | nodes
+    C_gpu_devs=()          # explicit Nvidia/exotic nodes (mode=nodes)
+    C_devs=()              # host devices basket (raw paths)
+    C_mounts=()            # host dir mounts basket (validated absolutes)
+    C_ports=()             # ports basket (HOST:CONTAINER)
+    C_cpus=""
+    C_mem=""
+}
+
+# ── device helpers ────────────────────────────────────────────────────────
+cc_perm_suffix() {   # unreadable-but-present nodes stay offered (dockerd is root)
+    [ -r "$1" ] && return 0
+    printf '%s' " (perm-restricted for you — dockerd may still access)"
+}
+
+cc_node_label() {   # <node> → display label on stdout · rc 1 = unusable, drop
+    [ -e "$1" ] || return 1
+    stat "$1" &>/dev/null || return 1
+    printf '%s%s' "$1" "$(cc_perm_suffix "$1")"
+}
+
+cc_root_disk() {   # basename of the disk hosting / — best effort, may fail
+    local src pk
+    src="$(findmnt -n -o SOURCE / 2>/dev/null)"
+    [ -n "$src" ] || return 1
+    pk="$(lsblk -sno PKNAME "$src" 2>/dev/null | tail -n1)"
+    [ -n "$pk" ] || pk="${src##*/}"
+    printf '%s' "$pk"
+}
+
+cc_is_system_disk() {   # <node> rc 0 iff it is (a partition of) the root disk
+    local root base="${1##*/}"
+    root="$(cc_root_disk)" || return 1
+    [ "$base" = "$root" ] && return 0
+    [[ "$base" =~ ^${root}(p[0-9]+|[0-9]+)$ ]] && return 0
+    return 1
+}
+
+# Candidate host devices → parallel arrays (names + labels). Every source is
+# optional: a missing binary means one info line, never an error. Block
+# devices list ALL disks, system disks labelled — never hidden.
+cc_collect_devices() {   # $1 names-out · $2 labels-out (global array names)
+    local -n o_names="$1"
+    local -n o_labels="$2"
+    local line bus dev node lbl typ size rm
+    o_names=()
+    o_labels=()
+
+    if command -v lsusb &>/dev/null; then
+        while IFS= read -r line; do
+            [[ "$line" =~ ^Bus\ ([0-9]+)\ Device\ ([0-9]+): ]] || continue
+            bus="$(printf '%03d' "${BASH_REMATCH[1]}")"
+            dev="$(printf '%03d' "${BASH_REMATCH[2]}")"
+            node="/dev/bus/usb/$bus/$dev"
+            lbl="$(cc_node_label "$node")" || continue
+            o_names+=("$node")
+            o_labels+=("$lbl")
+        done < <(lsusb 2>/dev/null)
     else
-        confirm "Create VM '$name' from $image?" n || { log "Cancelled"; return 0; }
-        menu_self create "$name" "$image"
+        cc_info "lsusb not available — skipping USB device scan"
     fi
+
+    for node in /dev/ttyUSB* /dev/ttyACM* /dev/video*; do
+        [ -e "$node" ] || continue
+        lbl="$(cc_node_label "$node")" || continue
+        o_names+=("$node")
+        o_labels+=("$lbl")
+    done
+    # sound offered as ONE entry (fine-grained snd nodes are out of scope)
+    if [ -e /dev/snd ]; then
+        o_names+=("/dev/snd")
+        o_labels+=("/dev/snd (sound subsystem)")
+    fi
+
+    if command -v lsblk &>/dev/null; then
+        while read -r node typ size rm; do
+            [ -e "$node" ] || continue
+            stat "$node" &>/dev/null || continue
+            lbl="$node ($typ, $size"
+            [ "$rm" = "1" ] && lbl+=", removable"
+            cc_is_system_disk "$node" && lbl+=", system disk — careful"
+            lbl+="$(cc_perm_suffix "$node")"
+            lbl+=")"
+            o_names+=("$node")
+            o_labels+=("$lbl")
+        done < <(lsblk -rnpo NAME,TYPE,SIZE,RM 2>/dev/null)
+    else
+        cc_info "lsblk not available — skipping block-device scan"
+    fi
+}
+
+# ── GPU / Nvidia detection (cheap-first, once per category entry) ──────────
+cc_nvidia_nodes() {   # fills C_nv_nodes · rc 0 iff /dev/nvidiactl anchor exists
+    C_nv_nodes=()
+    local f
+    [ -e /dev/nvidiactl ] || return 1
+    for f in /dev/nvidia*; do
+        [ -e "$f" ] || continue
+        [[ "${f##*/}" =~ ^nvidia[0-9]+$ ]] || continue
+        cc_node_label "$f" >/dev/null && C_nv_nodes+=("$f")
+    done
+    for f in /dev/nvidiactl /dev/nvidia-uvm; do
+        [ -e "$f" ] || continue
+        cc_node_label "$f" >/dev/null && C_nv_nodes+=("$f")
+    done
+    [ "${#C_nv_nodes[@]}" -gt 0 ]
+}
+
+cc_gpu_toolkit() {   # rc 0 iff an Nvidia container runtime is plausibly present
+    [[ "$(docker info --format '{{json .Runtimes}}' 2>/dev/null)" == *nvidia* ]] && return 0
+    command -v nvidia-container-runtime &>/dev/null && return 0
+    command -v nvidia-container-ctk &>/dev/null
+}
+
+# ── shared basket mechanics (loop-of-single-picks, no lib changes) ────────
+# Baskets are addressed by GLOBAL array name, passed verbatim down the chain
+# and bound one hop deep with local -n (never nameref-to-nameref).
+cc_add_loop() {   # $1 basket-name · $2 noun · $3 picker prompt · $4 manual prompt
+    local -n basket="$1"
+    local noun="$2" add_prompt="$3" manual_prompt="$4"
+    local idx sel p q skip joined ci clbl
+    local -a items disp
+    while true; do
+        if [ "${#basket[@]}" -gt 0 ]; then
+            joined="$(
+                IFS=','
+                echo "${basket[*]}"
+            )"
+            printf '[i] %s — selected: %d: %s\n' "$noun" "${#basket[@]}" "$joined" >&2
+        else
+            printf '[i] %s — selected: 0: (none yet)\n' "$noun" >&2
+        fi
+        items=()
+        disp=()
+        for p in "${CC_CAND_NAMES[@]}"; do
+            skip=0
+            for q in "${basket[@]}"; do
+                [ "$q" = "$p" ] && {
+                    skip=1
+                    break
+                }
+            done
+            [ "$skip" -eq 1 ] && continue   # already selected → excluded
+            items+=("$p")
+            clbl=""
+            for ((ci = 0; ci < ${#CC_CAND_NAMES[@]}; ci++)); do
+                if [ "${CC_CAND_NAMES[$ci]}" = "$p" ]; then
+                    clbl="${CC_CAND_LABELS[$ci]}"
+                    break
+                fi
+            done
+            disp+=("${clbl:-$p}")
+        done
+        items+=("__manual__")
+        disp+=("Type a device path manually")
+        items+=("__done__")
+        disp+=("✓ Done adding")
+        if ! idx="$(menu_pick "$add_prompt" "${disp[@]}")"; then
+            cc_quit_tick && return 77       # second consecutive quit ⇒ teardown
+            return 0                        # back/Done ends the loop, basket kept
+        fi
+        cc_quit_reset
+        sel="${items[$((idx - 1))]}"
+        case "$sel" in
+            __done__)
+                return 0
+                ;;
+            __manual__)
+                while true; do
+                    if ! read -rp "$manual_prompt: " p; then
+                        return 77          # raw read rc 1 = definitive EOF
+                    fi
+                    [ -z "$p" ] && break    # empty = cancel
+                    [[ "$p" == /dev/* ]] || {
+                        cc_warn "device path must start with /dev/ — try again"
+                        continue
+                    }
+                    skip=0
+                    for q in "${basket[@]}"; do
+                        [ "$q" = "$p" ] && skip=1
+                    done
+                    if [ "$skip" -eq 1 ]; then
+                        cc_warn "$p is already selected — skipped"
+                        break
+                    fi
+                    if ! stat "$p" &>/dev/null; then
+                        cc_warn "cannot stat $p — skipped"
+                        break
+                    fi
+                    basket+=("$p")
+                    cc_log "added $p — pick another, or choose ✓ Done"
+                    break
+                done
+                ;;
+            *)
+                basket+=("$sel")
+                cc_log "added $sel — pick another, or choose ✓ Done"
+                ;;
+        esac
+    done
+}
+
+cc_remove_one() {   # $1 basket-name · $2 remove prompt
+    local -n basket="$1"
+    local rm_prompt="$2"
+    local idx p i
+    local -a disp keep
+    if [ "${#basket[@]}" -eq 0 ]; then
+        cc_log "nothing selected yet"
+        return 0
+    fi
+    disp=()
+    for p in "${basket[@]}"; do disp+=("$p"); done
+    if ! idx="$(menu_pick "$rm_prompt" "${disp[@]}")"; then
+        cc_quit_tick && return 77
+        return 0
+    fi
+    cc_quit_reset
+    p="${basket[$((idx - 1))]}"
+    keep=()
+    for ((i = 0; i < ${#basket[@]}; i++)); do
+        [ "$i" -ne $((idx - 1)) ] && keep+=("${basket[i]}")
+    done
+    basket=("${keep[@]}")
+    cc_log "removed $p"
+}
+
+cc_clear_basket() {   # $1 basket-name · $2 noun phrase ("device(s)")
+    local -n basket="$1"
+    local word="$2" n="${#basket[@]}"
+    if [ "$n" -eq 0 ]; then
+        cc_log "nothing selected yet"
+        return 0
+    fi
+    if ! confirm "Remove all $n selected $word?" n; then
+        cc_quit_tick && return 77
+        return 0
+    fi
+    cc_quit_reset
+    basket=()
+    cc_log "all $n $word removed"
+}
+
+# Shared basket shape: Add … / Remove one (N selected) / Clear all / Back.
+# $5 = add function; remaining args forwarded to it verbatim.
+cc_basket_menu() {   # $1 basket-name · $2 noun · $3 remove-prompt · $4 clear-word · $5 add-fn …
+    local -n bref="$1"
+    local bname="$1" noun="$2" rm_prompt="$3" clear_word="$4" add_fn="$5"
+    shift 5
+    local idx
+    while true; do
+        if [ "${#bref[@]}" -eq 0 ]; then
+            "$add_fn" "$bname" "$@" || return 77
+            return 0                        # empty basket → straight to adding
+        fi
+        if ! idx="$(menu_run "$noun" \
+            "Add …" \
+            "Remove one (${#bref[@]} selected)" \
+            "Clear all")"; then
+            cc_quit_tick && return 77
+            return 0                        # Back
+        fi
+        cc_quit_reset
+        case "$idx" in
+            1) "$add_fn" "$bname" "$@" || return 77 ;;
+            2) cc_remove_one "$bname" "$rm_prompt" || return 77 ;;
+            3) cc_clear_basket "$bname" "$clear_word" || return 77 ;;
+        esac
+    done
+}
+
+# Typed-value add loop (mounts, ports). Raw read — NOT menu_ask_value — so an
+# EMPTY answer ("done") stays distinguishable from EOF (discard everything).
+# Validator contract: $1 raw input · rest = basket values · normalized value
+# on stdout · rc 1 = rejected (diagnostics printed by the validator).
+cc_add_typed_loop() {   # $1 basket-name · $2 prompt · $3 validator fn
+    local -n basket="$1"
+    local prompt="$2" vfn="$3"
+    local v norm
+    local -a vals
+    while true; do
+        if ! read -rp "$prompt: " v; then
+            return 77                       # raw read rc 1 = definitive EOF
+        fi
+        [ -z "$v" ] && return 0             # empty = done
+        vals=("${basket[@]}")
+        if norm="$("$vfn" "$v" ${vals[@]+"${vals[@]}"})"; then
+            basket+=("$norm")
+        fi
+    done
+}
+
+cc_validate_mount() {   # stdout: normalized absolute path · rc 1 = rejected
+    local raw="$1" v
+    shift
+    v="${raw/#\~/$HOME}"
+    case "$v" in
+        /*) ;;
+        *) cc_warn "not an absolute path: $raw — try again"; return 1 ;;
+    esac
+    [ -d "$v" ] || {
+        cc_warn "directory not found: $raw — try again"
+        return 1
+    }
+    local q
+    for q in "$@"; do
+        [ "$q" = "$v" ] && {
+            cc_warn "$v is already mounted — skipped"
+            return 1
+        }
+    done
+    printf '%s\n' "$v"
+    cc_log "will mount $v:$v"
+}
+
+cc_validate_port() {   # stdout: validated HOST:CONTAINER · rc 1 = rejected
+    local v="$1"
+    shift
+    [[ "$v" =~ ^[0-9]+(:[0-9]+){1,2}$ ]] || {
+        cc_warn "not a HOST:CONTAINER pair: $v — try again (e.g. 8080:80)"
+        return 1
+    }
+    local hp="${v%%:*}" q hq
+    for q in "$@"; do
+        hq="${q%%:*}"
+        [ "$hq" = "$hp" ] && {
+            cc_warn "host port $hp already mapped — rejected"
+            return 1
+        }
+    done
+    printf '%s\n' "$v"
+    cc_log "will publish $v"
+}
+
+# ── categories ────────────────────────────────────────────────────────────
+cc_category_image() {
+    local -a picks=("ubuntu:22.04" "ubuntu:24.04" "debian:12" "kalilinux/kali-rolling" "archlinux" "fedora:latest" "alpine:latest" "Other (type image ref)")
+    local idx ref
+    while true; do
+        if ! idx="$(menu_pick "Pick image" "${picks[@]}")"; then
+            cc_quit_tick && return 77
+            return 0                        # back keeps the current image
+        fi
+        cc_quit_reset
+        if [ "$idx" -lt "${#picks[@]}" ]; then
+            C_image="${picks[$((idx - 1))]}"
+            C_image_set=1
+            cc_log "image set to $C_image"
+            return 0
+        fi
+        if ! ref="$(menu_ask_value "Image ref")"; then
+            cc_quit_tick && return 77
+            continue                        # cancelled typing → picker again
+        fi
+        cc_quit_reset
+        if [[ "$ref" =~ [[:space:]] ]]; then
+            cc_warn "not a valid image ref — spaces not allowed"
+            continue
+        fi
+        C_image="$ref"
+        C_image_set=1
+        cc_log "image set to $C_image"
+        return 0
+    done
+}
+
+cc_category_gpu() {
+    local nodes_present=0 toolkit_present=0 pci_line="" choice sem nl
+    if cc_nvidia_nodes; then nodes_present=1; fi
+    if cc_gpu_toolkit; then toolkit_present=1; fi
+    if command -v lspci &>/dev/null; then
+        pci_line="$(lspci 2>/dev/null | grep -Ei 'vga|3d controller' | grep -i nvidia | head -n1)" || pci_line=""
+        [ -n "$pci_line" ] && cc_log "Nvidia hardware: ${pci_line#* }"
+    fi
+
+    if [ "$nodes_present" -eq 0 ]; then
+        # Path C — no GPU found: informational, never an error, never blocking.
+        # Category stays enterable via the manual escape hatch.
+        cc_info "no Nvidia driver/GPU detected on this host — skipping GPU setup"
+        cc_info "an exotic device path can still be added manually"
+        CC_CAND_NAMES=()
+        CC_CAND_LABELS=()
+        cc_add_loop C_gpu_devs "GPU (manual)" \
+            "Pick device to ADD" \
+            "Device path (must start with /dev/, empty = cancel)" || return 77
+        [ "${#C_gpu_devs[@]}" -gt 0 ] && C_gpu_mode="nodes"
+        return 0
+    fi
+
+    local i_all="Full GPU access (--gpus all)"
+    local i_nodes="Explicit Nvidia device nodes"
+    local i_none="none (clears GPU configuration)"
+    local -a opts=() sems=()
+    if [ "$toolkit_present" -eq 1 ]; then
+        # Path A — full support: recommend --gpus all (highlight ≠ preselect).
+        cc_info "Nvidia container toolkit detected — --gpus all available"
+        opts=("$i_all (recommended)" "$i_nodes" "$i_none")
+        sems=("all" "nodes" "none")
+    else
+        # Path B — nodes without toolkit: steer to explicit nodes first.
+        cc_info "nvidia-container-toolkit not detected — --gpus all will likely fail; offering explicit device nodes instead (install nvidia-container-toolkit for CUDA workloads)"
+        opts=("$i_nodes (recommended here)" "Configure anyway (--gpus all)" "$i_none")
+        sems=("nodes" "all" "none")
+    fi
+    case "$C_gpu_mode" in
+        all) opts[0]+=" (current)" ;;
+        nodes) opts[1]+=" (current)" ;;
+        *) opts[2]+=" (current)" ;;
+    esac
+    if ! choice="$(menu_run "GPU / Nvidia" "${opts[@]}")"; then
+        cc_quit_tick && return 77
+        return 0
+    fi
+    cc_quit_reset
+    sem="${sems[$((choice - 1))]}"
+    case "$sem" in
+        all)
+            C_gpu_mode="all"
+            C_gpu_devs=()
+            cc_log "GPU: --gpus all"
+            ;;
+        nodes)
+            C_gpu_mode="nodes"
+            C_gpu_devs=()
+            cc_info "a working set is usually /dev/nvidia0 + /dev/nvidiactl + /dev/nvidia-uvm"
+            CC_CAND_NAMES=("${C_nv_nodes[@]}")
+            CC_CAND_LABELS=()
+            for nl in "${C_nv_nodes[@]}"; do
+                lbl="$(cc_node_label "$nl")" || lbl="$nl"   # raced-away node: fall back to the bare path
+                CC_CAND_LABELS+=("$lbl")
+            done
+            cc_add_loop C_gpu_devs "Nvidia devices" \
+                "Pick device to ADD" \
+                "Device path (must start with /dev/, empty = cancel)" || return 77
+            [ "${#C_gpu_devs[@]}" -eq 0 ] && C_gpu_mode=""   # nothing picked ⇒ back to unconfigured
+            ;;
+        none)
+            C_gpu_mode=""
+            C_gpu_devs=()
+            cc_log "GPU configuration cleared"
+            ;;
+    esac
+    return 0
+}
+
+cc_category_devices() {
+    cc_collect_devices CC_CAND_NAMES CC_CAND_LABELS
+    if [ "${#CC_CAND_NAMES[@]}" -eq 0 ]; then
+        cc_info "no candidate devices found — type a path manually"
+    fi
+    cc_basket_menu C_devs "Host devices" \
+        "Remove which device?" "device(s)" cc_add_loop \
+        "Host devices" \
+        "Pick device to ADD" \
+        "Device path (must start with /dev/, empty = cancel)"
+}
+
+cc_category_mounts() {
+    cc_basket_menu C_mounts "Host dir mounts" \
+        "Remove which mount?" "mount(s)" cc_add_typed_loop \
+        "Host directory to mount (empty = done)" cc_validate_mount
+}
+
+cc_category_ports() {
+    cc_basket_menu C_ports "Ports" \
+        "Remove which port?" "port mapping(s)" cc_add_typed_loop \
+        "Publish port HOST:CONTAINER (empty = done)" cc_validate_port
+}
+
+cc_category_resources() {
+    local v
+    cc_info "press Enter to keep Docker defaults"
+    while true; do
+        v=""
+        [ -n "$C_cpus" ] && v=" (current: $C_cpus)"
+        if ! read -rp "--cpus$v — blank = Docker default: " v; then
+            return 77                       # raw read rc 1 = definitive EOF
+        fi
+        if [ -z "$v" ]; then
+            C_cpus=""
+            break
+        fi
+        [[ "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]] || {
+            cc_warn "CPUs must be a number (e.g. 2 or 1.5)"
+            continue
+        }
+        C_cpus="$v"
+        break
+    done
+    while true; do
+        v=""
+        [ -n "$C_mem" ] && v=" (current: $C_mem)"
+        if ! read -rp "--memory$v — blank = Docker default (e.g. 512m, 2g): " v; then
+            return 77                       # raw read rc 1 = definitive EOF
+        fi
+        if [ -z "$v" ]; then
+            C_mem=""
+            break
+        fi
+        [[ "$v" =~ ^[0-9]+(b|k|m|g|mb|gb)?$ ]] || {
+            cc_warn "memory formats: 500b, 100k, 512m, 2g (mb/gb accepted)"
+            continue
+        }
+        C_mem="$v"
+        break
+    done
+    cc_log "resources: ${C_cpus:-Docker default} cpu(s), ${C_mem:-Docker default} memory"
+    return 0
+}
+
+# ── compose + review ──────────────────────────────────────────────────────
+cc_compose() {   # fills CC_ARGS (argv for menu_self) + CC_FLAGS_TXT (display)
+    # The UI never asks for the primary dir — it stays ~/<name> (the verb's
+    # default). Pass it as the FIRST --dir explicitly, so mount baskets map
+    # to the repeatable --dir form without displacing the working directory.
+    # It must exist before the verb resolves it (cd && pwd), so create it here.
+    mkdir -p "$HOME/$C_name"
+    CC_ARGS=(create "$C_name" "$C_image" --dir "$HOME/$C_name")
+    CC_FLAGS_TXT=""
+    local d p m
+    if [ "$C_gpu_mode" = "all" ]; then
+        CC_ARGS+=(--gpu)
+        CC_FLAGS_TXT="--gpus all"
+    fi
+    for d in "${C_gpu_devs[@]}"; do
+        CC_ARGS+=(--device "$d")
+        CC_FLAGS_TXT+=" --device $d"
+    done
+    for d in "${C_devs[@]}"; do
+        CC_ARGS+=(--device "$d")
+        CC_FLAGS_TXT+=" --device $d"
+    done
+    for p in "${C_ports[@]}"; do
+        CC_ARGS+=(--port "$p")
+        CC_FLAGS_TXT+=" --port $p"
+    done
+    [ -n "$C_cpus" ] && {
+        CC_ARGS+=(--cpus "$C_cpus")
+        CC_FLAGS_TXT+=" --cpus $C_cpus"
+    }
+    [ -n "$C_mem" ] && {
+        CC_ARGS+=(--memory "$C_mem")
+        CC_FLAGS_TXT+=" --memory $C_mem"
+    }
+    for m in "${C_mounts[@]}"; do
+        CC_ARGS+=(--dir "$m")
+        CC_FLAGS_TXT+=" --dir $m"
+    done
+}
+
+cc_render_group() {   # $1 label · rest = rendered values · truncates at 6 rows
+    local label="$1"
+    shift
+    local max=6 shown=0 v n="$#"
+    if [ "$n" -eq 0 ]; then
+        printf '  %-10s %s\n' "$label" "none" >&2
+        return 0
+    fi
+    for v in "$@"; do
+        [ "$shown" -lt "$max" ] || break
+        if [ "$shown" -eq 0 ]; then
+            printf '  %-10s %s\n' "$label" "$v" >&2
+        else
+            printf '  %-10s %s\n' "" "$v" >&2
+        fi
+        shown=$((shown + 1))
+    done
+    if [ "$n" -gt "$max" ]; then
+        printf '  %-10s … (+%d more)\n' "" "$((n - max))" >&2
+    fi
+}
+
+cc_review() {   # rc 0 = confirmed (CC_ARGS ready) · rc 1 = back to hub · rc 77 = discarded
+    local -a gpu_vals=() dev_vals=() mnt_vals=() port_vals=() rv=()
+    local d p m res
+    case "$C_gpu_mode" in
+        all) gpu_vals+=("--gpus all") ;;
+        nodes)
+            for d in "${C_gpu_devs[@]}"; do gpu_vals+=("--device $d"); done
+            ;;
+    esac
+    for d in "${C_devs[@]}"; do dev_vals+=("--device $d"); done
+    for m in "${C_mounts[@]}"; do mnt_vals+=("$m:$m"); done
+    for p in "${C_ports[@]}"; do port_vals+=("-p $p"); done
+
+    {
+        echo
+        echo "${CYAN}════════════════════════════════════════════${RESET}"
+        echo "${CYAN}  Create VM '$C_name' — review plan${RESET}"
+        echo "${CYAN}════════════════════════════════════════════${RESET}"
+    } >&2
+    cc_render_group "image" "$C_image"
+    cc_render_group "host dir" "~/$C_name  (bind-mounted at same path, cwd inside VM)"
+    cc_render_group "gpus" ${gpu_vals[@]+"${gpu_vals[@]}"}
+    cc_render_group "devices" ${dev_vals[@]+"${dev_vals[@]}"}
+    cc_render_group "mounts" ${mnt_vals[@]+"${mnt_vals[@]}"}
+    cc_render_group "ports" ${port_vals[@]+"${port_vals[@]}"}
+    [ -n "$C_cpus" ] && rv+=("--cpus $C_cpus")
+    [ -n "$C_mem" ] && rv+=("--memory $C_mem")
+    if [ "${#rv[@]}" -gt 0 ]; then
+        res="$(
+            IFS=' '
+            echo "${rv[*]}"
+        )"
+    else
+        res="Docker defaults"
+    fi
+    cc_render_group "cpu/ram" "$res"
+    cc_render_group "network" "Docker default (bridge)"
+
+    cc_compose
+    {
+        echo "----------------------------------------" >&2
+        echo "  docker create -it --name $C_name --label linux_post_install.vbox=true \\" >&2
+        echo "      ${CC_FLAGS_TXT} $C_image bash" >&2
+    }
+
+    # A CUDA image is ever only a hint — never forced, never auto-applied.
+    if [ -n "$C_gpu_mode" ] && [[ "$C_image" != *cuda* && "$C_image" != nvidia/* ]]; then
+        cc_info "tip: for CUDA inside the VM try an image like nvidia/cuda:12.4-base-ubuntu22.04 (set it under Image & distro)"
+    fi
+
+    if confirm "Create?" n; then
+        cc_quit_reset
+        return 0
+    fi
+    cc_quit_tick && return 77           # second consecutive quit ⇒ teardown
+    return 1                            # 'n' → back to the hub, edits preserved
+}
+
+cc_hub_items() {   # rebuilds CC_ITEMS with live basket counts
+    local img gpu dev mnt prt res
+    if [ "$C_image_set" -eq 1 ]; then
+        img="$C_image"
+    else
+        img="$C_image (default)"
+    fi
+    case "$C_gpu_mode" in
+        all) gpu="--gpus all" ;;
+        nodes) gpu="${#C_gpu_devs[@]} node(s)" ;;
+        *) gpu="not configured" ;;
+    esac
+    if [ "${#C_devs[@]}" -gt 0 ]; then
+        dev="${#C_devs[@]} selected"
+    else
+        dev="none"
+    fi
+    if [ "${#C_mounts[@]}" -gt 0 ]; then
+        mnt="~/$C_name (auto) + ${#C_mounts[@]} more"
+    else
+        mnt="~/$C_name (auto)"
+    fi
+    if [ "${#C_ports[@]}" -gt 0 ]; then
+        prt="${#C_ports[@]} mapped"
+    else
+        prt="none"
+    fi
+    local -a rv=()
+    [ -n "$C_cpus" ] && rv+=("cpus=$C_cpus")
+    [ -n "$C_mem" ] && rv+=("mem=$C_mem")
+    if [ "${#rv[@]}" -gt 0 ]; then
+        res="$(
+            IFS=' '
+            echo "${rv[*]}"
+        )"
+    else
+        res="Docker defaults"
+    fi
+    CC_ITEMS=(
+        "Image & distro ....... $img"
+        "GPU / Nvidia ......... $gpu"
+        "Host devices ......... $dev"
+        "Host dir mounts ...... $mnt"
+        "Ports ................ $prt"
+        "CPU / RAM ............ $res"
+        "Review & create"
+    )
+}
+
+menu_vbox_create() {
+    local name choice
+    local crc=0 rrc=0
+    # §1: an EMPTY answer at the identity prompt backs out with nothing
+    # created. menu_ask_value has no default here, so an empty answer and a
+    # dead stream are indistinguishable (both rc 1) — both take the loud
+    # teardown (one discard line), matching §3's "EOF at ANY depth" rule.
+    if ! name="$(menu_ask_value "VM name")"; then
+        cc_die
+        return 0
+    fi
+    C_name="$name"
+    cc_reset
+    cc_quit_reset
+    while true; do
+        cc_hub_items
+        if ! choice="$(menu_run "Configure VM '$C_name' — capabilities" "${CC_ITEMS[@]}")"; then
+            cc_quit_tick && { cc_die; return 0; }   # dead input / second quit
+            if confirm "Discard this VM setup?" n; then
+                return 0                            # confirmed discard → main menu
+            fi
+            continue                                # single quit → guarded redraw
+        fi
+        cc_quit_reset
+        # Categories honour a strict rc contract: 0 = normal · 77 = EOF
+        # teardown somewhere below. Calls are ||-captured because a bare
+        # nonzero from a simple command would trip set -e before the check.
+        crc=0
+        case "$choice" in
+            1) cc_category_image || crc=$? ;;
+            2) cc_category_gpu || crc=$? ;;
+            3) cc_category_devices || crc=$? ;;
+            4) cc_category_mounts || crc=$? ;;
+            5) cc_category_ports || crc=$? ;;
+            6) cc_category_resources || crc=$? ;;
+        esac
+        [ "$crc" -eq 77 ] && { cc_die; return 0; }   # EOF teardown somewhere below
+        if [ "$choice" -eq 7 ]; then
+            rrc=0
+            cc_review || rrc=$?
+            case "$rrc" in
+                77)
+                    cc_die
+                    return 0
+                    ;;
+                0)
+                    menu_self "${CC_ARGS[@]}"
+                    return 0
+                    ;;
+                *) continue ;;            # 'n' → hub with edits preserved
+            esac
+        fi
+    done
 }
 
 menu_vbox_enter() {
@@ -160,16 +951,67 @@ case "$cmd" in
         name="${2:-}"
         [ -z "$name" ] && usage
 
-        # Parse remaining args: [image] [--dir <path>]
+        # Parse remaining args: [image] [--dir <path>]… [--device </dev/node>]…
+        # [--gpu] [--port HOST:CONTAINER]… [--cpus N] [--memory SIZE] [--network MODE]
+        # The new flags are additive; an invocation that uses none of them
+        # behaves byte-identically to the pre-categorized verb.
         image="ubuntu:22.04"
         custom_dir=""
+        extra_dirs=()
+        want_gpu=0
+        devices=()
+        ports=()
+        cpus=""
+        memory=""
+        network=""
         shift 2 || true
         while [ $# -gt 0 ]; do
             case "$1" in
                 --dir)
                     [ -z "${2:-}" ] && { echo "Missing value for --dir"; exit 1; }
-                    custom_dir="$2"
+                    if [ -z "$custom_dir" ]; then
+                        custom_dir="$2"
+                    else
+                        extra_dirs+=("$2")
+                    fi
                     shift 2
+                    ;;
+                --gpu)
+                    want_gpu=1
+                    shift
+                    ;;
+                --device)
+                    [ -z "${2:-}" ] && { echo "Missing value for --device"; exit 1; }
+                    [[ "$2" == /dev/* ]] || { echo "[!] --device expects a path under /dev/: $2"; exit 1; }
+                    devices+=("$2")
+                    shift 2
+                    ;;
+                --port)
+                    [ -z "${2:-}" ] && { echo "Missing value for --port"; exit 1; }
+                    [[ "$2" =~ ^[0-9]+(:[0-9]+){1,2}$ ]] || { echo "[!] --port expects HOST:CONTAINER (e.g. 8080:80): $2"; exit 1; }
+                    ports+=("$2")
+                    shift 2
+                    ;;
+                --cpus)
+                    [ -z "${2:-}" ] && { echo "Missing value for --cpus"; exit 1; }
+                    [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "[!] --cpus expects a number (e.g. 2 or 1.5): $2"; exit 1; }
+                    cpus="$2"
+                    shift 2
+                    ;;
+                --memory)
+                    [ -z "${2:-}" ] && { echo "Missing value for --memory"; exit 1; }
+                    [[ "$2" =~ ^[0-9]+(b|k|m|g|mb|gb)?$ ]] || { echo "[!] --memory expects a size (e.g. 512m or 2g): $2"; exit 1; }
+                    memory="$2"
+                    shift 2
+                    ;;
+                --network)
+                    [ -z "${2:-}" ] && { echo "Missing value for --network"; exit 1; }
+                    network="$2"
+                    shift 2
+                    ;;
+                -*)
+                    echo "[!] Unknown option: $1 — see 'pos docker vbox --help'"
+                    exit 1
                     ;;
                 *)
                     image="$1"
@@ -191,6 +1033,26 @@ case "$cmd" in
         mkdir -p "$lab_dir"
         echo "[+] Lab directory: $lab_dir"
 
+        # Additional bind mounts (repeated --dir): same-path convention like
+        # the primary lab dir.
+        mount_flags=()
+        for d in "${extra_dirs[@]}"; do
+            mnt_dir="$(cd "$d" 2>/dev/null && pwd)" || { echo "[!] Directory not found: $d"; exit 1; }
+            mkdir -p "$mnt_dir"
+            echo "[+] Bind mount: $mnt_dir:$mnt_dir"
+            mount_flags+=(-v "$mnt_dir:$mnt_dir")
+        done
+
+        # Optional flags in a fixed order: GPU → devices → ports → resources
+        # → network. Mounts are appended after the primary -v below.
+        create_flags=()
+        [ "$want_gpu" -eq 1 ] && create_flags+=(--gpus all)
+        for d in "${devices[@]}"; do create_flags+=(--device "$d"); done
+        for p in "${ports[@]}"; do create_flags+=(-p "$p"); done
+        [ -n "$cpus" ] && create_flags+=(--cpus "$cpus")
+        [ -n "$memory" ] && create_flags+=(--memory "$memory")
+        [ -n "$network" ] && create_flags+=(--network "$network")
+
         echo "[+] Pulling image: $image"
         docker pull "$image"
 
@@ -199,7 +1061,9 @@ case "$cmd" in
             -it \
             --name "$name" \
             --label linux_post_install.vbox=true \
+            ${create_flags[@]+"${create_flags[@]}"} \
             -v "$lab_dir:$lab_dir" \
+            ${mount_flags[@]+"${mount_flags[@]}"} \
             -w "$lab_dir" \
             "$image" \
             bash >/dev/null
