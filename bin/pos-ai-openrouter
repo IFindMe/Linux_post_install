@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: ai gemini — Chat with Google Gemini (ask, capture, chat, models, sessions)
+# POS: ai openrouter — Chat with OpenRouter models (ask, capture, chat, models, sessions)
 # POS_SUBCMDS: ask capture chat models sessions
 # POS_FLAGS: --model --session --system --full --last
-# POS_CONFIG: ai | ai.env | AI_GEMINI_API_KEY=secret:API key from aistudio.google.com | AI_GEMINI_MODEL=:Model id (default gemini-2.5-flash)
+# POS_CONFIG: ai-openrouter | ai-openrouter.env | OPENROUTER_API_KEY=secret:API key from openrouter.ai (https://openrouter.ai/settings/keys) | OPENROUTER_MODEL=:Model id (default openrouter/auto)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
-CONFIG_FILE="$HOME/.config/linux_post_install/ai.env"
-API="https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_MODEL="gemini-2.5-flash"
-SESSION_DIR="$HOME/.local/share/linux_post_install/ai"
+CONFIG_FILE="$HOME/.config/linux_post_install/ai-openrouter.env"
+API="https://openrouter.ai/api/v1"
+DEFAULT_MODEL="openrouter/auto"
+SESSION_DIR="$HOME/.local/share/linux_post_install/ai-openrouter"
 DISPATCH_LOG_DIR="$HOME/.local/share/linux_post_install/logs"  # bin/pos per-run logs
 LAST_CMD_OUTPUT_FILE="$HOME/.local/share/linux_post_install/last_cmd_output"  # --last fallback for any command
 OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"          # read-only test seam (DEV.md env-overridable paths)
@@ -25,9 +25,9 @@ DEFAULT_SYSTEM_PROMPT="You assist a user working in a Linux/Unix CLI terminal. B
 
 usage() {
     cat <<EOF
-Usage: pos ai gemini <subcommand> [--model <id>] [--session <name>] [--system <text>] [--full] [--last]
+Usage: pos ai openrouter <subcommand> [--model <id>] [--session <name>] [--system <text>] [--full] [--last]
 
-Chat with Google Gemini via the REST API (generativelanguage.googleapis.com).
+Chat with OpenRouter models via the REST API (openrouter.ai).
 
 Subcommands:
   ask "<prompt>"    Answer; prints the answer text to stdout. The prompt may
@@ -38,14 +38,14 @@ Subcommands:
                     Each capture overwrites the previous one (latest only).
   chat              Interactive multi-turn conversation (session 'default'
                     unless --session is given).
-  models            List models that support generateContent.
+  models            List available models and flag the configured default.
   sessions          List persistent sessions / clear one:
                     'sessions' and 'sessions reset <name>'.
 
 Options:
   --model <id>      Override the model for this invocation.
   --session <name>  Use a named persistent session instead of 'default':
-                    ~/.local/share/linux_post_install/ai/<name>.json
+                    ~/.local/share/linux_post_install/ai-openrouter/<name>.json
                     (capped at $MAX_SESSION_TURNS turns).
   --system <text>   System instruction sent with every turn (kept out of the
                     session file); replaces the built-in terse ask prompt
@@ -59,9 +59,9 @@ Options:
                     its age; warns when stale (>60 min).
   -h|--help         This help.
 
-Config:  $CONFIG_FILE  (edit with 'pos config ai')
-  AI_GEMINI_API_KEY   API key from aistudio.google.com (required)
-  AI_GEMINI_MODEL     Model id (default $DEFAULT_MODEL)
+Config:  $CONFIG_FILE  (edit with 'pos config ai-openrouter')
+  OPENROUTER_API_KEY   API key from openrouter.ai (required)
+  OPENROUTER_MODEL     Model id (default $DEFAULT_MODEL)
 
 Notes:
   ask is terse by default: a built-in system instruction tells the model to
@@ -70,32 +70,31 @@ Notes:
   line (hostname, distro, kernel, arch detected on this box) so answers fit
   the actual machine; --system replaces it wholesale, --full drops it all.
   Every ask/chat lands in a persistent session ('default' unless --session);
-  clear it with 'pos ai gemini sessions reset default'. On a terminal the
+  clear it with 'pos ai openrouter sessions reset default'. On a terminal the
   answer is rendered as markdown (glow if installed, else a built-in
   renderer); when stdout is not a tty (pipes, scripts, Telegram bridges) the
   raw markdown is printed unchanged.
 
 Examples:
-  pos ai gemini ask "check disk space on /"
-  pos ai gemini ask --full "Explain DNS in depth"
-  echo "summarize this log" | pos ai gemini ask
-  failing-cmd 2>&1 | pos ai gemini ask how do I fix this
-  pos ai gemini ask --last "why did that fail?"        # attach last output
-  pos ai gemini capture pip install xyz                # capture any command
-  pos ai gemini ask --last "what happened?"            # after capture
-  pos ai gemini chat
-  pos ai gemini models
-  pos ai gemini ask --model gemini-2.5-flash "hi"
-  pos ai gemini ask --system "Reply like a pirate" "explain chmod"
-  pos ai gemini ask --session work "my name is joe"
-  pos ai gemini ask --session work "what is my name?"   # remembers
-  pos ai gemini sessions
-  pos ai gemini sessions reset default                  # forget default memory
+  pos ai openrouter ask "check disk space on /"
+  pos ai openrouter ask --full "Explain DNS in depth"
+  echo "summarize this log" | pos ai openrouter ask
+  failing-cmd 2>&1 | pos ai openrouter ask how do I fix this
+  pos ai openrouter ask --last "why did that fail?"        # attach last output
+  pos ai openrouter capture pip install xyz                # capture any command
+  pos ai openrouter ask --last "what happened?"            # after capture
+  pos ai openrouter chat
+  pos ai openrouter ask --model anthropic/claude-sonnet-4 "hi"
+  pos ai openrouter ask --system "Reply like a pirate" "explain chmod"
+  pos ai openrouter ask --session work "my name is joe"
+  pos ai openrouter ask --session work "what is my name?"   # remembers
+  pos ai openrouter sessions
+  pos ai openrouter sessions reset default                  # forget default memory
 EOF
     exit 0
 }
 
-# ── ai.env loader (same pattern as telegram.env) ────────────────
+# ── ai-openrouter.env loader (same pattern as telegram.env) ────────
 load_config() {
     [ -f "$CONFIG_FILE" ] || return 0
     local k v
@@ -114,14 +113,14 @@ load_config() {
 
 require_key() {
     load_config
-    [ -n "${AI_GEMINI_API_KEY:-}" ] || err "No Gemini API key — run 'pos config ai'"
+    [ -n "${OPENROUTER_API_KEY:-}" ] || err "No OpenRouter API key — run 'pos config ai-openrouter'"
 }
 
 resolve_model() {
     if [ -n "${MODEL_OVERRIDE:-}" ]; then
         printf '%s' "$MODEL_OVERRIDE"
-    elif [ -n "${AI_GEMINI_MODEL:-}" ]; then
-        printf '%s' "$AI_GEMINI_MODEL"
+    elif [ -n "${OPENROUTER_MODEL:-}" ]; then
+        printf '%s' "$OPENROUTER_MODEL"
     else
         printf '%s' "$DEFAULT_MODEL"
     fi
@@ -129,7 +128,7 @@ resolve_model() {
 
 # ── --last: attach the most recent pos command output ───────────
 # bin/pos logs every non-interactive run to DISPATCH_LOG_DIR/<ts>_pos_<cmd>.log
-# (ai-gemini itself is interactive-logged, so it never creates its own output
+# (ai-openrouter itself is interactive-logged, so it never creates its own output
 # log). The <ts> prefix is zero-padded sortable, so name-descending = newest;
 # mtime alone would tie-flake for same-second runs. pos.log is the invocation
 # index, not command output — excluded.
@@ -185,12 +184,12 @@ last_log_annotate() {
         printf '[i]   "%.100s"\n' "$line" >&2
     fi
     if [ "$age_s" -gt "$LAST_LOG_STALE_SECS" ]; then
-        printf '[!] that log is %s old and may not match your current problem. For a FRESH failure of any command:  failing-cmd 2>&1 | pos ai gemini ask "what happened"\n' "$age" >&2
+        printf '[!] that log is %s old and may not match your current problem. For a FRESH failure of any command:  failing-cmd 2>&1 | pos ai openrouter ask "what happened"\n' "$age" >&2
     fi
 }
 
 # ── Persistent session memory ───────────────────────────────────
-# History lives as a Gemini "contents" JSON document per session name under
+# History lives as an OpenAI-style "messages" JSON document per session name under
 # SESSION_DIR. Names are sanitized to [A-Za-z0-9_-]; ask/chat always run in a
 # session ('default' unless --session names another).
 session_file() {
@@ -200,13 +199,13 @@ session_file() {
 }
 
 session_load() {
-    [ -n "$SESSION" ] || { printf '{"contents":[]}'; return 0; }
+    [ -n "$SESSION" ] || { printf '{"messages":[]}'; return 0; }
     local f
     f="$(session_file)"
-    if [ -s "$f" ] && jq -e '.contents' "$f" >/dev/null 2>&1; then
+    if [ -s "$f" ] && jq -e '.messages' "$f" >/dev/null 2>&1; then
         cat "$f"
     else
-        printf '{"contents":[]}'
+        printf '{"messages":[]}'
     fi
 }
 
@@ -223,25 +222,28 @@ session_save() {
 
 # Append a turn and prune to the last MAX_SESSION_TURNS entries. stdout = JSON.
 session_push() {
-    local contents="$1" role="$2" text="$3"
-    printf '%s' "$contents" | jq -c --arg r "$role" --arg t "$text" \
-        '.contents += [{role:$r, parts:[{text:$t}]}] | .contents |= .[-'"$MAX_SESSION_TURNS"':]'
+    local messages="$1" role="$2" text="$3"
+    printf '%s' "$messages" | jq -c --arg r "$role" --arg t "$text" \
+        '.messages += [{role:$r, content:$t}] | .messages |= .[-'"$MAX_SESSION_TURNS"':]'
 }
 
-# One generateContent call. $1 = model, $2 = contents JSON, $3 = optional
-# system instruction (added as systemInstruction, not stored in the session).
+# One OpenRouter chat completion call. $1 = model, $2 = messages JSON, $3 = optional
+# system instruction (prepended as a system message, not stored in the session).
 # stdout = the answer text on success; an error message on failure (exit 1).
-gemini_generate() {
-    local model="$1" contents="$2" system="${3:-}" body
-    body="$contents"
+openrouter_generate() {
+    local model="$1" messages_json="$2" system="${3:-}" body resp code body_out errmsg
     if [ -n "$system" ]; then
-        body="$(printf '%s' "$contents" | jq -c --arg s "$system" \
-            '. + {systemInstruction:{role:"system",parts:[{text:$s}]}}')"
+        body="$(printf '%s' "$messages_json" | jq -c --arg s "$system" \
+            '[{role:"system",content:$s}] + .messages')"
+    else
+        body="$(printf '%s' "$messages_json" | jq -c '.messages')"
     fi
-    local resp code body_out errmsg
-    resp="$(curl -sS -m 60 -X POST "${API}/models/${model}:generateContent" \
-        -H "x-goog-api-key: ${AI_GEMINI_API_KEY}" \
+    body="$(printf '%s' "$body" | jq -nc --arg m "$model" --argjson msgs "$body" \
+        '{model:$m, messages:$msgs}')"
+    resp="$(curl -sS -m 60 -X POST "${API}/chat/completions" \
+        -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
         -H "Content-Type: application/json" \
+        -H "HTTP-Referer: https://github.com/admin/Linux_post_install" \
         --write-out $'\n%{http_code}' \
         --data "$body")" || { echo "request failed (curl exit $?)" >&2; return 1; }
     code="${resp##*$'\n'}"
@@ -251,7 +253,7 @@ gemini_generate() {
         echo "API error $code${errmsg:+: $errmsg}" >&2
         return 1
     fi
-    printf '%s' "$body_out" | jq -r '[.candidates[0].content.parts[]?.text] | join("")'
+    printf '%s' "$body_out" | jq -r '.choices[0].message.content // ""'
 }
 
 # ── Terminal markdown rendering (tty-only; raw bytes otherwise) ──
@@ -391,7 +393,7 @@ machine_context() {
 }
 
 cmd_capture() {
-    [ $# -gt 0 ] || err "usage: pos ai gemini capture <command> [args...]"
+    [ $# -gt 0 ] || err "usage: pos ai openrouter capture <command> [args...]"
     mkdir -p "$(dirname "$LAST_CMD_OUTPUT_FILE")"
     "$@" 2>&1 | tee "$LAST_CMD_OUTPUT_FILE"
     local rc=${PIPESTATUS[0]}
@@ -400,13 +402,13 @@ cmd_capture() {
 }
 
 cmd_ask() {
-    local prompt="" contents out system ctx mc
+    local prompt="" messages out system ctx mc
     if [ $# -gt 0 ]; then
         prompt="$*"
     elif [ ! -t 0 ]; then
         prompt="$(cat)"
     fi
-    [ -n "$prompt" ] || err "No prompt given — usage: pos ai gemini ask \"<prompt>\""
+    [ -n "$prompt" ] || err "No prompt given — usage: pos ai openrouter ask \"<prompt>\""
     # --last: append the most recent logged pos command output AFTER the
     # question, so the model diagnoses the real failure.
     if [ "$LAST_MODE" -eq 1 ]; then
@@ -417,7 +419,7 @@ cmd_ask() {
         if [ -z "$log_file" ] && [ -s "$LAST_CMD_OUTPUT_FILE" ]; then
             log_file="$LAST_CMD_OUTPUT_FILE"
         fi
-        [ -n "$log_file" ] || err "No recent output found — run 'pos ai gemini capture <cmd>' first, or pipe: cmd 2>&1 | pos ai gemini ask \"what happened\""
+        [ -n "$log_file" ] || err "No recent output found — run 'pos ai openrouter capture <cmd>' first, or pipe: cmd 2>&1 | pos ai openrouter ask \"what happened\""
         last_log_annotate "$log_file"
         ctx="$(last_log_context "$log_file")"
         prompt="$prompt"$'\n\n[last command output:]\n'"$ctx"
@@ -434,25 +436,25 @@ cmd_ask() {
         system="$DEFAULT_SYSTEM_PROMPT$mc"
     fi
     # Persistent session memory ('default' unless --session).
-    contents="$(session_load)"
-    contents="$(session_push "$contents" user "$prompt")"
-    if ! out="$(gemini_generate "$(resolve_model)" "$contents" "$system" 2>&1)"; then
+    messages="$(session_load)"
+    messages="$(session_push "$messages" user "$prompt")"
+    if ! out="$(openrouter_generate "$(resolve_model)" "$messages" "$system" 2>&1)"; then
         err "$out"
     fi
-    contents="$(session_push "$contents" model "$out")"
-    session_save "$contents"
+    messages="$(session_push "$messages" assistant "$out")"
+    session_save "$messages"
     render_markdown "$out"
 }
 
 cmd_chat() {
     [ $# -eq 0 ] || err "Unexpected argument for chat: $*"
-    local model contents text answer
+    local model messages text answer
     model="$(resolve_model)"
     require_key
-    contents="$(session_load)"
-    printf 'session: %s (resumed %s prior turns)\n' "$SESSION" "$(printf '%s' "$contents" | jq -r '.contents | length')"
+    messages="$(session_load)"
+    printf 'session: %s (resumed %s prior turns)\n' "$SESSION" "$(printf '%s' "$messages" | jq -r '.messages | length')"
     trap 'echo; echo "bye"; exit 0' INT
-    echo "Gemini · ${model} — type a message; q=quit, /reset=clear history"
+    echo "OpenRouter · ${model} — type a message; q=quit, /reset=clear history"
     while true; do
         printf '> '
         IFS= read -r text || break
@@ -460,18 +462,18 @@ cmd_chat() {
             "" ) continue ;;
             q|Q|quit|exit) echo; echo "bye"; return 0 ;;
             /reset)
-                contents='{"contents":[]}'
-                session_save "$contents"
+                messages='{"messages":[]}'
+                session_save "$messages"
                 echo "[history cleared]"
                 continue ;;
         esac
-        contents="$(session_push "$contents" user "$text")"
-        if ! answer="$(gemini_generate "$model" "$contents" "$SYSTEM_PROMPT" 2>&1)"; then
+        messages="$(session_push "$messages" user "$text")"
+        if ! answer="$(openrouter_generate "$model" "$messages" "$SYSTEM_PROMPT" 2>&1)"; then
             warn "AI error: $answer"
             continue
         fi
-        contents="$(session_push "$contents" model "$answer")"
-        session_save "$contents"
+        messages="$(session_push "$messages" assistant "$answer")"
+        session_save "$messages"
         # The bare '> ' prompt has no newline: this one closes the prompt
         # line, and render_markdown's tty-only blank line then shows as the
         # visible gap before the answer. On a pipe both bytes are preserved.
@@ -492,13 +494,13 @@ cmd_sessions() {
             for f in "$SESSION_DIR"/*.json; do
                 [ -f "$f" ] || continue
                 found=1
-                n="$(jq -r '.contents | length' "$f" 2>/dev/null || echo 0)"
+                n="$(jq -r '.messages | length' "$f" 2>/dev/null || echo 0)"
                 printf '  %-32s %s turns\n' "$(basename "$f" .json)" "${n:-0}"
             done
             [ "$found" -eq 1 ] || echo "no sessions"
             ;;
         reset)
-            [ $# -ge 2 ] || err "usage: pos ai gemini sessions reset <name>"
+            [ $# -ge 2 ] || err "usage: pos ai openrouter sessions reset <name>"
             name="$2"
             if rm -f "$(session_file "$name")"; then
                 ok "session '$name' cleared"
@@ -513,9 +515,8 @@ cmd_models() {
     local model resp code body m
     model="$(resolve_model)"
     require_key
-    resp="$(curl -sS -m 30 -G "${API}/models" \
-        -H "x-goog-api-key: ${AI_GEMINI_API_KEY}" \
-        --data-urlencode "pageSize=1000" \
+    resp="$(curl -sS -m 30 "${API}/models" \
+        -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
         --write-out $'\n%{http_code}')" || err "request failed (curl exit $?)"
     code="${resp##*$'\n'}"
     body="${resp%$'\n'*}"
@@ -523,18 +524,18 @@ cmd_models() {
         err "API error $code: $(printf '%s' "$body" | jq -r '.error.message // empty')"
     fi
     local list
-    list="$(printf '%s' "$body" | jq -r '.models[]? | select((.supportedGenerationMethods // []) | index("generateContent")) | .name' | sed 's#^models/##' | sort)"
-    echo "Gemini models (generateContent-capable):"
+    list="$(printf '%s' "$body" | jq -r '.data[]?.id' | sort)"
+    echo "OpenRouter models:"
     while IFS= read -r m; do
         [ -n "$m" ] || continue
         if [ "$m" = "$model" ]; then
-            printf '  %-32s <- default\n' "$m"
+            printf '  %-48s <- default\n' "$m"
         else
-            printf '  %-32s\n' "$m"
+            printf '  %-48s\n' "$m"
         fi
     done <<< "$list"
     if ! grep -qxF "$model" <<< "$list"; then
-        warn "configured default '$model' is not in the list — set AI_GEMINI_MODEL"
+        warn "configured default '$model' is not in the list — set OPENROUTER_MODEL"
     fi
 }
 
@@ -572,7 +573,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$LAST_MODE" -eq 1 ] && [ "${cmd:-}" != "ask" ]; then
-    err "--last only applies to 'ask' — for capturing output use 'capture': pos ai gemini capture <cmd>"
+    err "--last only applies to 'ask' — for capturing output use 'capture': pos ai openrouter capture <cmd>"
 fi
 
 case "${cmd:-}" in
@@ -582,5 +583,5 @@ case "${cmd:-}" in
     chat)      cmd_chat "${args[@]}" ;;
     models)    cmd_models "${args[@]}" ;;
     sessions)  cmd_sessions "${args[@]}" ;;
-    *)         err "Unknown ai gemini subcommand '$cmd' (see --help)" ;;
+    *)         err "Unknown ai openrouter subcommand '$cmd' (see --help)" ;;
 esac
