@@ -1,0 +1,642 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
+# POS_SUBCMDS: ask chat sessions capture models providers
+# POS_FLAGS: --provider --model --session --system --full --last
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini|openrouter, default gemini) | AI_API_KEY=secret:API key for the active provider | AI_MODEL=:Model id (default per provider) | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in; empty to reset)
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+# ── Paths & constants ──────────────────────────────────────────
+CONFIG_FILE="$HOME/.config/linux_post_install/ai.env"
+SESSION_DIR="$HOME/.local/share/linux_post_install/ai"
+DISPATCH_LOG_DIR="$HOME/.local/share/linux_post_install/logs"  # bin/pos per-run logs
+LAST_CMD_OUTPUT_FILE="$HOME/.local/share/linux_post_install/last_cmd_output"  # --last fallback for any command
+OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"          # read-only test seam (DEV.md env-overridable paths)
+PROVIDER_DIR="$(dirname "$0")/../lib/ai-providers"
+# Fallback for installed layout (flat /usr/local/bin)
+[ -d "$PROVIDER_DIR" ] || PROVIDER_DIR="$(dirname "$0")/ai-providers"
+
+SESSION="default"
+SYSTEM_PROMPT=""
+MAX_SESSION_TURNS=40
+LAST_LOG_MAX_BYTES=4096
+LAST_LOG_STALE_SECS=3600   # --last: warn when the attached log is older than this
+# Built-in terse ask prompt. cmd_ask appends a machine-context clause
+# (see machine_context) unless --system replaces it or --full drops everything.
+DEFAULT_SYSTEM_PROMPT_HARD="You are a Linux CLI assistant. Rules:
+1. Lead with exact command(s) — no explanations unless asked
+2. One line max per command; short bullets for multi-step only
+3. No greetings, no pleasantries, no closing offers
+4. For errors: diagnose and give the fix command first
+5. Match the user's OS/package manager (apt/dnf/pacman)"
+
+# Legacy: kept for session migration and backward compat config
+LEGACY_GEMINI_CONFIG="$HOME/.config/linux_post_install/ai.env"
+LEGACY_OPENROUTER_CONFIG="$HOME/.config/linux_post_install/ai-openrouter.env"
+
+usage() {
+    cat <<EOF
+Usage: pos ai [subcommand] [--provider <name>] [--model <id>] [--session <name>] [--system <text>] [--full] [--last]
+
+AI assistant with pluggable providers (gemini, openrouter).
+
+Subcommands:
+  ask "<prompt>"    Answer; prints the answer text to stdout. The prompt may
+                    also be piped in via stdin when no argument is given.
+                    Runs inside the persistent 'default' session (prior turns
+                    are sent as context); --session <name> picks another.
+  capture <cmd..>   Run a command, capture its output for --last, and show it.
+                    Each capture overwrites the previous one (latest only).
+  chat              Interactive multi-turn conversation (session 'default'
+                    unless --session is given).
+  models            List available models for the active provider.
+  providers         List available providers and their config status.
+  sessions          List persistent sessions / clear one:
+                    'sessions' and 'sessions reset <name>'.
+
+Options:
+  --provider <name> Provider to use (gemini|openrouter; default: gemini).
+                    Can also be set via AI_PROVIDER env/config.
+  --model <id>      Override the model for this invocation.
+  --session <name>  Use a named persistent session instead of 'default':
+                    ~/.local/share/linux_post_install/ai/<name>.json
+                    (capped at $MAX_SESSION_TURNS turns).
+  --system <text>   System instruction sent with every turn (kept out of the
+                    session file); replaces the built-in terse ask prompt
+                    wholesale, e.g. "Reply like a friendly Telegram chat".
+  --full            Skip the built-in terse prompt — long-form answers.
+  --last            ask only: attach the most recent pos dispatcher log or
+                    captured output (tail, max $LAST_LOG_MAX_BYTES chars) so
+                    the model can diagnose a real failure. Sources in priority
+                    order: (1) newest pos log, (2) captured output from
+                    'capture'. Notes on stderr which source was attached and
+                    its age; warns when stale (>60 min).
+  -h|--help         This help.
+
+Config:  $CONFIG_FILE  (edit with 'pos config ai')
+  AI_PROVIDER         Provider to use (gemini|openrouter, default gemini)
+  AI_API_KEY          API key for the active provider (secret)
+  AI_MODEL            Model id (default depends on provider)
+  AI_SYSTEM_PROMPT    Custom system prompt (overrides built-in; empty to reset)
+  AI_GEMINI_API_KEY   Legacy: Gemini API key fallback
+  AI_GEMINI_MODEL     Legacy: Gemini model fallback
+  OPENROUTER_API_KEY  Legacy: OpenRouter API key fallback
+  OPENROUTER_MODEL    Legacy: OpenRouter model fallback
+
+Notes:
+  ask is terse by default: a built-in system instruction tells the model to
+  lead with the exact commands and keep prose minimal — and to diagnose pasted
+  errors/output with a fix first. That prompt ends with one machine-context
+  line (hostname, distro, kernel, arch detected on this box) so answers fit
+  the actual machine; --system replaces it wholesale, --full drops it all.
+  Every ask/chat lands in a persistent session ('default' unless --session);
+  clear it with 'pos ai sessions reset default'. On a terminal the
+  answer is rendered as markdown (glow if installed, else a built-in
+  renderer); when stdout is not a tty (pipes, scripts, Telegram bridges) the
+  raw markdown is printed unchanged.
+
+Examples:
+  pos ai ask "check disk space on /"
+  pos ai --provider gemini ask "Explain DNS in one line"
+  pos ai --provider openrouter ask "hi"
+  echo "summarize this log" | pos ai ask
+  failing-cmd 2>&1 | pos ai ask how do I fix this
+  pos ai ask --last "why did that fail?"        # attach last output
+  pos ai capture pip install xyz                # capture any command
+  pos ai ask --last "what happened?"            # after capture
+  pos ai chat
+  pos ai models
+  pos ai providers
+  pos ai ask --model gemini-2.5-flash "hi"
+  pos ai ask --system "Reply like a pirate" "explain chmod"
+  pos ai ask --session work "my name is joe"
+  pos ai ask --session work "what is my name?"   # remembers
+  pos ai sessions
+  pos ai sessions reset default                  # forget default memory
+EOF
+    exit 0
+}
+
+# ── Provider loading ───────────────────────────────────────────
+load_provider() {
+    local p="${PROVIDER:-gemini}"
+    local f="$PROVIDER_DIR/$p.sh"
+    [ -f "$f" ] || err "Unknown provider '$p' — available: $(ls "$PROVIDER_DIR"/*.sh 2>/dev/null | xargs -I{} basename {} .sh | tr '\n' ' ')"
+    # shellcheck source=/dev/null
+    source "$f"
+}
+
+# ── ai.env loader (same pattern as telegram.env) ────────────────
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        v="${v//$'\r'/}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    # Legacy provider-specific config files (fallback for old configs)
+    # Both files are loaded — env-var precedence means unified AI_API_KEY wins.
+    local legacy_files="$LEGACY_GEMINI_CONFIG $LEGACY_OPENROUTER_CONFIG"
+    local legacy_env
+    for legacy_env in $legacy_files; do
+        [ -f "$legacy_env" ] && [ "$legacy_env" != "$CONFIG_FILE" ] || continue
+        while IFS='=' read -r k v; do
+            [ -n "$k" ] || continue
+            case "$k" in \#*) continue ;; esac
+            v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+            v="${v//$'\r'/}"
+            if [ -z "${!k:-}" ]; then
+                export "$k"="$v"
+            fi
+        done < <(grep -E '^[A-Z_]+=' "$legacy_env" || true)
+    done
+}
+
+# ── Config resolution ──────────────────────────────────────────
+resolve_key() {
+    load_config
+    local p="${PROVIDER:-gemini}"
+    # 1. Unified AI_API_KEY
+    if [ -n "${AI_API_KEY:-}" ]; then
+        return 0
+    fi
+    # 2. Provider-specific fallback
+    case "$p" in
+        gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && export AI_API_KEY="$AI_GEMINI_API_KEY" && return 0 ;;
+        openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && export AI_API_KEY="$OPENROUTER_API_KEY" && return 0 ;;
+    esac
+    # 3. No key found — return 1 (require_key handles the error message)
+    return 1
+}
+
+require_key() {
+    if ! resolve_key >/dev/null 2>&1; then
+        local p="${PROVIDER:-gemini}"
+        case "$p" in
+            gemini)     err "No Gemini API key — run 'pos config ai' or set AI_API_KEY / AI_GEMINI_API_KEY" ;;
+            openrouter) err "No OpenRouter API key — run 'pos config ai' or set AI_API_KEY / OPENROUTER_API_KEY" ;;
+        esac
+        err "No API key for provider '$p' — run 'pos config ai' or set AI_API_KEY"
+    fi
+}
+
+resolve_model() {
+    local p="${PROVIDER:-gemini}"
+    if [ -n "${MODEL_OVERRIDE:-}" ]; then
+        printf '%s' "$MODEL_OVERRIDE"
+    elif [ -n "${AI_MODEL:-}" ]; then
+        printf '%s' "$AI_MODEL"
+    else
+        # Provider-specific fallback
+        case "$p" in
+            gemini)     [ -n "${AI_GEMINI_MODEL:-}" ] && printf '%s' "$AI_GEMINI_MODEL" && return ;;
+            openrouter) [ -n "${OPENROUTER_MODEL:-}" ] && printf '%s' "$OPENROUTER_MODEL" && return ;;
+        esac
+        provider_default_model
+    fi
+}
+
+# ── --last: attach the most recent pos command output ───────────
+newest_pos_log() {
+    [ -d "$DISPATCH_LOG_DIR" ] || return 1
+    local f
+    while IFS= read -r f; do
+        [ -s "$f" ] && { printf '%s' "$f"; return 0; }
+    done < <(ls "$DISPATCH_LOG_DIR"/*.log 2>/dev/null | LC_ALL=C sort -r | grep -v '/pos\.log$')
+    return 1
+}
+
+last_log_context() {
+    local raw
+    raw="$(tail -c "$LAST_LOG_MAX_BYTES" "$1")"
+    if command -v iconv >/dev/null 2>&1; then
+        raw="$(printf '%s' "$raw" | iconv -c -f utf-8 -t utf-8 2>/dev/null || printf '%s' "$raw")"
+    fi
+    if [ "$(wc -c <"$1")" -gt "$LAST_LOG_MAX_BYTES" ]; then
+        printf '[…truncated…]\n%s' "$raw"
+    else
+        printf '%s' "$raw"
+    fi
+}
+
+human_age() {
+    local s="$1"
+    [ "$s" -lt 0 ] && s=0
+    if   [ "$s" -lt 60 ];    then printf 'just now'
+    elif [ "$s" -lt 3600 ];  then printf '%sm' "$((s / 60))"
+    elif [ "$s" -lt 86400 ]; then printf '%sh' "$((s / 3600))"
+    else                          printf '%sd' "$((s / 86400))"
+    fi
+}
+
+last_log_annotate() {
+    local f="$1" age_s age line
+    age_s=$(( $(date +%s) - $(stat -c %Y "$f") ))
+    [ "$age_s" -lt 0 ] && age_s=0
+    age="$(human_age "$age_s")"
+    printf '[i] attaching last pos output — %s (%s)\n' "$(basename "$f")" "$age" >&2
+    line="$(grep -m1 '[^[:space:]]' "$f" 2>/dev/null || true)"
+    if [ -n "$line" ]; then
+        printf '[i]   "%.100s"\n' "$line" >&2
+    fi
+    if [ "$age_s" -gt "$LAST_LOG_STALE_SECS" ]; then
+        printf '[!] that log is %s old and may not match your current problem. For a FRESH failure of any command:  failing-cmd 2>&1 | pos ai ask "what happened"\n' "$age" >&2
+    fi
+}
+
+# ── Persistent session memory (universal OpenAI messages format) ─
+session_file() {
+    local name="${1:-$SESSION}"
+    name="${name//[^A-Za-z0-9_-]/_}"
+    printf '%s/%s.json' "$SESSION_DIR" "$name"
+}
+
+session_load() {
+    [ -n "$SESSION" ] || { printf '{"messages":[]}'; return 0; }
+    local f
+    f="$(session_file)"
+    if [ -s "$f" ]; then
+        # Check for old Gemini contents format → migrate transparently
+        if jq -e '.contents' "$f" >/dev/null 2>&1 && ! jq -e '.messages' "$f" >/dev/null 2>&1; then
+            local migrated
+            migrated="$(jq -c '{messages: [.contents[]? | {role: (if .role == "model" then "assistant" else .role end), content: (.parts | map(.text) | join(""))}]}' "$f" 2>/dev/null)" || {
+                printf '{"messages":[]}'; return 0
+            }
+            printf '%s\n' "$migrated" > "$f"
+            chmod 600 "$f"
+            printf '%s' "$migrated"
+        elif jq -e '.messages' "$f" >/dev/null 2>&1; then
+            cat "$f"
+        else
+            printf '{"messages":[]}'
+        fi
+    else
+        printf '{"messages":[]}'
+    fi
+}
+
+session_save() {
+    [ -n "$SESSION" ] || return 0
+    local f tmp
+    f="$(session_file)"
+    mkdir -p "$SESSION_DIR"
+    tmp="$(mktemp)"
+    printf '%s\n' "$1" >"$tmp"
+    mv "$tmp" "$f"
+    chmod 600 "$f"
+}
+
+# Append a turn and prune to the last MAX_SESSION_TURNS entries. stdout = JSON.
+session_push() {
+    local messages="$1" role="$2" text="$3"
+    printf '%s' "$messages" | jq -c --arg r "$role" --arg t "$text" \
+        '.messages += [{role:$r, content:$t}] | .messages |= .[-'"$MAX_SESSION_TURNS"':]'
+}
+
+# ── Terminal markdown rendering (tty-only; raw bytes otherwise) ──
+render_markdown() {
+    local text="$1"
+    if [ ! -t 1 ]; then
+        printf '%s\n' "$text"
+        return 0
+    fi
+    local rendered prog
+    prog='
+        BEGIN {
+            e = sprintf("%c", 27)
+            R = e "[0m"; DIM = e "[2m"; B = e "[1m"
+            YEL = e "[33m"; CYA = e "[1;36m"
+            RULE = ""
+            for (i = 0; i < 60; i++) RULE = RULE "─"
+            RULE = DIM RULE R
+        }
+        /^```/ { fence = !fence; next }
+        fence  { printf "%s    %s%s\n", DIM, $0, R; next }
+        /^#{1,4} / {
+            sub(/^#{1,4} +/, "")
+            printf "%s%s%s\n", CYA, $0, R
+            next
+        }
+        /^(-{3,}|\*{3,}|_{3,})$/ { print RULE; next }
+        {
+            line = $0
+            out = ""; rest = line
+            while (match(rest, /`[^`]*`/)) {
+                out = out substr(rest, 1, RSTART - 1) YEL \
+                      substr(rest, RSTART + 1, RLENGTH - 2) R
+                rest = substr(rest, RSTART + RLENGTH)
+            }
+            line = out rest
+            out = ""; rest = line
+            while (match(rest, /\*\*[^*]+\*\*/)) {
+                out = out substr(rest, 1, RSTART - 1) B \
+                      substr(rest, RSTART + 2, RLENGTH - 4) R
+                rest = substr(rest, RSTART + RLENGTH)
+            }
+            line = out rest
+            out = ""; rest = line
+            while (match(rest, /__[^_]+__/)) {
+                out = out substr(rest, 1, RSTART - 1) B \
+                      substr(rest, RSTART + 2, RLENGTH - 4) R
+                rest = substr(rest, RSTART + RLENGTH)
+            }
+            print out rest
+        }
+    '
+    if command -v glow >/dev/null 2>&1; then
+        rendered="$(printf '%s\n' "$text" | glow -)"
+    else
+        rendered="$(printf '%s\n' "$text" | awk "$prog")"
+    fi
+    printf '\n%s\n' "$rendered"
+}
+
+# ── Machine context appended to the built-in default prompt ─────
+mc_clean() {
+    sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+        -e 's/[[:space:]][[:space:]]*/ /g' \
+        | tr -d '\000-\010\013-\037\177' \
+        | sed -e 's/^ //; s/ $//'
+}
+
+machine_context() {
+    local raw line key val h="" o="" k="" a="" part out=""
+    if command -v hostnamectl >/dev/null 2>&1; then
+        raw="$(hostnamectl status 2>/dev/null || true)"
+        while IFS= read -r line; do
+            key="$(printf '%s' "${line%%:*}" | tr -d '[:space:]')"
+            val="${line#*:}"
+            case "$key" in
+                Statichostname|Transienthostname|Hostname)
+                    [ -z "$h" ] && h="$val" ;;
+                OperatingSystem)
+                    [ -z "$o" ] && o="$val" ;;
+                Kernel)
+                    [ -z "$k" ] && k="$val" ;;
+                Architecture)
+                    [ -z "$a" ] && a="$val" ;;
+            esac
+        done <<< "$raw"
+    fi
+    if [ -z "$o" ] && [ -r "$OS_RELEASE_FILE" ]; then
+        o="$(
+            . "$OS_RELEASE_FILE" 2>/dev/null || true
+            if [ -n "${PRETTY_NAME:-}" ]; then
+                printf '%s' "$PRETTY_NAME"
+            elif [ -n "${NAME:-}" ]; then
+                printf '%s' "${NAME}${VERSION_ID:+ (${VERSION_ID})}"
+            fi
+        )"
+    fi
+    [ -n "$k" ] || k="$(uname -sr 2>/dev/null || true)"
+    [ -n "$a" ] || a="$(uname -m 2>/dev/null || true)"
+    h="$(printf '%s' "$h" | mc_clean)"
+    o="$(printf '%s' "$o" | mc_clean)"
+    k="$(printf '%s' "$k" | mc_clean)"
+    a="$(printf '%s' "$a" | mc_clean)"
+    case "$k" in "Linux "*) k="${k#Linux }" ;; esac
+    local out=""
+    for part in "$h" "$o" "${k:+kernel $k}" "$a"; do
+        [ -n "$part" ] || continue
+        if [ -n "$out" ]; then out="$out, $part"; else out="$part"; fi
+    done
+    [ -n "$out" ] || return 0
+    printf 'Machine context (answers must fit this box): %s.' "$out"
+}
+
+# ── Subcommands ────────────────────────────────────────────────
+cmd_capture() {
+    [ $# -gt 0 ] || err "usage: pos ai capture <command> [args...]"
+    mkdir -p "$(dirname "$LAST_CMD_OUTPUT_FILE")"
+    "$@" 2>&1 | tee "$LAST_CMD_OUTPUT_FILE"
+    local rc=${PIPESTATUS[0]}
+    printf '[captured → %s]\n' "$LAST_CMD_OUTPUT_FILE" >&2
+    return $rc
+}
+
+cmd_ask() {
+    local prompt="" messages out system ctx mc
+    if [ $# -gt 0 ]; then
+        prompt="$*"
+    elif [ ! -t 0 ]; then
+        prompt="$(cat)"
+    fi
+    [ -n "$prompt" ] || err "No prompt given — usage: pos ai ask \"<prompt>\""
+    # --last: append the most recent logged pos command output AFTER the
+    # question, so the model diagnoses the real failure.
+    if [ "$LAST_MODE" -eq 1 ]; then
+        local log_file="" pos_log="" captured_log=""
+        pos_log="$(newest_pos_log 2>/dev/null)" || true
+        [ -s "$LAST_CMD_OUTPUT_FILE" ] && captured_log="$LAST_CMD_OUTPUT_FILE"
+        if [ -n "$pos_log" ] && [ -n "$captured_log" ]; then
+            local pos_age=$(( $(date +%s) - $(stat -c %Y "$pos_log") ))
+            local cap_age=$(( $(date +%s) - $(stat -c %Y "$captured_log") ))
+            if [ "$cap_age" -lt "$pos_age" ]; then
+                log_file="$captured_log"
+            else
+                log_file="$pos_log"
+            fi
+        elif [ -n "$captured_log" ]; then
+            log_file="$captured_log"
+        else
+            log_file="$pos_log"
+        fi
+        [ -n "$log_file" ] || err "No recent output found — run 'pos ai capture <cmd>' first, or pipe: cmd 2>&1 | pos ai ask \"what happened\""
+        last_log_annotate "$log_file"
+        ctx="$(last_log_context "$log_file")"
+        prompt="$prompt"$'\n\n[last command output:]\n'"$ctx"
+    fi
+    require_key
+    # Terse by default: user --system replaces the built-in prompt wholesale;
+    # --full skips everything (built-in text AND machine context).
+    system="$SYSTEM_PROMPT"
+    if [ -z "$system" ] && [ "$FULL_MODE" -eq 0 ]; then
+        # Check AI_SYSTEM_PROMPT config first, then fall back to built-in
+        system="${AI_SYSTEM_PROMPT:-}"
+        if [ -z "$system" ]; then
+            system="$DEFAULT_SYSTEM_PROMPT_HARD"
+        fi
+        mc="$(machine_context)"
+        [ -n "$mc" ] && mc=" $mc"
+        system="$system$mc"
+    fi
+    # Persistent session memory ('default' unless --session).
+    messages="$(session_load)"
+    messages="$(session_push "$messages" user "$prompt")"
+    if ! out="$(provider_generate "$(resolve_model)" "$messages" "$system" 2>&1)"; then
+        err "$out"
+    fi
+    messages="$(session_push "$messages" assistant "$out")"
+    session_save "$messages"
+    render_markdown "$out"
+}
+
+cmd_chat() {
+    [ $# -eq 0 ] || err "Unexpected argument for chat: $*"
+    local model messages text answer provider_display
+    model="$(resolve_model)"
+    require_key
+    provider_display="$(provider_name)"
+    messages="$(session_load)"
+    printf 'session: %s (resumed %s prior turns)\n' "$SESSION" "$(printf '%s' "$messages" | jq -r '.messages | length')"
+    trap 'echo; echo "bye"; exit 0' INT
+    echo "${provider_display} · ${model} — type a message; q=quit, /reset=clear history"
+    while true; do
+        printf '> '
+        IFS= read -r text || break
+        case "$text" in
+            "" ) continue ;;
+            q|Q|quit|exit) echo; echo "bye"; return 0 ;;
+            /reset)
+                messages='{"messages":[]}'
+                session_save "$messages"
+                echo "[history cleared]"
+                continue ;;
+        esac
+        messages="$(session_push "$messages" user "$text")"
+        if ! answer="$(provider_generate "$model" "$messages" "$SYSTEM_PROMPT" 2>&1)"; then
+            warn "AI error: $answer"
+            continue
+        fi
+        messages="$(session_push "$messages" assistant "$answer")"
+        session_save "$messages"
+        printf '\n'
+        render_markdown "$answer"
+        printf '\n\n'
+    done
+    echo
+    return 0
+}
+
+cmd_sessions() {
+    local action="${1:-list}" name f n
+    case "$action" in
+        list|"")
+            [ -d "$SESSION_DIR" ] || { echo "no sessions"; return 0; }
+            local found=0
+            for f in "$SESSION_DIR"/*.json; do
+                [ -f "$f" ] || continue
+                found=1
+                n="$(jq -r '.messages | length' "$f" 2>/dev/null || echo 0)"
+                printf '  %-32s %s turns\n' "$(basename "$f" .json)" "${n:-0}"
+            done
+            [ "$found" -eq 1 ] || echo "no sessions"
+            ;;
+        reset)
+            [ $# -ge 2 ] || err "usage: pos ai sessions reset <name>"
+            name="$2"
+            if rm -f "$(session_file "$name")"; then
+                ok "session '$name' cleared"
+            fi
+            ;;
+        *) err "Unknown sessions subcommand '$action' (list | reset <name>)" ;;
+    esac
+}
+
+cmd_models() {
+    [ $# -eq 0 ] || err "Unexpected argument for models: $*"
+    local model
+    model="$(resolve_model)"
+    require_key
+    provider_models_list "$model"
+}
+
+cmd_providers() {
+    echo "Available providers:"
+    load_config  # ensure env vars are populated
+    local active="${PROVIDER:-gemini}"
+    for f in "$PROVIDER_DIR"/*.sh; do
+        [ -f "$f" ] || continue
+        local name pname pmodel configured current
+        name="$(basename "$f" .sh)"
+        # Source provider in a subshell to get its metadata
+        local meta
+        meta="$( ( source "$f"; printf '%s\x00%s' "$(provider_name)" "$(provider_default_model)" ) 2>/dev/null )" || true
+        pname="${meta%%$'\x00'*}"
+        pmodel="${meta#*$'\x00'}"
+        [ -n "$pname" ] || pname="$name"
+        [ -n "$pmodel" ] || pmodel="unknown"
+        # Check if API key exists for this provider
+        configured="not configured"
+        if [ -n "${AI_API_KEY:-}" ]; then
+            configured="configured"
+        else
+            case "$name" in
+                gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && configured="configured" ;;
+                openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && configured="configured" ;;
+            esac
+        fi
+        current=""
+        [ "$name" = "$active" ] && current=" ← active"
+        printf '  %-16s %s (model: %s)%s\n' "$name" "$configured" "$pmodel" "$current"
+    done
+}
+
+# ── Parse flags + subcommand ────────────────────────────────────
+MODEL_OVERRIDE=""
+FULL_MODE=0
+LAST_MODE=0
+PROVIDER=""
+cmd=""
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --provider)
+            [ $# -ge 2 ] || err "--provider needs a value"
+            PROVIDER="$2"; shift 2 ;;
+        --model)
+            [ $# -ge 2 ] || err "--model needs a value"
+            MODEL_OVERRIDE="$2"; shift 2 ;;
+        --session)
+            [ $# -ge 2 ] || err "--session needs a value"
+            SESSION="$2"; shift 2 ;;
+        --system)
+            [ $# -ge 2 ] || err "--system needs a value"
+            SYSTEM_PROMPT="$2"; shift 2 ;;
+        --full)
+            FULL_MODE=1; shift ;;
+        --last)
+            LAST_MODE=1; shift ;;
+        -*) err "Unknown option '$1' (see --help)" ;;
+        *)
+            if [ -z "$cmd" ]; then
+                cmd="$1"
+            else
+                args+=("$1")
+            fi
+            shift ;;
+    esac
+done
+
+# Resolve provider: --provider flag > AI_PROVIDER env/config > default gemini
+if [ -z "$PROVIDER" ]; then
+    load_config
+    PROVIDER="${AI_PROVIDER:-gemini}"
+fi
+
+# Load provider adapter functions
+load_provider
+
+if [ "$LAST_MODE" -eq 1 ] && [ "${cmd:-}" != "ask" ]; then
+    err "--last only applies to 'ask' — for capturing output use 'capture': pos ai capture <cmd>"
+fi
+
+case "${cmd:-}" in
+    "")        usage ;;
+    ask)       cmd_ask "${args[@]}" ;;
+    capture)   cmd_capture "${args[@]}" ;;
+    chat)      cmd_chat "${args[@]}" ;;
+    models)    cmd_models "${args[@]}" ;;
+    providers) cmd_providers "${args[@]}" ;;
+    sessions)  cmd_sessions "${args[@]}" ;;
+    *)         err "Unknown ai subcommand '$cmd' (see --help)" ;;
+esac

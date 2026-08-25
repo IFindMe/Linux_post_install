@@ -147,6 +147,19 @@ if should_run 2 scripts; then
     done
     log "libs -> /usr/local/bin (644): ${lib_names% }"
 
+    # ── AI provider adapters ────────────────────────────────────
+    # Installed into /usr/local/bin/ai-providers/ for pos-ai.
+    ap_count=0
+    ap_names=""
+    run sudo mkdir -p /usr/local/bin/ai-providers
+    for apf in lib/ai-providers/*.sh; do
+        [ -f "$apf" ] || continue
+        run sudo install -m 644 "$apf" "/usr/local/bin/ai-providers/"
+        ap_count=$((ap_count + 1))
+        ap_names+="$(basename "$apf") "
+    done
+    [ "$ap_count" -gt 0 ] && log "ai-providers -> /usr/local/bin/ai-providers (644): ${ap_names% }"
+
     # ── Entertainment plugins ────────────────────────────────
     # Installed into /usr/local/bin so the repo can be deleted afterwards.
     pcount=0

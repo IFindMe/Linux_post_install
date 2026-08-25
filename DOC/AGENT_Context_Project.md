@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–197 |
-| ## 3. Installation Flow | 198–251 |
-| ## 4. The `pos` CLI System | 252–326 |
-| ## 5. Shared Library — `lib/common.sh` | 327–358 |
-| ## 6. Docker Compose / ScaleTail | 359–401 |
-| ## 7. Optional Apps (`apps/`) | 402–431 |
-| ## 8. Entertainment Module | 432–445 |
-| ## 9. Systemd Services | 446–457 |
-| ## 10. Configuration Files | 458–484 |
-| ## 11. Coding Conventions | 485–517 |
-| ## 12. Development Workflow | 518–570 |
-| ## 13. Key File Quick Reference | 571–638 |
-| ## 14. Common Tasks for Agents | 639–672 |
+| ## 2. Directory Structure | 44–198 |
+| ## 3. Installation Flow | 199–252 |
+| ## 4. The `pos` CLI System | 253–328 |
+| ## 5. Shared Library — `lib/common.sh` | 329–360 |
+| ## 6. Docker Compose / ScaleTail | 361–403 |
+| ## 7. Optional Apps (`apps/`) | 404–433 |
+| ## 8. Entertainment Module | 434–447 |
+| ## 9. Systemd Services | 448–459 |
+| ## 10. Configuration Files | 460–486 |
+| ## 11. Coding Conventions | 487–519 |
+| ## 12. Development Workflow | 520–572 |
+| ## 13. Key File Quick Reference | 573–641 |
+| ## 14. Common Tasks for Agents | 642–675 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -61,8 +61,8 @@ Linux_post_install/
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
-│   ├── pos-ai-gemini                       # Chat with Google Gemini (ask, capture, chat, models, sessions)
-│   ├── pos-ai-openrouter                   # Chat with OpenRouter models (ask, capture, chat, models, sessions)
+│   ├── pos-ai-gemini                       # Forward to pos ai --provider gemini (backward compat)
+│   ├── pos-ai-openrouter                   # Forward to pos ai --provider openrouter (backward compat)
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
 │   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
 │   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
@@ -97,6 +97,7 @@ Linux_post_install/
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
+│   ├── pos-ai                              # AI assistant: ask, chat, sessions, capture, models, providers
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 <!-- GEN:END tree -->
@@ -268,8 +269,8 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
-| ai | gemini | `pos-ai-gemini` | Chat with Google Gemini (ask, capture, chat, models, sessions) |
-| ai | openrouter | `pos-ai-openrouter` | Chat with OpenRouter models (ask, capture, chat, models, sessions) |
+| ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |
+| ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |
 | communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
 | communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
@@ -304,6 +305,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | firewall | `pos-system-firewall` | Interactive UFW management |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+|  | ai | `pos-ai` | AI assistant: ask, chat, sessions, capture, models, providers |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
 <!-- GEN:END dispatch -->
@@ -351,7 +353,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`pos`, `pos-communication-matrix-listener`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
+`pos`, `pos-ai-gemini`, `pos-ai-openrouter`, `pos-communication-matrix-listener`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -468,7 +470,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 - `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
 - `~/.config/linux_post_install/system.env` — shared "system" tool settings (loaded by `pos system health` / `pos system backup` via `load_system_env()` in `lib/common.sh`; env already exported wins over the file); template `config/system.env`
 - `~/.config/linux_post_install/notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out); read by `lib/notify.sh`; template `config/notify.env`
-- `~/.config/linux_post_install/ai.env` — Google Gemini config (`AI_GEMINI_API_KEY` secret, `AI_GEMINI_MODEL` default `gemini-2.5-flash`); read by `pos ai gemini`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
+- `~/.config/linux_post_install/ai.env` — AI provider config (`AI_PROVIDER`, `AI_API_KEY` secret, `AI_MODEL`, `AI_SYSTEM_PROMPT`, plus legacy fallbacks `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`); read by `pos ai`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -592,8 +594,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 295 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-ai-gemini` | 586 | Chat with Google Gemini (ask, capture, chat, models, sessions) |
-| `bin/pos-ai-openrouter` | 587 | Chat with OpenRouter models (ask, capture, chat, models, sessions) |
+| `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
+| `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
@@ -628,6 +630,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
+| `bin/pos-ai` | 642 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 305 | Dynamic bash completion |
@@ -664,7 +667,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify Music→USB sync logic | Edit `bin/pos-media-sync` / shared USB layer `lib/usb-lib.sh` (seams `MEDIA_SYNC_SOURCE`/`MEDIA_SYNC_DEST`/`USB_MOUNT_BASE`/`USB_BYID` in `~/.config/linux_post_install/system.env`) |
 | Modify YouTube channel sync logic | Edit `bin/pos-media-ytsync` (state in `~/.local/share/linux_post_install/ytsync`; config scope `ytsync` via `pos config ytsync`; research notes `tools-docs/ytsync.md`) |
 | Modify the scheduler / scheduled jobs | Edit `bin/pos-system-schedule` / `lib/scheduler-lib.sh` (jobs in `~/.config/linux_post_install/schedule.d/`) |
-| Modify AI/Gemini logic | Edit `bin/pos-ai-gemini` (config scope `ai` via `pos config ai`; `AI_GEMINI_API_KEY`/`AI_GEMINI_MODEL` in `~/.config/linux_post_install/ai.env`) |
+| Modify AI logic | Edit `bin/pos-ai` (main tool) + `lib/ai-providers/*.sh` (provider adapters); config scope `ai` via `pos config ai`; `AI_API_KEY`/`AI_MODEL`/`AI_PROVIDER` in `~/.config/linux_post_install/ai.env` |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
 | Modify install phases/flags | Edit arg parsing in `install.sh` |

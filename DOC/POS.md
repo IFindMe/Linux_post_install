@@ -55,52 +55,42 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 ### ai
 
-**File:** `bin/pos-ai-gemini`
-**Purpose:** chat with Google Gemini via the REST API (`generativelanguage.googleapis.com`). One tool, four subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), and `models` (list `generateContent`-capable ids).
+**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` (backward-compat forwarders → `pos ai --provider <name>`)
+**Provider adapters:** `lib/ai-providers/gemini.sh`, `lib/ai-providers/openrouter.sh`
+**Purpose:** AI assistant with pluggable providers. Six subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), `models` (list available models), `providers` (list providers and config status), and `sessions` (list/clear sessions). Providers handle API-specific logic; the main tool handles sessions, rendering, machine context, and all shared logic.
 
 | Command | Behavior |
 |---------|----------|
-| `pos ai gemini ask "<prompt>"` | POSTs `generateContent` and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai/default.json`, capped at 40 turns; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
-| `pos ai gemini capture <cmd..>` | Run a command, capture its stdout+stderr to screen and to `~/.local/share/linux_post_install/last_cmd_output` for `--last`. Each capture overwrites the previous one. Returns the command's exit code |
-| `pos ai gemini chat` | Interactive REPL with multi-turn history (the `contents[]` array is appended per turn and persisted to the session file — `default` unless `--session`); replies are rendered like `ask` on a tty; `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
-| `pos ai gemini sessions` | Lists session files with turn counts; `sessions reset <name>` clears one (e.g. `reset default`) |
-| `pos ai gemini models` | Lists models that support `generateContent` and flags the configured default |
-| `pos ai gemini --model <id> …` | Overrides the model for one invocation |
+| `pos ai ask "<prompt>"` | Sends the prompt to the active provider (default: gemini) and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai/default.json`, capped at 40 turns; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it; `AI_SYSTEM_PROMPT` env/config provides a custom default). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
+| `pos ai --provider openrouter ask "<prompt>"` | Same, but uses OpenRouter instead of the default Gemini provider |
+| `pos ai capture <cmd..>` | Run a command, capture its stdout+stderr to screen and to `~/.local/share/linux_post_install/last_cmd_output` for `--last`. Each capture overwrites the previous one. Returns the command's exit code |
+| `pos ai chat` | Interactive REPL with multi-turn history (the `messages[]` array is appended per turn and persisted to the session file — `default` unless `--session`); replies are rendered like `ask` on a tty; `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
+| `pos ai sessions` | Lists session files with turn counts; `sessions reset <name>` clears one (e.g. `reset default`) |
+| `pos ai models` | Lists available models for the active provider and flags the configured default |
+| `pos ai providers` | Lists available providers, their config status, and the active provider |
+| `pos ai --model <id> …` | Overrides the model for one invocation |
+| `pos ai --provider <name> …` | Selects the provider for one invocation (gemini\|openrouter) |
 
-`pos ai gemini` with no subcommand prints usage (never blocks on stdin). `ask`/`chat` time out after 60s per request; on a non-2xx response the API's `error.message` is shown and the tool exits non-zero.
+Backward compatibility: `pos ai gemini` and `pos ai openrouter` still work as shorthands for `pos ai --provider gemini` and `pos ai --provider openrouter`.
+
+`pos ai` with no subcommand prints usage (never blocks on stdin). `ask`/`chat` time out after 60s per request; on a non-2xx response the API's `error.message` is shown and the tool exits non-zero.
 
 **Configuration** (`~/.config/linux_post_install/ai.env`, edit with `pos config ai`):
 
 | Key | Required | Default | Purpose |
 |-----|----------|---------|---------|
-| `AI_GEMINI_API_KEY` | yes | — | API key from aistudio.google.com (secret — masked in `pos config ai`) |
-| `AI_GEMINI_MODEL` | no | `gemini-2.5-flash` | Model id used by `ask`/`chat`/`models` |
+| `AI_PROVIDER` | no | `gemini` | Active provider (gemini\|openrouter) |
+| `AI_API_KEY` | yes | — | API key for the active provider (secret — masked in `pos config ai`) |
+| `AI_MODEL` | no | per provider | Model id used by `ask`/`chat`/`models` |
+| `AI_SYSTEM_PROMPT` | no | built-in terse prompt | Custom system prompt (overrides built-in; empty to reset) |
+| `AI_GEMINI_API_KEY` | fallback | — | Legacy: Gemini API key (used when `AI_API_KEY` is empty) |
+| `AI_GEMINI_MODEL` | fallback | `gemini-2.5-flash` | Legacy: Gemini model id (used when `AI_MODEL` is empty) |
+| `OPENROUTER_API_KEY` | fallback | — | Legacy: OpenRouter API key (used when `AI_API_KEY` is empty) |
+| `OPENROUTER_MODEL` | fallback | `openrouter/auto` | Legacy: OpenRouter model id (used when `AI_MODEL` is empty) |
 
-Precedence: `--model` flag > `AI_GEMINI_MODEL` env > config file > `gemini-2.5-flash`. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES).
+Model precedence: `--model` flag > `AI_MODEL` env > provider-specific fallback (`AI_GEMINI_MODEL`/`OPENROUTER_MODEL`) > provider default. API key precedence: `AI_API_KEY` env > provider-specific fallback (`AI_GEMINI_API_KEY`/`OPENROUTER_API_KEY`) > error. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES). Sessions are stored in OpenAI `messages` format universally; old Gemini-format sessions (`contents[]`) are auto-migrated on load.
 
-**Messaging bridges:** the Telegram and Matrix listeners forward non-command messages starting with `ai ` (case-insensitive) to `pos ai gemini ask` and reply with the model's answer — see [communication → listener](#communication). The Telegram bridge uses one session per chat (`telegram-<chat id>`), the Matrix bridge one per room (`matrix-<room>`).
-
-**File:** `bin/pos-ai-openrouter`
-**Purpose:** chat with OpenRouter models via the REST API (`openrouter.ai`). One tool, four subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), and `sessions` (list/clear sessions). OpenRouter provides access to hundreds of models from different providers through a single OpenAI-compatible API.
-
-| Command | Behavior |
-|---------|----------|
-| `pos ai openrouter ask "<prompt>"` | POSTs a chat completion and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai-openrouter/default.json`, capped at 40 turns; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
-| `pos ai openrouter capture <cmd..>` | Run a command, capture its stdout+stderr to screen and to `~/.local/share/linux_post_install/last_cmd_output` for `--last`. Each capture overwrites the previous one. Returns the command's exit code |
-| `pos ai openrouter chat` | Interactive REPL with multi-turn history (the `messages[]` array is appended per turn and persisted to the session file — `default` unless `--session`); replies are rendered like `ask` on a tty; `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
-| `pos ai openrouter sessions` | Lists session files with turn counts; `sessions reset <name>` clears one (e.g. `reset default`) |
-| `pos ai openrouter --model <id> …` | Overrides the model for one invocation |
-
-`pos ai openrouter` with no subcommand prints usage (never blocks on stdin). `ask`/`chat` time out after 60s per request; on a non-2xx response the API's `error.message` is shown and the tool exits non-zero.
-
-**Configuration** (`~/.config/linux_post_install/ai-openrouter.env`, edit with `pos config ai-openrouter`):
-
-| Key | Required | Default | Purpose |
-|-----|----------|---------|---------|
-| `OPENROUTER_API_KEY` | yes | — | API key from openrouter.ai (secret — masked in `pos config ai-openrouter`) |
-| `OPENROUTER_MODEL` | no | `openrouter/auto` | Model id used by `ask`/`chat`/`models` |
-
-Precedence: `--model` flag > `OPENROUTER_MODEL` env > config file > `openrouter/auto`. Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES).
+**Messaging bridges:** the Telegram and Matrix listeners forward non-command messages starting with `ai ` (case-insensitive) to `pos ai ask` and reply with the model's answer — see [communication → listener](#communication). The Telegram bridge uses one session per chat (`telegram-<chat id>`), the Matrix bridge one per room (`matrix-<room>`).
 
 ### network
 

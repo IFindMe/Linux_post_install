@@ -7,7 +7,7 @@
 #
 # After sourcing, every command's stdout+stderr is silently tee'd to
 # ~/.local/share/linux_post_install/last_cmd_output (truncated at 1 MB).
-# Then pos ai gemini ask --last / pos ai openrouter ask --last will
+# Then pos ai ask --last (or pos ai --provider openrouter ask --last) will
 # pick it up automatically — no 'capture' subcommand needed.
 # To disable: unset __POS_CAPTURE_ACTIVE
 
