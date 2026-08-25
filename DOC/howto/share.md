@@ -153,8 +153,14 @@ up — a down/unreachable NFS server can't break boot (with fstab it could).
 
 **Interactive menu:** run `pos share nfs client` with no args for a menu
 (mount / persist / unmount / unpersist / list). Mountpoints are offered from
-existing mount-layout candidates with manual entry as fallback; unmount and
-unpersist tolerate already-absent targets instead of erroring.
+existing mount-layout candidates with manual entry as fallback — the picker
+also accepts the server-side export path as a "(as on server)" pick when it
+differs from your local layout, and `n=new` creates a fresh directory in
+place (y/N confirmed; a failure just returns to the picker). Unmount lists
+the active NFS mounts as `<mountpoint> ← <source>` picks and asks for
+confirmation before unmounting (with a typed fallback when nothing is
+mounted); unmount and unpersist tolerate already-absent targets instead of
+erroring.
 
 **Troubleshooting:**
 - "mount.nfs not found" → `nfs-common` isn't installed; `sudo apt install nfs-common`
@@ -285,7 +291,13 @@ fstab it could). `enable --now` arms the automount immediately.
 (enumerate / mount / persist / unmount / unpersist / list). Enter the server,
 an empty user tries guest enumeration first (with an auth retry on denial),
 then shares and mountpoints are offered as pickers with manual fallback —
-the account you authenticated with is reused for the mount.
+the account you authenticated with is reused for the mount. The mountpoint
+picker accepts `n=new` to create a fresh directory in place (y/N confirmed;
+a failure just returns to the picker); when the server is this machine, its
+underlying share directory is offered as a "(as on server)" pick too.
+Unmount lists the active CIFS mounts as `<mountpoint> ← <source>` picks and
+asks for confirmation before unmounting (typed fallback when nothing is
+mounted).
 
 ---
 

@@ -117,15 +117,26 @@ spawn() {
 }
 
 # ── Confirmation prompt ────────────────────────────────────────
+# confirm <prompt> [default] — Enter accepts the DISPLAYED DEFAULT ('y'
+# when omitted); explicit y/Y or n/N overrides; anything else (invalid
+# input, EOF/closed stdin) denies. EOF fails closed and rc-safely ($yn is
+# pre-initialized, so no set -u surprise on shells where read leaves it
+# unset). Destructive call sites pass explicit 'n'.
 confirm() {
-    local prompt="$1" default="${2:-y}" yn
-    if [ "$default" = "y" ]; then
-        read -rp "${prompt} [Y/n]: " yn
-        [[ -z "$yn" || "$yn" =~ ^[Yy] ]]
-    else
-        read -rp "${prompt} [y/N]: " yn
-        [[ "$yn" =~ ^[Yy] ]]
+    local prompt="$1" default="${2:-y}" hint="[y/N]" yn=""
+    local d="${default,,}"
+    if [ "$d" = "y" ]; then
+        hint="[Y/n]"
     fi
+    if ! read -rp "${prompt} ${hint}: " yn; then
+        return 1                        # EOF / closed stdin — deny
+    fi
+    case "$yn" in
+        [Yy]) return 0 ;;
+        [Nn]) return 1 ;;
+        "") [ "$d" = "y" ] ;;           # Enter → the displayed default
+        *) return 1 ;;                  # invalid input — deny
+    esac
 }
 
 # ── system.env loader ──────────────────────────────────────────

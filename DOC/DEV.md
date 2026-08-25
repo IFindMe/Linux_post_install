@@ -72,7 +72,7 @@ Sourced by most scripts. Key functions:
 | `run cmd` | Executes command, respects `$DRY_RUN` |
 | `spawn "msg" cmd` | Animated braille spinner + elapsed time |
 | `timer_start` / `timer_stop` | Elapsed time tracking |
-| `confirm "prompt"` | y/N prompt with optional default |
+| `confirm "prompt" [default]` | y/n prompt; Enter accepts the default (`y` when omitted) |
 
 ---
 
@@ -427,6 +427,10 @@ pos-communication-<platform> send <value> [--markdown]   # exit 0 on delivery
 ```
 
 then listing it in `NOTIFY_PLATFORM`. Platform keys map to tool names via `notify_sender_name()` in `lib/notify.sh` — the telegram platform key stays `telegram` but its tool is `pos-communication-telegram-sender`. `pos-communication-telegram-sender` already follows this (`--markdown` is an alias for `--parse-mode markdown`). No changes to `lib/notify.sh` are needed for a new platform.
+
+### Confirmation prompts
+
+`confirm()` rule: Enter accepts the displayed default; destructive call sites pass explicit `'n'`.
 
 ### Idempotency
 

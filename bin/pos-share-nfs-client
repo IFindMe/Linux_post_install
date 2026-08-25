@@ -21,7 +21,8 @@ Mount and manage NFS shares from remote servers (nfs-common).
 
 Commands:
   mount <server:export> <local-dir>    One-shot mount (creates local-dir if needed)
-  unmount <local-dir>                   Unmount the share
+  unmount <local-dir>                   Unmount the share (idempotent: rc 0 when
+                                        nothing is mounted)
   list                                  Show active NFS mounts
   persist <server:export> <local-dir>   Persistent mount via a systemd .mount unit
                                         (ordered after network-online.target)
@@ -72,11 +73,34 @@ cmd_unmount() {
     validate_dir "$where"
 
     if ! findmnt -r -n -o TARGET -t nfs,nfs4 2>/dev/null | grep -qxF "$where"; then
-        log "$where is not mounted as NFS — nothing to do"
+        # Idempotent no-op — rc 0 whether or not a unit exists. A persisted
+        # boot-time .mount that is not currently mounted usually means the
+        # unit failed or was stopped; say so instead of a bare nothing-to-do.
+        if persisted_nfs_at "$where"; then
+            warn "$where has a persistent NFS mount unit (${PERSISTED_UNIT}) — not currently mounted."
+            log "Check it: systemctl status ${PERSISTED_UNIT%.mount} — or remove the persistence: menu option 5 (pos share nfs-client unpersist $where)"
+        else
+            log "$where is not mounted as NFS — nothing to do"
+        fi
         return 0
     fi
     sudo umount "$where"
     log "Unmounted $where"
+}
+
+# Persisted Type=nfs/nfs4 unit declaring Where=<path>? Sets PERSISTED_UNIT.
+persisted_nfs_at() { # <path> — rc 0 persisted · rc 1 not persisted
+    local uf
+    PERSISTED_UNIT=""
+    for uf in "${UNIT_DIR}"/*.mount; do
+        [ -f "$uf" ] || continue
+        grep -q '^Type=nfs' "$uf" || continue
+        if [ "$(sed -n 's/^Where=//p' "$uf")" = "$1" ]; then
+            PERSISTED_UNIT="$(basename "$uf")"
+            return 0
+        fi
+    done
+    return 1
 }
 
 cmd_list() {
@@ -175,8 +199,17 @@ cmd_unpersist() {
     unit_file="${UNIT_DIR}/${unit}"
 
     if [ ! -f "$unit_file" ]; then
-        warn "No systemd mount unit for $where (${unit})"
-        exit 0
+        # Idempotent no-op — rc 0 whether or not anything is configured.
+        # Return, not exit: a bogus typed path reached from the menu must
+        # not kill the whole session. Mirror of cmd_unmount's guidance for
+        # a persisted unit under a non-escape-derived filename.
+        if persisted_nfs_at "$where"; then
+            warn "$where has a persistent NFS mount unit (${PERSISTED_UNIT}) under a non-standard unit name."
+            log "Check it: systemctl status ${PERSISTED_UNIT%.mount} — or find it in the list: pos share nfs-client list"
+        else
+            warn "No systemd mount unit for $where (${unit})"
+        fi
+        return 0
     fi
 
     sudo systemctl disable "$unit" 2>/dev/null || true
@@ -188,6 +221,105 @@ cmd_unpersist() {
 }
 
 # ── Interactive menu flows ─────────────────────────────────────
+
+# Mountpoint picker — local port of the share_pick primitive with exactly
+# two deltas: the hint line offers `n=new`, and typing n runs the
+# create-new-dir flow below. share_pick cannot intercept `n` (it filters on
+# it) and lib/menu-lib.sh is shared, so the fork lives here. Rendering of
+# numbered picks / text filter / 0=back is byte-identical to menu_pick.
+# stdout: chosen item text (or the freshly created dir) · rc 1 = back/cancel.
+pick_mountpoint() {
+    local prompt="$1"; shift
+    local -a items=("$@")
+    if [ "${#items[@]}" -eq 0 ]; then
+        return 1
+    fi
+    if ! [ -t 0 ]; then
+        printf '[!] Interactive picker needs a terminal.\n' >&2
+        return 1
+    fi
+    local filter="" ans i n total=${#items[@]} made
+    local -a shown=()
+    while true; do
+        shown=()
+        for ((i = 0; i < total; i++)); do
+            if [ -z "$filter" ] || [[ "${items[$i],,}" == *"${filter,,}"* ]]; then
+                shown+=("${items[$i]}")
+            fi
+        done
+        n=${#shown[@]}
+        {
+            echo
+            if [ -n "$filter" ]; then
+                printf -- "-- %d of %d match '%s' --\n" "$n" "$total" "$filter"
+            else
+                printf -- "-- %d available --\n" "$total"
+            fi
+            if [ "$n" -eq 0 ]; then
+                printf '[!] no matches — enter nothing or / to clear the filter\n' >&2
+            else
+                for ((i = 0; i < n; i++)); do
+                    printf ' %2d) %s\n' $((i + 1)) "${shown[$i]}"
+                done
+            fi
+        } >&2
+        if ! read -rp "${prompt} [1-${n}], n=new, text=filter, 0=back " ans; then
+            return 1                     # EOF — cancel
+        fi
+        case "$ans" in
+            "")  [ -z "$filter" ] || filter="" ; continue ;;
+            "/") filter="" ; continue ;;
+            0 | q | Q | b | B) return 1 ;;
+            n | N)
+                made="$(ask_new_mountpoint)" && { echo "$made"; return 0; }
+                continue                 # declined/invalid/mkdir-failed → redraw
+                ;;
+            *[!0-9]*)
+                filter="$ans"
+                continue
+                ;;
+            *)
+                if (( ans >= 1 && ans <= n )); then
+                    echo "${shown[$((ans - 1))]}"
+                    return 0
+                fi
+                echo "Unknown choice." >&2
+                ;;
+        esac
+    done
+}
+
+# Create-new-dir flow behind the picker's `n` key. Validates the shape
+# (absolute, no trailing slash), confirm-gates the creation, then mkdir -p.
+# Any decline, invalid input, EOF or mkdir failure is a warning + rc 1 —
+# the picker redraws, the tool never aborts.
+ask_new_mountpoint() { # stdout: created dir · rc 1 = cancelled/failed
+    # NOTE: runs inside $( ) from the picker — every display line MUST go to
+    # stderr (menu-lib contract: display → stderr, result → stdout).
+    local dir
+    dir="$(share_ask_value "New mountpoint (absolute path)")" || return 1
+    case "$dir" in
+        /*) ;;
+        *) warn "'$dir' is not an absolute path — must start with /" >&2; return 1 ;;
+    esac
+    case "$dir" in
+        */) warn "'$dir' must not end with a slash" >&2; return 1 ;;
+    esac
+    case "$dir" in
+        /etc|/boot|/bin|/sbin|/lib|/lib64|/usr|/var|/root|/home/*/.ssh*)
+            warn "Refusing system path as mountpoint" >&2
+            return 1
+            ;;
+    esac
+    confirm "Create mountpoint ${dir}?" n || return 1
+    if ! run sudo mkdir -p "$dir"; then
+        warn "Could not create ${dir}" >&2
+        return 1
+    fi
+    log "Created mount point $dir" >&2
+    echo "$dir"
+}
+
 menu_pick_export() { # <host> — stdout: server:export · rc 1 cancelled
     local host="$1" idx exp
     local -a exports=()
@@ -207,13 +339,26 @@ menu_pick_export() { # <host> — stdout: server:export · rc 1 cancelled
     esac
 }
 
-menu_ask_mountpoint() { # stdout: absolute path · rc 1 cancelled
-    local idx dir cand
-    local -a cands=()
-    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
-        if idx="$(share_pick "Mountpoint" "${cands[@]}")"; then
-            cand="${cands[$((idx - 1))]}"
-            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+menu_ask_mountpoint() { # [server_path] — stdout: absolute path · rc 1 cancelled
+    local srv="${1:-}" idx res cand dir known=0
+    local -a cands=() dirs=()
+    mapfile -t cands < <(share_folder_candidates)
+    for cand in "${cands[@]}"; do
+        dirs+=("${cand%% (*}")     # bare path (strip "(mounted fstype)" note)
+    done
+    # Same-as-server suggestion: unless the server-side path already exists
+    # among the local candidates, append it as a synthetic pick so mounting
+    # at a mirrored path is a normal selection.
+    if [ -n "$srv" ] && [ "${#dirs[@]}" -gt 0 ] &&
+        printf '%s\n' "${dirs[@]}" | grep -qxF -- "$srv"; then
+        known=1
+    fi
+    if [ -n "$srv" ] && [ "$known" -eq 0 ]; then
+        cands+=("${srv}   (as on server)")
+    fi
+    if [ "${#cands[@]}" -gt 0 ]; then
+        if res="$(pick_mountpoint "Mountpoint" "${cands[@]}")"; then
+            dir="${res%% (*}"              # strip "(as on server)"/mount note
             case "$dir" in
                 /etc|/boot|/bin|/sbin|/lib|/lib64|/usr|/var|/root|/home/*/.ssh*)
                     warn "Refusing system path as mountpoint"
@@ -242,7 +387,7 @@ menu_mount() {
     fi
 
     what="$(menu_pick_export "$host")" || return 1
-    where="$(menu_ask_mountpoint)" || return 1
+    where="$(menu_ask_mountpoint "${what#*:}")" || return 1   # ${what#*:} = server-side export path
 
     if [ "$mode" = "persist" ]; then
         cmd_persist "$what" "$where"
@@ -252,16 +397,30 @@ menu_mount() {
 }
 
 menu_unmount() {
-    local idx where
-    local -a targets=()
-    if mapfile -t targets < <(findmnt -r -n -o TARGET -t nfs,nfs4 2>/dev/null | tail -n +2) &&
-        [ "${#targets[@]}" -gt 0 ]; then
-        idx="$(share_pick "Unmount which NFS mount?" "${targets[@]}")" || return 1
-        where="${targets[$((idx - 1))]}"
-    else
+    local idx row src where i
+    local -a tgts=() srcs=() items=()
+    # Same enumeration source as the `list` view (findmnt -t nfs,nfs4),
+    # reduced to TARGET|SOURCE rows.
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        tgts+=("${row%%|*}")
+        srcs+=("${row#*|}")
+    done < <(findmnt -rn -o TARGET,SOURCE -t nfs,nfs4 2>/dev/null |
+        awk '{ src=$NF; $NF=""; sub(/[ \t]+$/, ""); print $0 "|" src }')
+    if [ "${#tgts[@]}" -eq 0 ]; then
+        log "No active NFS mounts"
         where="$(share_ask_value "Local mountpoint to unmount")" || return 1
         [ -n "$where" ] || return 1
+        cmd_unmount "$where"
+        return 0
     fi
+    for ((i = 0; i < ${#tgts[@]}; i++)); do
+        items+=("${tgts[$i]}  ← ${srcs[$i]}")
+    done
+    idx="$(share_pick "Unmount which NFS mount?" "${items[@]}")" || return 1
+    where="${tgts[$((idx - 1))]}"
+    src="${srcs[$((idx - 1))]}"
+    confirm "Unmount ${where} (from ${src})?" n || { log "Cancelled"; return 1; }
     cmd_unmount "$where"
 }
 
@@ -296,11 +455,13 @@ run_menu() {
             "Unmount a mounted share" \
             "Remove a persistent mount")" || return 0
         case "$choice" in
-            1) menu_mount ephemeral ;;
-            2) menu_mount persist ;;
-            3) cmd_list ;;
-            4) menu_unmount ;;
-            5) menu_unpersist ;;
+            # Handlers return nonzero on cancel/back — normalized here so a
+            # cancel can never reach set -e and kill the whole session.
+            1) menu_mount ephemeral || true ;;
+            2) menu_mount persist || true ;;
+            3) cmd_list || true ;;
+            4) menu_unmount || true ;;
+            5) menu_unpersist || true ;;
         esac
     done
 }

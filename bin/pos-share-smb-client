@@ -10,6 +10,7 @@ source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$
 SMB_CREDS_DIR="${SMB_CREDS_DIR:-/etc/samba/credentials}"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 SMB_PORT="${SMB_PORT:-445}"
+SMB_CONF="${SMB_CONF:-/etc/samba/smb.conf}"
 command -v mount.cifs &>/dev/null || err "mount.cifs not found (install cifs-utils)"
 command -v systemd-escape &>/dev/null || err "systemd-escape not found"
 
@@ -21,7 +22,8 @@ Mount and manage SMB/CIFS shares from remote servers (cifs-utils).
 
 Commands:
   mount <//server/share> <local-dir> [user]   One-shot mount (creates local-dir if needed)
-  unmount <local-dir>                          Unmount the share (idempotent)
+  unmount <local-dir>                          Unmount the share (idempotent: rc 0 when
+                                               nothing is mounted)
   list                                         Show active + persistent SMB mounts
   persist <//server/share> <local-dir> [user]  Persistent mount via systemd .mount + .automount
                                                units (mounts on first access — never blocks boot)
@@ -101,6 +103,23 @@ probe_server() {
 # Source currently cifs-mounted at $1 (empty string when none).
 mounted_src() {
     findmnt -rnf -t cifs -o SOURCE,TARGET 2>/dev/null | awk -v t="$1" '$2 == t {print $1; exit}'
+}
+
+# Persisted Type=cifs unit declaring Where=<path>? An idle automount never
+# appears in findmnt, so this is the only way to tell "idle automount" apart
+# from "nothing configured". Sets PERSISTED_UNIT to the unit file basename.
+persisted_smb_at() { # <path> — rc 0 persisted · rc 1 not persisted
+    local uf
+    PERSISTED_UNIT=""
+    for uf in "${UNIT_DIR}"/*.mount; do
+        [ -f "$uf" ] || continue
+        grep -q '^Type=cifs$' "$uf" || continue
+        if [ "$(sed -n 's/^Where=//p' "$uf")" = "$1" ]; then
+            PERSISTED_UNIT="$(basename "$uf")"
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Create the mountpoint if needed; refuse to silently shadow a non-empty dir.
@@ -243,13 +262,19 @@ cmd_unmount() { # <local-dir>
 
     src="$(mounted_src "$where")"
     if [ -z "$src" ]; then
-        log "Nothing mounted at $where"
-        exit 0
+        # Idempotent no-op — rc 0 whether or not anything is configured.
+        if persisted_smb_at "$where"; then
+            warn "$where is a persisted automount — not currently mounted."
+            log "Access it once (e.g.: ls $where) to auto-mount it, or remove the persistence first: menu option 5 (pos share smb-client unpersist $where)"
+        else
+            log "Nothing mounted at $where"
+        fi
+        return 0
     fi
     if ! out="$(sudo umount "$where" 2>&1)"; then
         if grep -qE "busy|in use" <<<"$out"; then
             warn "$where is busy (${src})"
-            confirm "Force a lazy unmount now?" y && { run sudo umount -l "$where"; log "Lazy-unmounted $where"; exit 0; }
+            confirm "Force a lazy unmount now?" y && { run sudo umount -l "$where"; log "Lazy-unmounted $where"; return 0; }
             err "Still mounted. Find the blocker: sudo lsof +D $where  (or fuser -vm $where)"
         fi
         err "Unmount failed: $out"
@@ -410,8 +435,18 @@ cmd_unpersist() { # <local-dir>
     auto_file="${UNIT_DIR}/${auto_unit}"
 
     if [ ! -f "$unit_file" ] && [ ! -f "$auto_file" ]; then
-        log "No persistent SMB mount for $where — nothing to do"
-        exit 0
+        # Idempotent no-op — rc 0 whether or not anything is configured.
+        # Return, not exit: a bogus typed path reached from the menu must
+        # not kill the whole session. A persisted unit can also live under
+        # a non-escape-derived filename (Where= still matches) — point at
+        # it instead of a bare nothing-to-do.
+        if persisted_smb_at "$where"; then
+            warn "$where has a persistent SMB mount unit (${PERSISTED_UNIT}) under a non-standard unit name."
+            log "Check it: systemctl status ${PERSISTED_UNIT%.mount} — or find it in the list: pos share smb-client list"
+        else
+            log "No persistent SMB mount for $where — nothing to do"
+        fi
+        return 0
     fi
 
     sudo systemctl disable "$auto_unit" 2>/dev/null || true
@@ -432,13 +467,149 @@ cmd_unpersist() { # <local-dir>
 }
 
 # ── Interactive menu flows ─────────────────────────────────────
-menu_ask_mountpoint() { # stdout: absolute path · rc 1 cancelled
-    local idx dir cand
-    local -a cands=()
-    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
-        if idx="$(share_pick "Mountpoint" "${cands[@]}")"; then
-            cand="${cands[$((idx - 1))]}"
-            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+
+# Best-effort resolution of the directory BEHIND share <$2> on host <$1>.
+# The underlying path of a remote SMB share is not remotely discoverable;
+# it is only locally knowable when THIS machine is the server (testparm
+# answers from the local config). Anything else stays unresolved (rc 1)
+# and the mountpoint picker silently skips the "(as on server)" suggestion.
+smb_server_path() { # <host> <share> — stdout: server-side dir · rc 1 = unresolved
+    local host="${1,,}" share="$2" name p ips=""
+    local -a names=("localhost" "127.0.0.1" "::1" "$(hostname)")
+    names+=("$(hostname -f 2>/dev/null || true)")
+    ips="$(hostname -I 2>/dev/null)" || true
+    # shellcheck disable=SC2086 — $ips is an intentional space-split IP list
+    for name in "${names[@]}" ${ips}; do
+        if [ "$name" = "$host" ]; then
+            share_require_bin testparm "" || return 1
+            [ -f "$SMB_CONF" ] || return 1
+            p="$(testparm -s --parameter-name=path --section-name="$share" "$SMB_CONF" 2>/dev/null)" || return 1
+            [ -n "$p" ] || return 1
+            printf '%s\n' "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Mountpoint picker — local port of the share_pick primitive with exactly
+# two deltas: the hint line offers `n=new`, and typing n runs the
+# create-new-dir flow below. share_pick cannot intercept `n` (it filters on
+# it) and lib/menu-lib.sh is shared, so the fork lives here. Rendering of
+# numbered picks / text filter / 0=back is byte-identical to menu_pick.
+# stdout: chosen item text (or the freshly created dir) · rc 1 = back/cancel.
+pick_mountpoint() {
+    local prompt="$1"; shift
+    local -a items=("$@")
+    if [ "${#items[@]}" -eq 0 ]; then
+        return 1
+    fi
+    if ! [ -t 0 ]; then
+        printf '[!] Interactive picker needs a terminal.\n' >&2
+        return 1
+    fi
+    local filter="" ans i n total=${#items[@]} made
+    local -a shown=()
+    while true; do
+        shown=()
+        for ((i = 0; i < total; i++)); do
+            if [ -z "$filter" ] || [[ "${items[$i],,}" == *"${filter,,}"* ]]; then
+                shown+=("${items[$i]}")
+            fi
+        done
+        n=${#shown[@]}
+        {
+            echo
+            if [ -n "$filter" ]; then
+                printf -- "-- %d of %d match '%s' --\n" "$n" "$total" "$filter"
+            else
+                printf -- "-- %d available --\n" "$total"
+            fi
+            if [ "$n" -eq 0 ]; then
+                printf '[!] no matches — enter nothing or / to clear the filter\n' >&2
+            else
+                for ((i = 0; i < n; i++)); do
+                    printf ' %2d) %s\n' $((i + 1)) "${shown[$i]}"
+                done
+            fi
+        } >&2
+        if ! read -rp "${prompt} [1-${n}], n=new, text=filter, 0=back " ans; then
+            return 1                     # EOF — cancel
+        fi
+        case "$ans" in
+            "")  [ -z "$filter" ] || filter="" ; continue ;;
+            "/") filter="" ; continue ;;
+            0 | q | Q | b | B) return 1 ;;
+            n | N)
+                made="$(ask_new_mountpoint)" && { echo "$made"; return 0; }
+                continue                 # declined/invalid/mkdir-failed → redraw
+                ;;
+            *[!0-9]*)
+                filter="$ans"
+                continue
+                ;;
+            *)
+                if (( ans >= 1 && ans <= n )); then
+                    echo "${shown[$((ans - 1))]}"
+                    return 0
+                fi
+                echo "Unknown choice." >&2
+                ;;
+        esac
+    done
+}
+
+# Create-new-dir flow behind the picker's `n` key. Validates the shape
+# (absolute, no trailing slash), confirm-gates the creation, then mkdir -p.
+# Any decline, invalid input, EOF or mkdir failure is a warning + rc 1 —
+# the picker redraws, the tool never aborts.
+ask_new_mountpoint() { # stdout: created dir · rc 1 = cancelled/failed
+    # NOTE: runs inside $( ) from the picker — every display line MUST go to
+    # stderr (menu-lib contract: display → stderr, result → stdout).
+    local dir
+    dir="$(share_ask_value "New mountpoint (absolute path)")" || return 1
+    case "$dir" in
+        /*) ;;
+        *) warn "'$dir' is not an absolute path — must start with /" >&2; return 1 ;;
+    esac
+    case "$dir" in
+        */) warn "'$dir' must not end with a slash" >&2; return 1 ;;
+    esac
+    case "$dir" in
+        /etc|/boot|/bin|/sbin|/lib|/lib64|/usr|/var|/root|/home/*/.ssh*)
+            warn "Refusing system path as mountpoint" >&2
+            return 1
+            ;;
+    esac
+    confirm "Create mountpoint ${dir}?" n || return 1
+    if ! run sudo mkdir -p "$dir"; then
+        warn "Could not create ${dir}" >&2
+        return 1
+    fi
+    log "Created mount point $dir" >&2
+    echo "$dir"
+}
+
+menu_ask_mountpoint() { # [server_path] — stdout: absolute path · rc 1 cancelled
+    local srv="${1:-}" idx res cand dir known=0
+    local -a cands=() dirs=()
+    mapfile -t cands < <(share_folder_candidates)
+    for cand in "${cands[@]}"; do
+        dirs+=("${cand%% (*}")     # bare path (strip "(mounted fstype)" note)
+    done
+    # Same-as-server suggestion: unless the server-side path already exists
+    # among the local candidates, append it as a synthetic pick so mounting
+    # at a mirrored path is a normal selection.
+    if [ -n "$srv" ] && [ "${#dirs[@]}" -gt 0 ] &&
+        printf '%s\n' "${dirs[@]}" | grep -qxF -- "$srv"; then
+        known=1
+    fi
+    if [ -n "$srv" ] && [ "$known" -eq 0 ]; then
+        cands+=("${srv}   (as on server)")
+    fi
+    if [ "${#cands[@]}" -gt 0 ]; then
+        if res="$(pick_mountpoint "Mountpoint" "${cands[@]}")"; then
+            dir="${res%% (*}"              # strip "(as on server)"/mount note
             case "$dir" in
                 /etc|/boot|/bin|/sbin|/lib|/lib64|/usr|/var|/root|/home/*/.ssh*)
                     warn "Refusing system path as mountpoint"
@@ -479,7 +650,11 @@ menu_mount() { # ephemeral|persist
     user="${SMB_AUTH_USER:-$user}"
 
     what="//${host}/${share}"
-    where="$(menu_ask_mountpoint)" || return 1
+    # Underlying server-side dir, when knowable (this machine is the server);
+    # empty → picker silently skips the "(as on server)" suggestion.
+    local srv_path=""
+    srv_path="$(smb_server_path "$host" "$share")" || srv_path=""
+    where="$(menu_ask_mountpoint "$srv_path")" || return 1
 
     if [ "$mode" = "persist" ]; then
         cmd_persist "$what" "$where" "$user"
@@ -489,19 +664,30 @@ menu_mount() { # ephemeral|persist
 }
 
 menu_unmount() {
-    local idx row where
-    local -a targets=()
-    if mapfile -t rows < <(findmnt -rnf -t cifs -o SOURCE,TARGET 2>/dev/null) &&
-        [ "${#rows[@]}" -gt 0 ]; then
-        for row in "${rows[@]}"; do
-            targets+=("${row##* }")     # last field of raw mode = TARGET
-        done
-        idx="$(share_pick "Unmount which SMB mount?" "${targets[@]}")" || return 1
-        where="${targets[$((idx - 1))]}"
-    else
+    local idx row src where i
+    local -a tgts=() srcs=() items=()
+    # Same enumeration source as the `list` view's active section
+    # (findmnt -t cifs), reduced to TARGET|SOURCE rows.
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        tgts+=("${row%%|*}")
+        srcs+=("${row#*|}")
+    done < <(findmnt -rn -o TARGET,SOURCE -t cifs 2>/dev/null |
+        awk '{ src=$NF; $NF=""; sub(/[ \t]+$/, ""); print $0 "|" src }')
+    if [ "${#tgts[@]}" -eq 0 ]; then
+        log "No active SMB mounts"
         where="$(share_ask_value "Local mountpoint to unmount")" || return 1
         [ -n "$where" ] || return 1
+        cmd_unmount "$where"
+        return 0
     fi
+    for ((i = 0; i < ${#tgts[@]}; i++)); do
+        items+=("${tgts[$i]}  ← ${srcs[$i]}")
+    done
+    idx="$(share_pick "Unmount which SMB mount?" "${items[@]}")" || return 1
+    where="${tgts[$((idx - 1))]}"
+    src="${srcs[$((idx - 1))]}"
+    confirm "Unmount ${where} (from ${src})?" n || { log "Cancelled"; return 1; }
     cmd_unmount "$where"
 }
 
@@ -535,11 +721,13 @@ run_menu() {
             "Unmount a mounted share" \
             "Remove a persistent mount")" || return 0
         case "$choice" in
-            1) menu_mount ephemeral ;;
-            2) menu_mount persist ;;
-            3) cmd_list ;;
-            4) menu_unmount ;;
-            5) menu_unpersist ;;
+            # Handlers return nonzero on cancel/back — normalized here so a
+            # cancel can never reach set -e and kill the whole session.
+            1) menu_mount ephemeral || true ;;
+            2) menu_mount persist || true ;;
+            3) cmd_list || true ;;
+            4) menu_unmount || true ;;
+            5) menu_unpersist || true ;;
         esac
     done
 }
