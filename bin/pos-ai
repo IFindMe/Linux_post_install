@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
 # POS_FLAGS: --provider --model --session --system --full --last
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini|openrouter, default gemini) | AI_API_KEY=secret:API key for the active provider | AI_MODEL=:Model id (default per provider) | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in; empty to reset)
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | AI_API_KEY=secret:API key for the active provider | AI_MODEL=:Model id (default per provider) | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -304,7 +304,10 @@ session_push() {
 # ── Terminal markdown rendering (tty-only; raw bytes otherwise) ──
 render_markdown() {
     local text="$1"
-    if [ ! -t 1 ]; then
+    # Check stdout tty OR controlling terminal (/dev/tty) — the shell hook
+    # (pos-ai-hook.sh) redirects stdout through tee, breaking [ -t 1 ], but
+    # /dev/tty remains writable in interactive shells.
+    if [ ! -t 1 ] && [ ! -w /dev/tty ]; then
         printf '%s\n' "$text"
         return 0
     fi
