@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–196 |
-| ## 3. Installation Flow | 197–250 |
-| ## 4. The `pos` CLI System | 251–324 |
-| ## 5. Shared Library — `lib/common.sh` | 325–356 |
-| ## 6. Docker Compose / ScaleTail | 357–399 |
-| ## 7. Optional Apps (`apps/`) | 400–429 |
-| ## 8. Entertainment Module | 430–443 |
-| ## 9. Systemd Services | 444–455 |
-| ## 10. Configuration Files | 456–482 |
-| ## 11. Coding Conventions | 483–515 |
-| ## 12. Development Workflow | 516–568 |
-| ## 13. Key File Quick Reference | 569–635 |
-| ## 14. Common Tasks for Agents | 636–669 |
+| ## 2. Directory Structure | 44–197 |
+| ## 3. Installation Flow | 198–251 |
+| ## 4. The `pos` CLI System | 252–326 |
+| ## 5. Shared Library — `lib/common.sh` | 327–358 |
+| ## 6. Docker Compose / ScaleTail | 359–401 |
+| ## 7. Optional Apps (`apps/`) | 402–431 |
+| ## 8. Entertainment Module | 432–445 |
+| ## 9. Systemd Services | 446–457 |
+| ## 10. Configuration Files | 458–484 |
+| ## 11. Coding Conventions | 485–517 |
+| ## 12. Development Workflow | 518–570 |
+| ## 13. Key File Quick Reference | 571–638 |
+| ## 14. Common Tasks for Agents | 639–672 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -61,7 +61,8 @@ Linux_post_install/
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
-│   ├── pos-ai-gemini                       # Chat with Google Gemini (ask, chat, models, sessions)
+│   ├── pos-ai-gemini                       # Chat with Google Gemini (ask, capture, chat, models, sessions)
+│   ├── pos-ai-openrouter                   # Chat with OpenRouter models (ask, capture, chat, models, sessions)
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
 │   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
 │   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
@@ -267,7 +268,8 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
-| ai | gemini | `pos-ai-gemini` | Chat with Google Gemini (ask, chat, models, sessions) |
+| ai | gemini | `pos-ai-gemini` | Chat with Google Gemini (ask, capture, chat, models, sessions) |
+| ai | openrouter | `pos-ai-openrouter` | Chat with OpenRouter models (ask, capture, chat, models, sessions) |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |
 | communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
 | communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
@@ -590,7 +592,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 295 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-ai-gemini` | 311 | Chat with Google Gemini (ask, chat, models, sessions) |
+| `bin/pos-ai-gemini` | 586 | Chat with Google Gemini (ask, capture, chat, models, sessions) |
+| `bin/pos-ai-openrouter` | 587 | Chat with OpenRouter models (ask, capture, chat, models, sessions) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
@@ -600,7 +603,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-stack` | 101 | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |
-| `bin/pos-docker-vbox` | 261 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
+| `bin/pos-docker-vbox` | 1125 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
 | `bin/pos-entertainment-disable` | 32 | Disable a plugin's auto-trigger (remove it from ENABLED) |
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
@@ -615,9 +618,9 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
-| `bin/pos-share-nfs-client` | 343 | Mount NFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-nfs-client` | 504 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 245 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
-| `bin/pos-share-smb-client` | 576 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-smb-client` | 764 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
@@ -627,7 +630,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 302 | Dynamic bash completion |
+| `completions/pos.bash` | 305 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

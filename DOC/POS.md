@@ -56,12 +56,14 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 ### ai
 
 **File:** `bin/pos-ai-gemini`
-**Purpose:** chat with Google Gemini via the REST API (`generativelanguage.googleapis.com`). One tool, three subcommands: `ask` (one-shot, scriptable), `chat` (interactive multi-turn REPL), and `models` (list `generateContent`-capable ids).
+**Purpose:** chat with Google Gemini via the REST API (`generativelanguage.googleapis.com`). One tool, four subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), and `models` (list `generateContent`-capable ids).
 
 | Command | Behavior |
 |---------|----------|
-| `pos ai gemini ask "<prompt>"` | One-shot; POSTs `generateContent` and prints **only** the answer text to stdout (pipe/script/Telegram-friendly). The prompt may also be piped in via stdin when no argument is given |
-| `pos ai gemini chat` | Interactive REPL with multi-turn history (the `contents[]` array is appended per turn); `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
+| `pos ai gemini ask "<prompt>"` | POSTs `generateContent` and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai/default.json`, capped at 40 turns; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
+| `pos ai gemini capture <cmd..>` | Run a command, capture its stdout+stderr to screen and to `~/.local/share/linux_post_install/last_cmd_output` for `--last`. Each capture overwrites the previous one. Returns the command's exit code |
+| `pos ai gemini chat` | Interactive REPL with multi-turn history (the `contents[]` array is appended per turn and persisted to the session file — `default` unless `--session`); replies are rendered like `ask` on a tty; `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
+| `pos ai gemini sessions` | Lists session files with turn counts; `sessions reset <name>` clears one (e.g. `reset default`) |
 | `pos ai gemini models` | Lists models that support `generateContent` and flags the configured default |
 | `pos ai gemini --model <id> …` | Overrides the model for one invocation |
 
@@ -77,6 +79,28 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 Precedence: `--model` flag > `AI_GEMINI_MODEL` env > config file > `gemini-2.5-flash`. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES).
 
 **Messaging bridges:** the Telegram and Matrix listeners forward non-command messages starting with `ai ` (case-insensitive) to `pos ai gemini ask` and reply with the model's answer — see [communication → listener](#communication). The Telegram bridge uses one session per chat (`telegram-<chat id>`), the Matrix bridge one per room (`matrix-<room>`).
+
+**File:** `bin/pos-ai-openrouter`
+**Purpose:** chat with OpenRouter models via the REST API (`openrouter.ai`). One tool, four subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), and `sessions` (list/clear sessions). OpenRouter provides access to hundreds of models from different providers through a single OpenAI-compatible API.
+
+| Command | Behavior |
+|---------|----------|
+| `pos ai openrouter ask "<prompt>"` | POSTs a chat completion and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai-openrouter/default.json`, capped at 40 turns; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
+| `pos ai openrouter capture <cmd..>` | Run a command, capture its stdout+stderr to screen and to `~/.local/share/linux_post_install/last_cmd_output` for `--last`. Each capture overwrites the previous one. Returns the command's exit code |
+| `pos ai openrouter chat` | Interactive REPL with multi-turn history (the `messages[]` array is appended per turn and persisted to the session file — `default` unless `--session`); replies are rendered like `ask` on a tty; `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
+| `pos ai openrouter sessions` | Lists session files with turn counts; `sessions reset <name>` clears one (e.g. `reset default`) |
+| `pos ai openrouter --model <id> …` | Overrides the model for one invocation |
+
+`pos ai openrouter` with no subcommand prints usage (never blocks on stdin). `ask`/`chat` time out after 60s per request; on a non-2xx response the API's `error.message` is shown and the tool exits non-zero.
+
+**Configuration** (`~/.config/linux_post_install/ai-openrouter.env`, edit with `pos config ai-openrouter`):
+
+| Key | Required | Default | Purpose |
+|-----|----------|---------|---------|
+| `OPENROUTER_API_KEY` | yes | — | API key from openrouter.ai (secret — masked in `pos config ai-openrouter`) |
+| `OPENROUTER_MODEL` | no | `openrouter/auto` | Model id used by `ask`/`chat`/`models` |
+
+Precedence: `--model` flag > `OPENROUTER_MODEL` env > config file > `openrouter/auto`. Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES).
 
 ### network
 
@@ -200,12 +224,12 @@ Global config keys:
 
 | Command | Behavior |
 |---------|----------|
-| `pos docker vbox create <name> [image] [--dir <path>]` | Creates a container from `ubuntu:22.04` (or the given image), bind-mounting `~/<name>` (or `--dir`, or `.` for cwd) as the working directory; prompts to enter immediately |
+| `pos docker vbox create <name> [image] [--dir <path>]… [--device </dev/node>]… [--gpu] [--port H:C]… [--cpus N] [--memory SIZE] [--network MODE]` | Creates a container from `ubuntu:22.04` (or the given image), bind-mounting `~/<name>` (or the first `--dir`; repeatable for extra same-path mounts) as the working directory; optional flags add GPU (`--gpus all`), device passthrough, port publishes and cpu/memory limits; prompts to enter immediately |
 | `pos docker vbox enter <name>` | Shell into the container (auto-starts it if stopped); detects the working dir from the container mounts |
 | `pos docker vbox start/stop/rm <name>` | Start, stop, or force-remove the container |
 | `pos docker vbox ls` | List vbox containers only (label filter) |
 
-**`pos docker vbox menu`** — bare invocation on a terminal (or the explicit `menu` subcommand) opens an interactive hub wrapping these verbs: list, create (asks name/image/host directory, y/N before anything is pulled), enter (hands the terminal to the container shell — `exit` returns to the menu), start/stop (pick a VM), and remove (y/N confirm naming the VM; `rm -f` removes the container, the host folder is kept). Arguments stay scriptable; without a terminal the menu fails closed with a pointer to these subcommands.
+**`pos docker vbox menu`** — bare invocation on a terminal (or the explicit `menu` subcommand) opens an interactive hub wrapping these verbs: list, create (categorized flow: name → category hub with live basket counts — image quick-picks, GPU/Nvidia with automatic toolkit/device-node detection, host devices, dir mounts, ports, CPU/RAM → review screen rendering the exact `docker create` plan before anything runs; 'n' returns to the hub with edits preserved), enter (hands the terminal to the container shell — `exit` returns to the menu), start/stop (pick a VM), and remove (y/N confirm naming the VM; `rm -f` removes the container, the host folder is kept). Arguments stay scriptable; without a terminal the menu fails closed with a pointer to these subcommands.
 
 The standalone `vbox` command still works and forwards to `pos docker vbox` (see [Legacy wrappers](#legacy-wrappers)).
 

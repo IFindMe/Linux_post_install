@@ -3,11 +3,13 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
-_pos_flags[ai-gemini]="--model --session --system"
+_pos_flags[ai-gemini]="--model --session --system --full --last"
+_pos_flags[ai-openrouter]="--model --session --system --full --last"
 _pos_flags[communication-matrix-listener]="--enable --disable --status --run"
 _pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
 _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
 _pos_flags[docker-stack]="-a --all"
+_pos_flags[docker-vbox]="--dir --gpu --device --port --cpus --memory --network"
 _pos_flags[entertainment-send]="--print --markdown"
 _pos_flags[media-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
 _pos_flags[media-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
@@ -23,7 +25,8 @@ _pos_flags[tree]="--depth"
 # GEN:END posflags
 # GEN:START possubcmds
 declare -A _pos_subcmds
-_pos_subcmds[ai-gemini]="ask chat models sessions"
+_pos_subcmds[ai-gemini]="ask capture chat models sessions"
+_pos_subcmds[ai-openrouter]="ask capture chat models sessions"
 _pos_subcmds[communication-matrix-sender]="send test login"
 _pos_subcmds[communication-scrcpy]="devices record tcpip connect push pull screenshot info"
 _pos_subcmds[communication-telegram-sender]="send test"
@@ -40,7 +43,7 @@ _pos_subcmds[system-backup]="menu"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
-declare -a _pos_config_scopes=(ai compose entertainment matrix notify scrcpy system telegram ytsync)
+declare -a _pos_config_scopes=(ai ai-openrouter compose entertainment matrix notify scrcpy system telegram ytsync)
 # GEN:END posconfigscopes
 
 _pos() {
