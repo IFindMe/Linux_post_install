@@ -412,12 +412,22 @@ cmd_ask() {
     # --last: append the most recent logged pos command output AFTER the
     # question, so the model diagnoses the real failure.
     if [ "$LAST_MODE" -eq 1 ]; then
-        local log_file=""
-        # Priority 1: most recent pos dispatcher log
-        log_file="$(newest_pos_log 2>/dev/null)" || true
-        # Priority 2: captured output from any command
-        if [ -z "$log_file" ] && [ -s "$LAST_CMD_OUTPUT_FILE" ]; then
-            log_file="$LAST_CMD_OUTPUT_FILE"
+        local log_file="" pos_log="" captured_log=""
+        pos_log="$(newest_pos_log 2>/dev/null)" || true
+        [ -s "$LAST_CMD_OUTPUT_FILE" ] && captured_log="$LAST_CMD_OUTPUT_FILE"
+        # Use whichever source is newer (auto-capture beats stale pos logs)
+        if [ -n "$pos_log" ] && [ -n "$captured_log" ]; then
+            local pos_age=$(( $(date +%s) - $(stat -c %Y "$pos_log") ))
+            local cap_age=$(( $(date +%s) - $(stat -c %Y "$captured_log") ))
+            if [ "$cap_age" -lt "$pos_age" ]; then
+                log_file="$captured_log"
+            else
+                log_file="$pos_log"
+            fi
+        elif [ -n "$captured_log" ]; then
+            log_file="$captured_log"
+        else
+            log_file="$pos_log"
         fi
         [ -n "$log_file" ] || err "No recent output found — run 'pos ai openrouter capture <cmd>' first, or pipe: cmd 2>&1 | pos ai openrouter ask \"what happened\""
         last_log_annotate "$log_file"
