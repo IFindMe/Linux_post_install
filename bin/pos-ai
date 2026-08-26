@@ -396,23 +396,37 @@ _prompt_run_command() {
     esac
 }
 
-# Simulate keyboard input to paste command onto the active terminal line.
-# Tries: xdotool (X11/Wayland) → tmux send-keys → history fallback.
+# Inject command for editing: clipboard copy → xdotool typing → tmux → history.
+# User pastes with Ctrl+Shift+V (X11) or Ctrl+V (Wayland/SSH).
 _inject_command() {
-    local cmd="$1"
-    if command -v xdotool >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-        # xdotool: simulate typing into the focused terminal
-        printf '%s\n' "Typing command — edit if needed, press Enter to run." >&2
-        printf '%s' "$cmd" | xdotool type --clearmodifiers --file -
-    elif [ -n "${TMUX:-}" ]; then
-        # tmux: send keys directly into the pane
-        printf '%s\n' "Typing command — edit if needed, press Enter to run." >&2
-        tmux send-keys "$cmd"
-    else
-        # Fallback: add to history, user presses ↑ to recall
-        history -s "$cmd" 2>/dev/null || true
-        printf '%s\n' "Command added to history — press ↑ to recall, edit, and run." >&2
+    local cmd="$1" injected=""
+    # 1. Clipboard (most universal — works over SSH via OSC52 in modern terminals)
+    if command -v xclip >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+        printf '%s' "$cmd" | xclip -selection clipboard && injected="clipboard"
+    elif command -v wl-copy >/dev/null 2>&1 && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        printf '%s' "$cmd" | wl-copy && injected="clipboard"
+    elif command -v xsel >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+        printf '%s' "$cmd" | xsel --clipboard --input && injected="clipboard"
     fi
+    if [ -n "$injected" ]; then
+        printf '%s\n' "Command copied to clipboard — paste with Ctrl+Shift+V, edit, Enter to run." >&2
+        return 0
+    fi
+    # 2. xdotool: simulate typing into focused terminal
+    if command -v xdotool >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        printf '%s\n' "Typing command — edit if needed, Enter to run." >&2
+        printf '%s' "$cmd" | xdotool type --clearmodifiers --file -
+        return 0
+    fi
+    # 3. tmux: send keys directly into the pane
+    if [ -n "${TMUX:-}" ]; then
+        printf '%s\n' "Typing command — edit if needed, Enter to run." >&2
+        tmux send-keys "$cmd"
+        return 0
+    fi
+    # 4. Fallback: add to history, user presses ↑ to recall
+    history -s "$cmd" 2>/dev/null || true
+    printf '%s\n' "Command added to history — press ↑ to recall, edit, and run." >&2
 }
 
 # ── Machine context appended to the built-in default prompt ─────

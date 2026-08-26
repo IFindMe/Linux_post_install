@@ -39,6 +39,7 @@ PACKAGES=(
     python3 python3-pip rclone
     ffmpeg
     libqrencode4 libgtk-3-0 adb
+    xdotool xclip
 )
 
 spawn "apt update" sudo apt update
