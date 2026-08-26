@@ -376,7 +376,7 @@ _prompt_run_command() {
     [ -w /dev/tty ] || return 0
     printf '\n%s\n' "Command detected:" >&2
     printf '  %s\n\n' "$cmd" >&2
-    printf 'Run this command? [Y/n] ' >&2
+    printf 'Run this command? [Y/n/e(dit)] ' >&2
     local choice
     IFS= read -r choice </dev/tty || choice=""
     case "${choice,,}" in
@@ -385,12 +385,34 @@ _prompt_run_command() {
             history -s "$cmd" 2>/dev/null || true
             printf '%s\n' "Command added to history — press ↑ to recall, edit, and run." >&2
             ;;
+        e|E)
+            _inject_command "$cmd"
+            ;;
         *)
             # Y or Enter: execute
             printf '%s\n' "$cmd"
             run eval "$cmd"
             ;;
     esac
+}
+
+# Simulate keyboard input to paste command onto the active terminal line.
+# Tries: xdotool (X11/Wayland) → tmux send-keys → history fallback.
+_inject_command() {
+    local cmd="$1"
+    if command -v xdotool >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        # xdotool: simulate typing into the focused terminal
+        printf '%s\n' "Typing command — edit if needed, press Enter to run." >&2
+        printf '%s' "$cmd" | xdotool type --clearmodifiers --file -
+    elif [ -n "${TMUX:-}" ]; then
+        # tmux: send keys directly into the pane
+        printf '%s\n' "Typing command — edit if needed, press Enter to run." >&2
+        tmux send-keys "$cmd"
+    else
+        # Fallback: add to history, user presses ↑ to recall
+        history -s "$cmd" 2>/dev/null || true
+        printf '%s\n' "Command added to history — press ↑ to recall, edit, and run." >&2
+    fi
 }
 
 # ── Machine context appended to the built-in default prompt ─────
