@@ -21,8 +21,8 @@
 | ## 10. Configuration Files | 464–490 |
 | ## 11. Coding Conventions | 491–523 |
 | ## 12. Development Workflow | 524–576 |
-| ## 13. Key File Quick Reference | 577–647 |
-| ## 14. Common Tasks for Agents | 648–681 |
+| ## 13. Key File Quick Reference | 577–648 |
+| ## 14. Common Tasks for Agents | 649–682 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -591,6 +591,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/usb-lib.sh` | 205 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`; EFI system partitions excluded; picker shows size/label/fs) — used by `pos system backup` + `pos media sync` |
 | `lib/share-lib.sh` | 318 | Domain layer for the share suite (usbsrv/smbclient record parsers, folder+mountpoint candidates, remote listings, service/firewall advisories; EOF-safe) + compat shims to `lib/menu-lib.sh` — used by all five `pos share *` tools |
 | `lib/menu-lib.sh` | 169 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
+| `lib/registry.sh` | 199 | Shared query API for POS tool metadata headers (`# POS_*:`) — `reg_scan`/`reg_list`/`reg_lookup`/`reg_each`/config scope helpers; used by `pos-tree` and `gen-docs.sh` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -638,7 +639,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-uninstall` | 415 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 680 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
-| `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
+| `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 307 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
