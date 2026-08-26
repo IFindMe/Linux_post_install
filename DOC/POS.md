@@ -70,6 +70,14 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 | `pos ai providers` | Lists available providers, their config status, and the active provider |
 | `pos ai --model <id> …` | Overrides the model for one invocation |
 | `pos ai --provider <name> …` | Selects the provider for one invocation (gemini\|openrouter) |
+| `pos ai alias` | Interactive alias manager (`bin/pos-ai-alias`): menu loop (create / edit / remove / list) that shows the alias table (Name/Provider/Session/Prompt, prompts truncated) between picks |
+| `pos ai alias create [name]` | Interactive 4-step wizard: alias name (leading letter, then letters/digits/-/_; unique across aliases), provider pick (from installed `lib/ai-providers/*.sh` adapters), session name (defaults to the alias name), optional system prompt (must not contain `\|`; warns above 500 chars); confirm defaults to yes, then the alias is saved |
+| `pos ai alias edit [name]` | Edits an existing alias (pick from list or pass the name): provider/session/prompt are re-prompted pre-filled with the current values — Enter keeps the current value; a per-field changed/unchanged summary is confirmed (default yes) before saving; nothing is written if nothing changed |
+| `pos ai alias remove [name]` | Removes an alias (pick from list or pass the name); the confirmation defaults to **no** and removal cannot be undone |
+| `pos ai alias list` | Non-interactive: prints all aliases as a Name/Provider/Session/Prompt table (prompts truncated at 42 chars) |
+| `pos ai alias show <name>` | Prints one alias's details including the resolved command: `pos ai <provider> ask --session <session>[ --system '<prompt>']` |
+
+Alias storage: records live in `~/.config/linux_post_install/ai-aliases.env` — one `name\|provider\|session\|system_prompt` line per alias, chmod 600, managed by the tool (do not hand-edit). Every create/edit/remove also rewrites `~/.config/linux_post_install/ai-aliases.sh` (chmod 644), which defines one shell alias per record — `alias <name>='pos ai <provider> ask --session <session>[ --system '<prompt>']'`. An empty session falls back to the alias name, prompts are single-quote-escaped, and the generated file is syntax-checked before it replaces the previous version. Source this file from your shell rc (e.g. `.bashrc`) to activate the aliases in new shells.
 
 Backward compatibility: `pos ai gemini` and `pos ai openrouter` still work as shorthands for `pos ai --provider gemini` and `pos ai --provider openrouter`.
 
