@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
 # POS_FLAGS: --provider --model --session --system --full --last
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | AI_API_KEY=secret:API key for the active provider | AI_MODEL=:Model id (default per provider) | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | AI_GEMINI_API_KEY=secret:Gemini API key from aistudio.google.com | OPENROUTER_API_KEY=secret:OpenRouter API key from openrouter.ai | AI_MODEL=:Model id (default per provider) | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -76,12 +76,10 @@ Options:
 
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
   AI_PROVIDER         Provider to use (gemini|openrouter, default gemini)
-  AI_API_KEY          API key for the active provider (secret)
+  AI_GEMINI_API_KEY   Gemini API key from aistudio.google.com
+  OPENROUTER_API_KEY  OpenRouter API key from openrouter.ai
   AI_MODEL            Model id (default depends on provider)
   AI_SYSTEM_PROMPT    Custom system prompt (overrides built-in; empty to reset)
-  AI_GEMINI_API_KEY   Legacy: Gemini API key fallback
-  AI_GEMINI_MODEL     Legacy: Gemini model fallback
-  OPENROUTER_API_KEY  Legacy: OpenRouter API key fallback
   OPENROUTER_MODEL    Legacy: OpenRouter model fallback
 
 Notes:
@@ -164,16 +162,11 @@ load_config() {
 resolve_key() {
     load_config
     local p="${PROVIDER:-gemini}"
-    # 1. Unified AI_API_KEY
-    if [ -n "${AI_API_KEY:-}" ]; then
-        return 0
-    fi
-    # 2. Provider-specific fallback
+    # Each provider has its own API key — set AI_API_KEY internally for adapters
     case "$p" in
         gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && export AI_API_KEY="$AI_GEMINI_API_KEY" && return 0 ;;
         openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && export AI_API_KEY="$OPENROUTER_API_KEY" && return 0 ;;
     esac
-    # 3. No key found — return 1 (require_key handles the error message)
     return 1
 }
 
@@ -181,10 +174,10 @@ require_key() {
     if ! resolve_key >/dev/null 2>&1; then
         local p="${PROVIDER:-gemini}"
         case "$p" in
-            gemini)     err "No Gemini API key — run 'pos config ai' or set AI_API_KEY / AI_GEMINI_API_KEY" ;;
-            openrouter) err "No OpenRouter API key — run 'pos config ai' or set AI_API_KEY / OPENROUTER_API_KEY" ;;
+            gemini)     err "No Gemini API key — run 'pos config ai' and set AI_GEMINI_API_KEY" ;;
+            openrouter) err "No OpenRouter API key — run 'pos config ai' and set OPENROUTER_API_KEY" ;;
         esac
-        err "No API key for provider '$p' — run 'pos config ai' or set AI_API_KEY"
+        err "No API key for provider '$p' — run 'pos config ai'"
     fi
 }
 
@@ -569,14 +562,10 @@ cmd_providers() {
         [ -n "$pmodel" ] || pmodel="unknown"
         # Check if API key exists for this provider
         configured="not configured"
-        if [ -n "${AI_API_KEY:-}" ]; then
-            configured="configured"
-        else
-            case "$name" in
-                gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && configured="configured" ;;
-                openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && configured="configured" ;;
-            esac
-        fi
+        case "$name" in
+            gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && configured="configured" ;;
+            openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && configured="configured" ;;
+        esac
         current=""
         [ "$name" = "$active" ] && current=" ← active"
         printf '  %-16s %s (model: %s)%s\n' "$name" "$configured" "$pmodel" "$current"
