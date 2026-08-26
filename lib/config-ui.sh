@@ -140,9 +140,18 @@ _cfg_plugin_keys() {
 # adapters' "# PROVIDER_CONFIG:" headers (lib/ai-providers/*.sh).
 _cfg_provider_keys() {
     local pdir line key desc flags
-    # Find lib/ai-providers/ relative to config-ui.sh
-    pdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ai-providers" 2>/dev/null && pwd)"
-    [ -d "$pdir" ] || return 0
+    # Repo layout: lib/config-ui.sh → ../lib/ai-providers/
+    # Installed layout: /usr/local/bin/config-ui.sh → ./ai-providers/
+    pdir=""
+    for candidate in \
+        "$(dirname "${BASH_SOURCE[0]}")/../lib/ai-providers" \
+        "$(dirname "${BASH_SOURCE[0]}")/ai-providers"; do
+        if [ -d "$candidate" ]; then
+            pdir="$(cd "$candidate" 2>/dev/null && pwd)"
+            break
+        fi
+    done
+    [ -n "$pdir" ] || return 0
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         # Format: KEY=flags:description (same as POS_CONFIG key fields)
