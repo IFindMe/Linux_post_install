@@ -25,6 +25,7 @@ _pos_flags[tree]="--depth"
 # GEN:END posflags
 # GEN:START possubcmds
 declare -A _pos_subcmds
+_pos_subcmds[ai-alias]="create edit remove list show"
 _pos_subcmds[ai-gemini]="ask chat models sessions capture"
 _pos_subcmds[ai-openrouter]="ask chat sessions capture"
 _pos_subcmds[communication-matrix-sender]="send test login"
@@ -41,7 +42,7 @@ _pos_subcmds[share-smb-client]="mount unmount list persist unpersist menu"
 _pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable menu"
 _pos_subcmds[system-backup]="menu"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
-_pos_subcmds[ai]="ask chat sessions capture models providers gemini openrouter"
+_pos_subcmds[ai]="ask chat sessions capture models providers alias gemini openrouter"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment matrix notify scrcpy system telegram ytsync)

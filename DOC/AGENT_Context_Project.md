@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–199 |
-| ## 3. Installation Flow | 200–253 |
-| ## 4. The `pos` CLI System | 254–330 |
-| ## 5. Shared Library — `lib/common.sh` | 331–362 |
-| ## 6. Docker Compose / ScaleTail | 363–405 |
-| ## 7. Optional Apps (`apps/`) | 406–435 |
-| ## 8. Entertainment Module | 436–449 |
-| ## 9. Systemd Services | 450–461 |
-| ## 10. Configuration Files | 462–488 |
-| ## 11. Coding Conventions | 489–521 |
-| ## 12. Development Workflow | 522–574 |
-| ## 13. Key File Quick Reference | 575–644 |
-| ## 14. Common Tasks for Agents | 645–678 |
+| ## 2. Directory Structure | 44–200 |
+| ## 3. Installation Flow | 201–254 |
+| ## 4. The `pos` CLI System | 255–332 |
+| ## 5. Shared Library — `lib/common.sh` | 333–364 |
+| ## 6. Docker Compose / ScaleTail | 365–407 |
+| ## 7. Optional Apps (`apps/`) | 408–437 |
+| ## 8. Entertainment Module | 438–451 |
+| ## 9. Systemd Services | 452–463 |
+| ## 10. Configuration Files | 464–490 |
+| ## 11. Coding Conventions | 491–523 |
+| ## 12. Development Workflow | 524–576 |
+| ## 13. Key File Quick Reference | 577–647 |
+| ## 14. Common Tasks for Agents | 648–681 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -61,6 +61,7 @@ Linux_post_install/
 ├── bin/                    # CLI tools — installed to /usr/local/bin/
 │   ├── pos                 # Main dispatcher — smart arg matching to pos-* scripts
 <!-- GEN:START tree -->
+│   ├── pos-ai-alias                        # manage AI agent aliases
 │   ├── pos-ai-gemini                       # Forward to pos ai --provider gemini (backward compat)
 │   ├── pos-ai-openrouter                   # Forward to pos ai --provider openrouter (backward compat)
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
@@ -270,6 +271,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | Category | Command | Script | Description |
 |----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
+| ai | alias | `pos-ai-alias` | manage AI agent aliases |
 | ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |
 | ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |
@@ -596,6 +598,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 295 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos-ai-alias` | 542 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
@@ -636,7 +639,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 680 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 112 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 306 | Dynamic bash completion |
+| `completions/pos.bash` | 307 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
