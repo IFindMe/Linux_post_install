@@ -411,7 +411,7 @@ _inject_command() {
     if [ -w /dev/tty ]; then
         local edited=""
         printf '\n' >&2
-        if edited="$(read -e -p "Command: " -i "$flat" </dev/tty 2>/dev/null)"; then
+        if read -e -p "Command: " -i "$flat" edited </dev/tty 2>/dev/null; then
             [ -n "$edited" ] || { printf '%s\n' "Empty command — skipped." >&2; return 0; }
             printf '%s\n' "$edited"
             run eval "$edited"
