@@ -396,35 +396,54 @@ _prompt_run_command() {
     esac
 }
 
-# Inject command for editing: clipboard copy → xdotool typing → tmux → history.
-# User pastes with Ctrl+Shift+V (X11) or Ctrl+V (Wayland/SSH).
+# Inject command for editing. Priority:
+#   1. read -e -i (bash native readline — works in ANY terminal, CLI or GUI)
+#   2. Clipboard (xclip/wl-copy — GUI only)
+#   3. xdotool typing (X11 GUI only)
+#   4. tmux send-keys
+#   5. History fallback (press ↑)
 _inject_command() {
-    local cmd="$1" injected=""
-    # 1. Clipboard (most universal — works over SSH via OSC52 in modern terminals)
-    if command -v xclip >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
-        printf '%s' "$cmd" | xclip -selection clipboard && injected="clipboard"
-    elif command -v wl-copy >/dev/null 2>&1 && [ -n "${WAYLAND_DISPLAY:-}" ]; then
-        printf '%s' "$cmd" | wl-copy && injected="clipboard"
+    local cmd="$1"
+    # Flatten multi-line commands for readline (read -i only handles single line)
+    local flat
+    flat="$(printf '%s' "$cmd" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')"
+    # 1. Bash readline: pre-fill the command on the line, user edits, Enter runs
+    if [ -w /dev/tty ]; then
+        local edited=""
+        printf '\n' >&2
+        if edited="$(read -e -p "Command: " -i "$flat" </dev/tty 2>/dev/null)"; then
+            [ -n "$edited" ] || { printf '%s\n' "Empty command — skipped." >&2; return 0; }
+            printf '%s\n' "$edited"
+            run eval "$edited"
+            return 0
+        fi
+        # read failed (Ctrl+C / EOF) — fall through
+    fi
+    # 2. Clipboard (GUI only)
+    local injected=""
+    if command -v wl-copy >/dev/null 2>&1 && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        printf '%s' "$cmd" | wl-copy && injected="wayland"
+    elif command -v xclip >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+        printf '%s' "$cmd" | xclip -selection clipboard && injected="x11"
     elif command -v xsel >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
-        printf '%s' "$cmd" | xsel --clipboard --input && injected="clipboard"
+        printf '%s' "$cmd" | xsel --clipboard --input && injected="x11"
     fi
     if [ -n "$injected" ]; then
-        printf '%s\n' "Command copied to clipboard — paste with Ctrl+Shift+V, edit, Enter to run." >&2
+        local key="Ctrl+V"; [ "$injected" = "x11" ] && key="Ctrl+Shift+V"
+        printf '%s\n' "Command copied to clipboard — paste with $key, edit, Enter to run." >&2
         return 0
     fi
-    # 2. xdotool: simulate typing into focused terminal
-    if command -v xdotool >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-        printf '%s\n' "Typing command — edit if needed, Enter to run." >&2
+    # 3. xdotool (X11 GUI only)
+    if command -v xdotool >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
         printf '%s' "$cmd" | xdotool type --clearmodifiers --file -
         return 0
     fi
-    # 3. tmux: send keys directly into the pane
+    # 4. tmux
     if [ -n "${TMUX:-}" ]; then
-        printf '%s\n' "Typing command — edit if needed, Enter to run." >&2
         tmux send-keys "$cmd"
         return 0
     fi
-    # 4. Fallback: add to history, user presses ↑ to recall
+    # 5. History fallback
     history -s "$cmd" 2>/dev/null || true
     printf '%s\n' "Command added to history — press ↑ to recall, edit, and run." >&2
 }
