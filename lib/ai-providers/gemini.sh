@@ -3,6 +3,10 @@
 # Provider-specific: API call, auth, response parsing, models list
 # Part of the R8 provider-agnostic architecture (lib/ai-providers/).
 
+# Provider-specific config variables (auto-discovered by pos config ai):
+# PROVIDER_CONFIG: AI_GEMINI_API_KEY=secret:Gemini API key from aistudio.google.com
+# PROVIDER_CONFIG: AI_GEMINI_MODEL=:Gemini model id (default: gemini-2.5-flash)
+
 provider_name() { printf 'Google Gemini'; }
 provider_default_model() { printf 'gemini-2.5-flash'; }
 

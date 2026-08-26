@@ -136,6 +136,33 @@ _cfg_plugin_keys() {
     return 0
 }
 
+# "*providers" expansion: keys declared by the installed AI provider
+# adapters' "# PROVIDER_CONFIG:" headers (lib/ai-providers/*.sh).
+_cfg_provider_keys() {
+    local pdir line key desc flags
+    # Find lib/ai-providers/ relative to config-ui.sh
+    pdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ai-providers" 2>/dev/null && pwd)"
+    [ -d "$pdir" ] || return 0
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        # Format: KEY=flags:description (same as POS_CONFIG key fields)
+        key="${line%%=*}"
+        [ -n "$key" ] || continue
+        [ -n "${_cfg_seen[$key]:-}" ] && continue
+        _cfg_seen[$key]=1
+        # Parse flags and description from the rest
+        local rest="${line#*=}" flags="" desc=""
+        if [[ "$rest" == *":"* ]]; then
+            flags="${rest%%:*}"
+            desc="${rest#*:}"
+        else
+            flags="$rest"
+        fi
+        printf '%s|%s|%s|\n' "$key" "$flags" "$desc"
+    done < <(grep '^# PROVIDER_CONFIG:' "$pdir"/*.sh 2>/dev/null | sed 's/^.*# PROVIDER_CONFIG:[[:space:]]*//' || true)
+    return 0
+}
+
 # Declared keys for a scope: "KEY|flags|description" lines, deduped.
 cfg_scope_keys() {
     local scope="$1" dir line s keystring field
@@ -155,7 +182,8 @@ cfg_scope_keys() {
             if [ -n "$field" ]; then
                 if [[ "$field" == "*"* ]]; then
                     case "$field" in
-                        *plugins*) _cfg_plugin_keys ;;
+                        *plugins*)  _cfg_plugin_keys ;;
+                        *providers*) _cfg_provider_keys ;;
                     esac
                 else
                     _cfg_key_line "$field"

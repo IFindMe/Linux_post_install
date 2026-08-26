@@ -3,6 +3,10 @@
 # Provider-specific: API call, auth, response parsing, models list
 # Part of the R8 provider-agnostic architecture (lib/ai-providers/).
 
+# Provider-specific config variables (auto-discovered by pos config ai):
+# PROVIDER_CONFIG: OPENROUTER_API_KEY=secret:OpenRouter API key from openrouter.ai
+# PROVIDER_CONFIG: OPENROUTER_MODEL=:OpenRouter model id (default: openrouter/auto)
+
 provider_name() { printf 'OpenRouter'; }
 provider_default_model() { printf 'openrouter/auto'; }
 

@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
 # POS_FLAGS: --provider --model --session --system --full --last
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | AI_GEMINI_API_KEY=secret:Gemini API key from aistudio.google.com | OPENROUTER_API_KEY=secret:OpenRouter API key from openrouter.ai | AI_MODEL=:Model id (default per provider) | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | *providers | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -76,11 +76,9 @@ Options:
 
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
   AI_PROVIDER         Provider to use (gemini|openrouter, default gemini)
-  AI_GEMINI_API_KEY   Gemini API key from aistudio.google.com
-  OPENROUTER_API_KEY  OpenRouter API key from openrouter.ai
-  AI_MODEL            Model id (default depends on provider)
   AI_SYSTEM_PROMPT    Custom system prompt (overrides built-in; empty to reset)
-  OPENROUTER_MODEL    Legacy: OpenRouter model fallback
+  Provider keys:      auto-discovered from lib/ai-providers/*.sh
+                      (AI_GEMINI_API_KEY, OPENROUTER_API_KEY, etc.)
 
 Notes:
   ask is terse by default: a built-in system instruction tells the model to
