@@ -34,7 +34,7 @@ _alias_load() {
         _ALIAS_NAMES+=("$_ln")
         _ALIAS_PROVIDERS+=("$_lp")
         _ALIAS_SESSIONS+=("$_ls")
-        _ALIAS_PROMPTS+=("$_lp2")
+        _ALIAS_PROMPTS+=("$(_alias_prompt_decode "$_lp2")")
         _ALIAS_TRUSTED+=("${_lr:-0}")
     done < <(grep -v '^[[:space:]]*#' "$ENV_FILE" | grep -v '^[[:space:]]*$' || true)
 }
@@ -48,7 +48,7 @@ _alias_save() {
         local i
         for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
             printf '%s|%s|%s|%s|%s\n' "${_ALIAS_NAMES[$i]}" "${_ALIAS_PROVIDERS[$i]}" \
-                "${_ALIAS_SESSIONS[$i]}" "${_ALIAS_PROMPTS[$i]}" "${_ALIAS_TRUSTED[$i]:-0}"
+                "${_ALIAS_SESSIONS[$i]}" "$(_alias_prompt_encode "${_ALIAS_PROMPTS[$i]}")" "${_ALIAS_TRUSTED[$i]:-0}"
         done
     } >"$ENV_FILE"
     chmod 600 "$ENV_FILE"
@@ -214,12 +214,52 @@ _alias_name_valid() {
 }
 
 _alias_prompt_truncate() {
-    local p="$1"
-    if [ ${#p} -gt 42 ]; then
-        printf '%s…' "${p:0:42}"
+    local p="${1//$'\n'/\\n}" max="${2:-42}"
+    if [ ${#p} -gt "$max" ]; then
+        printf '%s…' "${p:0:max}"
     else
         printf '%s' "$p"
     fi
+}
+
+# ── Prompt encoding for the line-based env file ────────────────
+# menu-lib's reader accepts literal multiline prompts; the ENV file is one
+# record per line, so prompts are escaped on save and unescaped on load:
+#   backslash → \\   newline → \n
+# ('|' is already rejected at input, so | never needs escaping.)
+_alias_prompt_encode() {
+    local s="$1" out="" c="" i
+    for ((i = 0; i < ${#s}; i++)); do
+        c="${s:i:1}"
+        if [ "$c" = '\' ]; then
+            out+='\\'
+        elif [ "$c" = $'\n' ]; then
+            out+='\n'
+        else
+            out+="$c"
+        fi
+    done
+    printf '%s' "$out"
+}
+
+# Decode is order-safe: \\n (escaped newline text) is backslash + n, which
+# decodes to literal '\n' only after both escapes are consumed in order.
+_alias_prompt_decode() {
+    local s="$1" out="" c="" n="" i=0
+    while [ "$i" -lt "${#s}" ]; do
+        c="${s:i:1}"
+        if [ "$c" = '\' ] && [ $((i + 1)) -lt "${#s}" ]; then
+            n="${s:i+1:1}"
+            if [ "$n" = 'n' ]; then
+                out+=$'\n'; i=$((i + 2)); continue
+            elif [ "$n" = '\' ]; then
+                out+='\'; i=$((i + 2)); continue
+            fi
+        fi
+        out+="$c"
+        i=$((i + 1))
+    done
+    printf '%s' "$out"
 }
 
 # ── Non-interactive output ─────────────────────────────────────
@@ -404,8 +444,7 @@ _alias_create() {
         printf '  Create alias '\''%s'\''?\n' "$name"
         printf '    Provider:  %s\n' "$provider"
         printf '    Session:   %s\n' "$session"
-        local dp="$prompt"
-        [ ${#dp} -gt 50 ] && dp="${dp:0:50}…"
+        local dp="$(_alias_prompt_truncate "$prompt" 50)"
         printf '    Prompt:    %s\n' "${dp:-<built-in>}"
         printf '    Trusted:   %s\n' "$([ "$trusted" = "1" ] && echo "yes (auto-execute)" || echo "no (confirm before run)")"
         echo "────────────────────────────────────────────"
@@ -508,12 +547,21 @@ _alias_edit() {
 
     # Edit prompt
     local tmp_prompt=""
+    local default_prompt="${_ALIAS_PROMPTS[$idx]}"
+    # Display-safe default (newlines → \n, truncated); Enter on it keeps the
+    # FULL original prompt — a long/multiline prompt must never be silently
+    # replaced by its truncated display form.
+    local default_display="$(_alias_prompt_truncate "$default_prompt" 80)"
     while true; do
         step 3 4 "System Prompt" >&2
-        local default_prompt="${_ALIAS_PROMPTS[$idx]}"
-        [ ${#default_prompt} -gt 80 ] && default_prompt="${default_prompt:0:80}…"
-        [ -z "$default_prompt" ] && default_prompt=""
-        tmp_prompt="$(menu_ask_value "System prompt" "$default_prompt")" || return 0
+        if ! tmp_prompt="$(menu_ask_value "System prompt" "$default_display")"; then
+            # EOF/cancel: empty-answer abort only when there IS a default;
+            # Enter on an empty original prompt keeps it empty and continues.
+            [ -z "$default_prompt" ] && tmp_prompt="" || return 0
+        fi
+        if [ "$tmp_prompt" = "$default_display" ]; then
+            tmp_prompt="$default_prompt"      # Enter → keep the full original
+        fi
         if [[ "$tmp_prompt" == *'|'* ]]; then
             warn "System prompt must not contain '|' characters" >&2
             tmp_prompt=""; continue
@@ -559,9 +607,9 @@ _alias_edit() {
         [ "$new_trusted" = "${_ALIAS_TRUSTED[$idx]:-0}" ] && tag_t="(unchanged)" || tag_t="(changed)"
         printf '    Provider:  %-12s %s\n' "$new_provider" "$tag_p"
         printf '    Session:   %-12s %s\n' "$new_session" "$tag_s"
-        local dp="$new_prompt"
+        local dp="$(_alias_prompt_truncate "$new_prompt" 40)"
         [ -z "$dp" ] && dp="<built-in>"
-        printf '    Prompt:    %s %s\n' "${dp:0:40}" "$tag_pr"
+        printf '    Prompt:    %s %s\n' "$dp" "$tag_pr"
         printf '    Trusted:   %-12s %s\n' "$([ "$new_trusted" = "1" ] && echo "yes" || echo "no")" "$tag_t"
         echo "────────────────────────────────────────────"
     } >&2

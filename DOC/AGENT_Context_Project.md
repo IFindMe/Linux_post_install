@@ -594,7 +594,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
 | `lib/usb-lib.sh` | 205 | Shared USB-storage detection + pick flow (detect/mount-offer/`usb_pick_root`; EFI system partitions excluded; picker shows size/label/fs) — used by `pos system backup` + `pos media sync` |
 | `lib/share-lib.sh` | 318 | Domain layer for the share suite (usbsrv/smbclient record parsers, folder+mountpoint candidates, remote listings, service/firewall advisories; EOF-safe) + compat shims to `lib/menu-lib.sh` — used by all five `pos share *` tools |
-| `lib/menu-lib.sh` | 169 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
+| `lib/menu-lib.sh` | 362 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default via raw-mode bracketed-paste-safe `menu_read_value`; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
 | `lib/registry.sh` | 199 | Shared query API for POS tool metadata headers (`# POS_*:`) — `reg_scan`/`reg_list`/`reg_lookup`/`reg_each`/config scope helpers; used by `pos-tree` and `gen-docs.sh` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
@@ -603,7 +603,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
 | `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-ai-alias` | 712 | manage AI agent aliases |
+| `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |

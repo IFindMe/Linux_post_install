@@ -25,6 +25,8 @@
 #   menu_run <title> <item...>          numbered menu loop → chosen index
 #   menu_pick <prompt> <item...>        type-to-filter picker → chosen index
 #   menu_ask_value <label> [default]    prompted value → entered text
+#   menu_read_value <label>             raw-mode bracketed-paste reader
+#   menu_redraw                         internal redraw (menu_read_value only)
 
 # ── Colors (guarded fallbacks; a sourced common.sh wins) ──────
 CYAN="${CYAN:-}"
@@ -150,15 +152,206 @@ menu_pick() {
     done
 }
 
+# ── Raw-mode value reader (bracketed-paste safe) ───────────────
+# Reads ONE value from the terminal in raw mode with bracketed paste enabled,
+# so a multi-line CTRL+V paste is inserted LITERALLY — embedded newlines are
+# data, never line terminators — and can never leak into the shell or a later
+# prompt as leftover keystrokes. A plain bash `read` is line-oriented: it
+# consumes only the first pasted line and the remaining lines sit in the tty
+# queue, where the next prompt (or the shell after this script exits) treats
+# them as input/commands. That is the paste bug this reader exists to prevent.
+#
+# Editing (single-line typing behaves like a normal prompt):
+#   Enter            submit the value (outside a paste)
+#   Backspace/DEL    delete the character before the cursor
+#   Left/Right       move the cursor; Home/End jump to start/end
+#   Delete           delete the character at the cursor
+#   Ctrl-U           clear the whole value
+#   Ctrl-D (empty)   EOF — cancel   ·   Ctrl-C/Z/\ — cancel · Up/Down — ignored
+#   Inside a bracketed paste the above are inert: text (incl. newlines) is
+#   inserted verbatim until the paste-end marker; a real Enter then submits.
+#
+# Display goes to stderr so callers may command-substitute the result:
+#   rc 0  value on stdout · rc 1  cancel/EOF/non-tty.
+menu_read_value() {
+    local label="$1"
+    local val="" state="" chunk="" ch="" esc="" seq="" esc_c=""
+    local paste=0 pos=0 submit=0 i=0 n=0
+
+    if ! state="$(stty -g 2>/dev/null)"; then
+        # not a terminal — plain stdin read; no paste protection is possible
+        IFS= read -r val || return 1
+        [ -n "$val" ] && printf '%s' "$val"
+        return 0
+    fi
+    if ! stty -icanon -echo -isig min 1 time 0 2>/dev/null; then
+        stty "$state" 2>/dev/null
+        IFS= read -r val || return 1
+        [ -n "$val" ] && printf '%s' "$val"
+        return 0
+    fi
+
+    local restore
+    restore() {
+        stty "$state" 2>/dev/null
+        printf '\033[?2004l' >&2
+    }
+    trap 'restore; trap - INT TERM; return 1' INT TERM
+
+    printf '\033[?2004h' >&2
+    printf '%s: ' "$label" >&2
+
+    # Next input byte as a 2-hex-digit string, returned via nameref. Uses
+    # dd|od, NOT bash's read builtin: read's tty path self-interrupts on an ETX
+    # byte even with ISIG disabled (SIGINTs the whole script on Ctrl-C, killing
+    # a cmdsubst caller). One dd per input burst (VMIN=1 returns all queued
+    # bytes), so pastes cost O(chunks), not O(per-byte forks). Runs in-place
+    # (never in a $( ) subshell) so its chunk/offset state persists.
+    #   byte <hexvar> — rc 0 = byte in hexvar, rc 1 = EOF/short.
+    local byte
+    byte() {
+        local -n _hex="$1"
+        if [ "$i" -ge "$n" ]; then
+            chunk="$(dd bs=4096 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+            [ -n "$chunk" ] || return 1
+            n=${#chunk}
+            i=0
+        fi
+        _hex="${chunk:i:2}"
+        i=$((i + 2))
+        return 0
+    }
+
+    while byte ch; do
+        case "$ch" in
+            1b)
+                seq=""
+                while byte esc; do
+                    printf -v esc_c '%b' "\\x$esc"
+                    seq+="$esc_c"
+                    case "$esc_c" in
+                        [A-Za-z~]) break ;;
+                    esac
+                done
+                case "$seq" in
+                    '[200~') paste=1 ;;
+                    '[201~') paste=0 ;;
+                    '[C') [ "$pos" -lt "${#val}" ] && { pos=$((pos + 1)); menu_redraw "$label" "$val" "$pos"; } ;;
+                    '[D') [ "$pos" -gt 0 ] && { pos=$((pos - 1)); menu_redraw "$label" "$val" "$pos"; } ;;
+                    '[H' | '[1~') pos=0; menu_redraw "$label" "$val" "$pos" ;;
+                    '[F' | '[4~') pos=${#val}; menu_redraw "$label" "$val" "$pos" ;;
+                    '[3~')
+                        if [ "$pos" -lt "${#val}" ]; then
+                            val="${val:0:pos}${val:pos+1}"
+                            menu_redraw "$label" "$val" "$pos"
+                        fi
+                        ;;
+                    '[A' | '[B') : ;;          # up/down: no history — ignore
+                esac
+                ;;
+            0a | 0d)
+                if [ "$paste" -eq 1 ]; then
+                    # newline inside a paste is literal data (paste as text);
+                    # echo the line break so CRLF pastes render at col 0
+                    printf -v ch '%b' "\\x$ch"
+                    val="${val:0:pos}${ch}${val:pos}"
+                    pos=$((pos + 1))
+                    printf '%s' "$ch" >&2
+                else
+                    submit=1
+                    break
+                fi
+                ;;
+            7f | 08)                        # Backspace/DEL
+                if [ "$pos" -gt 0 ]; then
+                    val="${val:0:pos-1}${val:pos}"
+                    pos=$((pos - 1))
+                    menu_redraw "$label" "$val" "$pos"
+                fi
+                ;;
+            03 | 1a | 1c)                   # Ctrl-C / Ctrl-Z / Ctrl-\ — cancel
+                submit=0
+                break
+                ;;
+            04)                             # Ctrl-D: EOF on empty → cancel
+                if [ -z "$val" ]; then
+                    submit=0
+                    break
+                fi
+                ;;
+            15)                             # Ctrl-U: clear
+                val=""; pos=0
+                menu_redraw "$label" "$val" "$pos"
+                ;;
+            *)
+                printf -v ch '%b' "\\x$ch"
+                val="${val:0:pos}${ch}${val:pos}"
+                pos=$((pos + 1))
+                if [ "$pos" -eq "${#val}" ]; then
+                    printf '%s' "$ch" >&2     # append in place — fast path
+                else
+                    menu_redraw "$label" "$val" "$pos"
+                fi
+                ;;
+        esac
+    done
+
+    trap - INT TERM
+    restore
+    printf '\n' >&2
+    if [ "$submit" -eq 0 ]; then
+        return 1
+    fi
+    printf '%s' "$val"
+    return 0
+}
+
+# ── Internal: redraw the whole input block (menu_read_value only) ──
+# The value may span several terminal rows (multiline paste); redraw clears
+# below the block start and reprints label + value, then repositions the
+# cursor to (row, col) of $3. Columns are counted in characters — wide CJK
+# glyphs can be off by one column (display-only; the stored value is exact).
+menu_redraw() {
+    local label="$1" val="$2" pos="$3"
+    local nl="" r="" c="" last="" ec="" d="" up=""
+    nl="${val//[^$'\n']/}"
+    [ "${#nl}" -gt 0 ] && printf '\033[%dA' "${#nl}" >&2
+    printf '\r\033[J' >&2
+    printf '%s: ' "$label" >&2
+    printf '%s' "$val" >&2
+    # target row/col of the cursor
+    last="${val:0:pos}"
+    r="${last//[^$'\n']/}"; r="${#r}"
+    last="${last##*$'\n'}"
+    c="${#last}"
+    # current cursor (end of block): end row = nl count; end col = after last
+    # newline (or 0 when the value ends with a newline)
+    ec=0; last="${val##*$'\n'}"
+    case "$val" in
+        *$'\n') ec=0 ;;
+        *) ec="${#last}" ;;
+    esac
+    [ "${#nl}" -gt "$r" ] && printf '\033[%dA' $(( ${#nl} - r )) >&2
+    d=$(( c - ec ))
+    if [ "$d" -gt 0 ]; then
+        printf '\033[%dC' "$d" >&2
+    elif [ "$d" -lt 0 ]; then
+        printf '\033[%dD' $(( -d )) >&2
+    fi
+    return 0
+}
+
 # ── Prompted value with optional default ───────────────────────
-# Prints "<label> [<default>]: " (read -p sends prompts to stderr) and echoes
-# the entered value or the default when the answer is empty.
-#   rc 0  value on stdout · rc 1  EOF, or empty answer with no default.
+# Prints "<label> [<default>]: " and echoes the entered value or the default
+# when the answer is empty. Uses the bracketed-paste-safe reader, so pasting
+# text — including multi-line pastes — inserts it literally instead of letting
+# leftover lines escape to the shell as commands.
+#   rc 0  value on stdout · rc 1  EOF/cancel, or empty answer with no default.
 menu_ask_value() {
     local label="$1" def="${2:-}" val pr="$1"
     [ -n "$def" ] && pr="$pr [$def]"
-    if ! read -rp "${pr}: " val; then
-        return 1                          # EOF — cancel
+    if ! val="$(menu_read_value "$pr")"; then
+        return 1                          # EOF / cancel
     fi
     if [ -z "$val" ]; then
         [ -n "$def" ] || return 1
