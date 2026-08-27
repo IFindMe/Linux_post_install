@@ -2,6 +2,7 @@
 set -euo pipefail
 # POS: communication telegram-listener — Telegram bot listener: map /command → bash, run them on chat messages
 # POS_FLAGS: --enable --disable --status --sync-commands --run
+# POS_SUBCMDS: prefix
 
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
@@ -10,8 +11,11 @@ API="https://api.telegram.org"
 SERVICE="pos-telegram-listener.service"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
-# System prompt for the "ai " bridge: replies are posted straight into the
-# chat, so ask for concise, emoji-friendly Telegram-style answers.
+# System prompt for the "<prefix> " AI bridge (default prefix: "ai"): replies
+# are posted straight into the chat, so ask for concise, emoji-friendly
+# Telegram-style answers. The trigger word is configurable via
+# TELEGRAM_AI_PREFIX in telegram.env ('pos communication telegram listener
+# prefix <word>' or 'pos config telegram').
 AI_SYSTEM="You are a friendly assistant chatting in a Telegram chat. Keep replies concise, use emojis and light formatting to make them lively, and never claim to send messages yourself."
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -32,8 +36,13 @@ Commands:
   --sync-commands
                Push the mapped /commands to the bot's "/" menu (setMyCommands)
   --run        Run the polling loop in the foreground (used by the service)
+  prefix [word]
+               Show (no argument) or set the AI-bridge trigger word — any
+               non-command message starting with '<word> ' is answered by
+               Gemini (default 'ai'). Restore the default with 'prefix ai'.
 
-Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — edit with 'pos config telegram')
+Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+         TELEGRAM_AI_PREFIX — edit with 'pos config telegram')
 Map:     $MAP_FILE — '/cmd=bash command' per line (optional
          '/cmd::short description=bash command' shown in the bot menu)
 
@@ -417,12 +426,52 @@ status() {
     fi
     echo "config:    $CONFIG_FILE"
     echo "map file:  $MAP_FILE"
+    load_config
+    echo "ai prefix: ${TELEGRAM_AI_PREFIX:-ai}"
     load_map
     echo "commands:  $MAP_N mapped"
     local i
     for ((i=1; i<=MAP_N; i++)); do
         printf '  %-16s -> %s%s\n' "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
     done
+}
+
+# ── AI-bridge trigger word (TELEGRAM_AI_PREFIX) ─────────────────
+# Show or set the word that starts the AI bridge in handle_message.
+# Default 'ai'; a word is [A-Za-z0-9][A-Za-z0-9_-]* (no spaces, no pattern
+# metacharacters — the match is a literal, case-insensitive prefix).
+prefix_cmd() {
+    local val="${1:-}"
+    if [ -z "$val" ]; then
+        load_config
+        echo "AI bridge prefix: ${TELEGRAM_AI_PREFIX:-ai}"
+        echo "Non-command messages starting with '<prefix> ' are answered by Gemini."
+        echo "Set it with: pos communication telegram listener prefix <word>  (default: ai)"
+        return 0
+    fi
+    if ! [[ "$val" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+        err "invalid prefix '$val' — use one word of letters, digits, '-' or '_' (no spaces)"
+    fi
+    mkdir -p "$CONFIG_DIR"
+    touch "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+    local tmp
+    tmp="$(mktemp)"
+    grep -vE '^TELEGRAM_AI_PREFIX=' "$CONFIG_FILE" > "$tmp" || true
+    printf 'TELEGRAM_AI_PREFIX=%s\n' "$val" >> "$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+    log "AI bridge prefix set to '$val' — messages starting with '$val ' go to Gemini (takes effect immediately, no restart)"
+}
+
+# Current AI-bridge trigger word. Like the command map, re-read per message so
+# 'prefix <word>' edits apply without restarting the daemon. Precedence:
+# telegram.env > env var from load_config (--run) > default 'ai'.
+ai_bridge_prefix() {
+    local v=""
+    [ -f "$CONFIG_FILE" ] && v="$(grep -E '^TELEGRAM_AI_PREFIX=' "$CONFIG_FILE" | tail -1 | sed 's/^[^=]*=//; s/^["'\'']//; s/["'\'']$//')" || true
+    [ -n "$v" ] || v="${TELEGRAM_AI_PREFIX:-ai}"
+    printf '%s' "$v"
 }
 
 # ── polling daemon ──────────────────────────────────────────────
@@ -460,14 +509,20 @@ handle_message() {
             reply "Mapped commands: $(map_cmds_list)" "$msg_id"
             return ;;
     esac
-    # AI bridge: non-command text starting with "ai " (case-insensitive) is
-    # forwarded to Gemini; the model's answer is replied verbatim. Each chat
-    # gets its own persistent memory session ("telegram-<chat_id>"); the exact
-    # prompt "ai /reset" clears it. Future non-command intents (e.g. reminders)
-    # slot in as more case arms here.
-    if [[ "$text" != /* && "$text" =~ ^[Aa][Ii][[:space:]](.*)$ ]]; then
+    # AI bridge: non-command text starting with "<prefix> " (default "ai",
+    # case-insensitive, configurable via 'pos communication telegram listener
+    # prefix <word>' / TELEGRAM_AI_PREFIX) is forwarded to Gemini; the model's
+    # answer is replied verbatim. Each chat gets its own persistent memory
+    # session ("telegram-<chat_id>"); the exact prompt "<prefix> /reset"
+    # clears it. Future non-command intents (e.g. reminders) slot in as more
+    # case arms here.
+    local prefix
+    prefix="$(ai_bridge_prefix)"
+    shopt -s nocasematch
+    if [[ "$text" != /* && "$text" =~ ^"$prefix"[[:space:]](.*)$ ]]; then
+        shopt -u nocasematch
         local prompt="${BASH_REMATCH[1]}" answer session
-        [ -n "$prompt" ] || { reply "Usage: ai <prompt> — e.g. 'ai what is Nvidia'" "$msg_id"; return; }
+        [ -n "$prompt" ] || { reply "Usage: $prefix <prompt> — e.g. '$prefix what is Nvidia'" "$msg_id"; return; }
         session="telegram-${TELEGRAM_CHAT_ID}"
         if [[ "$prompt" =~ ^/?reset[[:space:]]*$ ]]; then
             if pos ai gemini sessions reset "$session" >/dev/null 2>&1; then
@@ -477,7 +532,7 @@ handle_message() {
             fi
             return
         fi
-        log "ai: $prompt"
+        log "$prefix: $prompt"
         if [ -n "$reply_text" ]; then
             prompt="[Reply context — the message you are replying to]\n${reply_text}\n\n${prompt}"
         fi
@@ -489,6 +544,7 @@ handle_message() {
         fi
         return
     fi
+    shopt -u nocasematch
     value="$(map_get "$text")"
     if [ -z "$value" ]; then
         reply "Unknown command: $text (send /help)" "$msg_id"
@@ -561,6 +617,7 @@ case "${1:-}" in
     --status)  status ;;
     --sync-commands) sync_bot_commands ;;
     --run)     run_daemon ;;
+    prefix)    prefix_cmd "${2:-}" ;;
     "")        ui ;;
     *)         err "Unknown option '$1' (see --help)" ;;
 esac

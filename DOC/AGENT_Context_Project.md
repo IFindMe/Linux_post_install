@@ -609,7 +609,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| `bin/pos-communication-telegram-listener` | 566 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 623 | Telegram bot listener: map /command → bash, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
@@ -644,7 +644,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 692 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 307 | Dynamic bash completion |
+| `completions/pos.bash` | 308 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

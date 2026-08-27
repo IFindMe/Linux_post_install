@@ -150,6 +150,11 @@ you:    ai what is Nvidia
 bot:    NVIDIA is a company best known for GPUs...
 ```
 
+The trigger word is configurable via `pos communication telegram listener
+prefix <word>` (or `pos config telegram` → `TELEGRAM_AI_PREFIX`); it takes
+effect immediately, so with prefix `bot` you'd message `bot what is Nvidia`.
+`pos communication telegram listener prefix` shows the current value.
+
 The bridge lives in the Telegram listener's `handle_message` (it calls
 `pos ai ask`); only the owner chat is served, so your key stays private.
 Set a different model per message:
@@ -162,13 +167,14 @@ you:    ai --model gemini-2.5-flash explain a Raft consensus log
 
 Each chat has its own persistent session (`telegram-<chat id>` — independent
 of your terminal's `default` session), so the model
-remembers the conversation; `ai /reset` clears it. The listener passes a system
+remembers the conversation; `<prefix> /reset` clears it (with the default
+prefix that's `ai /reset`). The listener passes a system
 prompt telling the model it is answering in a Telegram chat — so it uses emojis
 and stays lively — and strips markdown (`**x**`, backticks, `#`, links…) from
 the reply before sending it, since messages go out as plain text.
 
-Replying to a message before `ai …` makes that message part of the prompt, so
-the model can answer about it:
+Replying to a message before `<prefix> …` makes that message part of the
+prompt, so the model can answer about it:
 
 ```
 you:    /status                    → bot: (system health output…)
@@ -237,9 +243,10 @@ truncated). To disable: `unset __POS_CAPTURE_ACTIVE`.
   model's context window; check `pos ai models`.
 - `API error 429` → rate limit (free tier); wait and retry, or use a different
   model.
-- Nothing in Telegram for `ai …` → the listener daemon must be running
-  (`pos communication telegram listener --status`); the bot token and owner
-  chat id must match `pos config telegram`.
+- Nothing in Telegram for `<prefix> …` (default `ai`) → the listener daemon
+  must be running (`pos communication telegram listener --status`); the bot
+  token and owner chat id must match `pos config telegram`. Check the current
+  trigger word with `pos communication telegram listener prefix`.
 
 ---
 
