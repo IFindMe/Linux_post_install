@@ -19,17 +19,21 @@ PROVIDER_DIR="$(dirname "$0")/../lib/ai-providers"
 _alias_load() {
     _ALIAS_NAMES=(); _ALIAS_PROVIDERS=(); _ALIAS_SESSIONS=(); _ALIAS_PROMPTS=()
     [ -f "$ENV_FILE" ] || return 0
-    while IFS='|' read -r name provider session prompt _rest; do
-        [[ "$name" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${name// /}" ]] && continue
-        name="${name## }"; name="${name%% }"
-        [[ "$name" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]] || continue
-        provider="${provider## }"; provider="${provider%% }"
-        session="${session## }"; session="${session%% }"
-        _ALIAS_NAMES+=("$name")
-        _ALIAS_PROVIDERS+=("$provider")
-        _ALIAS_SESSIONS+=("$session")
-        _ALIAS_PROMPTS+=("$prompt")
+    # NOTE: loop vars use _l* prefix to avoid dynamic-scope collision with
+    # callers that declare 'local name' (bash read clobbers the nearest
+    # matching variable up the call chain).
+    local _ln _lp _ls _lp2 _lr
+    while IFS='|' read -r _ln _lp _ls _lp2 _lr; do
+        [[ "$_ln" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${_ln// /}" ]] && continue
+        _ln="${_ln## }"; _ln="${_ln%% }"
+        [[ "$_ln" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]] || continue
+        _lp="${_lp## }"; _lp="${_lp%% }"
+        _ls="${_ls## }"; _ls="${_ls%% }"
+        _ALIAS_NAMES+=("$_ln")
+        _ALIAS_PROVIDERS+=("$_lp")
+        _ALIAS_SESSIONS+=("$_ls")
+        _ALIAS_PROMPTS+=("$_lp2")
     done < <(grep -v '^[[:space:]]*#' "$ENV_FILE" | grep -v '^[[:space:]]*$' || true)
 }
 
