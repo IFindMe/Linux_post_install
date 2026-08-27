@@ -18,6 +18,7 @@ PROVIDER_DIR="$(dirname "$0")/../lib/ai-providers"
 
 _alias_load() {
     _ALIAS_NAMES=(); _ALIAS_PROVIDERS=(); _ALIAS_SESSIONS=(); _ALIAS_PROMPTS=()
+    _ALIAS_TRUSTED=()
     [ -f "$ENV_FILE" ] || return 0
     # NOTE: loop vars use _l* prefix to avoid dynamic-scope collision with
     # callers that declare 'local name' (bash read clobbers the nearest
@@ -34,6 +35,7 @@ _alias_load() {
         _ALIAS_PROVIDERS+=("$_lp")
         _ALIAS_SESSIONS+=("$_ls")
         _ALIAS_PROMPTS+=("$_lp2")
+        _ALIAS_TRUSTED+=("${_lr:-0}")
     done < <(grep -v '^[[:space:]]*#' "$ENV_FILE" | grep -v '^[[:space:]]*$' || true)
 }
 
@@ -41,12 +43,12 @@ _alias_save() {
     mkdir -p "$(dirname "$ENV_FILE")"
     {
         printf '%s\n' "# AI aliases — managed by pos ai alias (do not hand-edit)"
-        printf '%s\n' "# Format: alias_name|provider|session_name|system_prompt"
+        printf '%s\n' "# Format: alias_name|provider|session_name|system_prompt|trusted"
         printf '%s\n' "#"
         local i
         for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
-            printf '%s|%s|%s|%s\n' "${_ALIAS_NAMES[$i]}" "${_ALIAS_PROVIDERS[$i]}" \
-                "${_ALIAS_SESSIONS[$i]}" "${_ALIAS_PROMPTS[$i]}"
+            printf '%s|%s|%s|%s|%s\n' "${_ALIAS_NAMES[$i]}" "${_ALIAS_PROVIDERS[$i]}" \
+                "${_ALIAS_SESSIONS[$i]}" "${_ALIAS_PROMPTS[$i]}" "${_ALIAS_TRUSTED[$i]:-0}"
         done
     } >"$ENV_FILE"
     chmod 600 "$ENV_FILE"
@@ -56,9 +58,10 @@ _alias_save() {
 # ONE shell word (printf %q) — shared by regen (stored form) and show
 # (copy-pasteable display form). Empty prompt → no --system fragment.
 _alias_quote_cmd() {
-    local provider="$1" session="$2" prompt="${3:-}" q_prompt
+    local provider="$1" session="$2" prompt="${3:-}" trusted="${4:-0}" q_prompt
     printf -v q_prompt '%q' "$prompt"
     printf 'pos ai %s ask --session %s' "$provider" "$session"
+    [ "$trusted" -eq 1 ] && printf ' --trust'
     [ -n "$prompt" ] && printf ' --system %s' "$q_prompt"
     return 0
 }
@@ -79,27 +82,27 @@ _alias_owned() {
     [ -f "$1" ] && sed -n '2p' "$1" 2>/dev/null | grep -q 'Managed by pos ai alias'
 }
 
-# Render one wrapper to stdout (args: name provider session prompt).
+# Render one wrapper to stdout (args: name provider session prompt [trusted]).
 # The exec line reuses _alias_quote_cmd's double-%q mechanics so the prompt
 # lands as exactly ONE shell word; "$@" passes user args through.
 _wrapper_render() {
-    local name="$1" provider="$2" session="$3" prompt="${4:-}"
+    local name="$1" provider="$2" session="$3" prompt="${4:-}" trusted="${5:-0}"
     cat <<WRAPPER_EOF
 #!/usr/bin/env bash
 # Managed by pos ai alias — regenerated automatically; hand-edits are overwritten.
 # Alias: ${name} | provider: ${provider} | session: ${session}
 set -euo pipefail
-exec $(_alias_quote_cmd "$provider" "$session" "$prompt") "\$@"
+exec $(_alias_quote_cmd "$provider" "$session" "$prompt" "$trusted") "\$@"
 WRAPPER_EOF
 }
 
 # Atomically install/refresh one wrapper. Skips the write when the rendered
 # content already matches (stable mtimes → sync idempotence is observable).
 # Pre-commit validation: bash -n on the rendered file; failure keeps previous.
-_wrapper_install() {   # name provider session prompt
+_wrapper_install() {   # name provider session prompt [trusted]
     local path="$(_wrapper_path "$1")" tmp
     tmp="$(mktemp "${HOME}/.local/bin/.pos-alias.XXXXXX")"
-    _wrapper_render "$1" "$2" "$3" "$4" >"$tmp"
+    _wrapper_render "$1" "$2" "$3" "$4" "${5:-0}" >"$tmp"
     if cmp -s "$tmp" "$path"; then
         rm -f "$tmp"
         return 0
@@ -156,7 +159,7 @@ _alias_sync() {
     mkdir -p "$bin_dir"
     for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
         _wrapper_install "${_ALIAS_NAMES[$i]}" "${_ALIAS_PROVIDERS[$i]}" \
-            "${_ALIAS_SESSIONS[$i]}" "${_ALIAS_PROMPTS[$i]}" || :
+            "${_ALIAS_SESSIONS[$i]}" "${_ALIAS_PROMPTS[$i]}" "${_ALIAS_TRUSTED[$i]:-0}" || :
     done
     for f in "$bin_dir"/*; do
         [ -f "$f" ] || continue
@@ -227,12 +230,14 @@ _alias_prompt_truncate() {
 _alias_table() {
     local count=${#_ALIAS_NAMES[@]} i
     [ "$count" -eq 0 ] && return 0
-    printf '  %-12s %-12s %-12s %s\n' "Name" "Provider" "Session" "Prompt"
-    printf '  %-12s %-12s %-12s %s\n' "------------" "------------" "------------" \
+    printf '  %-12s %-12s %-12s %-5s %s\n' "Name" "Provider" "Session" "Trust" "Prompt"
+    printf '  %-12s %-12s %-12s %-5s %s\n' "------------" "------------" "------------" "-----" \
         "------------------------------------------"
     for ((i = 0; i < count; i++)); do
-        printf '  %-12s %-12s %-12s %s\n' "${_ALIAS_NAMES[$i]}" "${_ALIAS_PROVIDERS[$i]}" \
-            "${_ALIAS_SESSIONS[$i]}" "$(_alias_prompt_truncate "${_ALIAS_PROMPTS[$i]}")"
+        local _tmark="—"
+        [ "${_ALIAS_TRUSTED[$i]:-0}" = "1" ] && _tmark="yes"
+        printf '  %-12s %-12s %-12s %-5s %s\n' "${_ALIAS_NAMES[$i]}" "${_ALIAS_PROVIDERS[$i]}" \
+            "${_ALIAS_SESSIONS[$i]}" "$_tmark" "$(_alias_prompt_truncate "${_ALIAS_PROMPTS[$i]}")"
     done
 }
 
@@ -247,6 +252,7 @@ _alias_show() {
     [ "$idx" = "-1" ] && err "Alias '$1' not found"
     local name="${_ALIAS_NAMES[$idx]}" provider="${_ALIAS_PROVIDERS[$idx]}"
     local session="${_ALIAS_SESSIONS[$idx]}" prompt="${_ALIAS_PROMPTS[$idx]}"
+    local trusted="${_ALIAS_TRUSTED[$idx]:-0}"
     [ -z "$session" ] && session="$name"
     printf '  %-12s %s\n' "Alias:" "$name"
     printf '  %-12s %s\n' "Provider:" "$provider"
@@ -257,9 +263,10 @@ _alias_show() {
         printf '  %-12s %s\n' "Wrapper:" "(not installed — ~/.local/bin not on PATH)"
     fi
     printf '  %-12s %s\n' "Prompt:" "${prompt:-$(printf '%s' "(default)")}"
+    printf '  %-12s %s\n' "Trusted:" "$([ "$trusted" = "1" ] && echo "yes (auto-executes commands)" || echo "no (prompts before running)")"
     # Show the resolved command (same quoting mechanism as the generated
     # wrapper — what users copy from here pastes into a shell verbatim)
-    printf '  %-12s %s\n' "Command:" "$(_alias_quote_cmd "$provider" "$session" "$prompt")"
+    printf '  %-12s %s\n' "Command:" "$(_alias_quote_cmd "$provider" "$session" "$prompt" "$trusted")"
 }
 
 # ── Interactive: main menu ─────────────────────────────────────
@@ -346,7 +353,7 @@ _alias_create() {
     # Step 3: Session name
     local session=""
     while true; do
-        step 3 4 "Session Name" >&2
+        step 3 5 "Session Name" >&2
         session="$(menu_ask_value "Session name" "$name")" || return 0
         if [ -n "$session" ] && ! _alias_name_valid "$session"; then
             warn "Invalid session '$session' — use letters, digits, hyphens, underscores" >&2
@@ -359,7 +366,7 @@ _alias_create() {
     # Step 4: System prompt
     local prompt=""
     while true; do
-        step 4 4 "System Prompt" >&2
+        step 4 5 "System Prompt" >&2
         prompt="$(menu_ask_value "System prompt (empty = use built-in)" "")" || return 0
         if [[ "$prompt" == *'|'* ]]; then
             warn "System prompt must not contain '|' characters" >&2
@@ -371,6 +378,26 @@ _alias_create() {
         break
     done
 
+    # Step 5: Trust level
+    local trusted="0"
+    while true; do
+        step 5 5 "Trust Level" >&2
+        {
+            echo "  TRUSTED aliases auto-execute commands from the agent"
+            echo "  WITHOUT asking for confirmation."
+            echo ""
+            echo "  Only enable this for aliases you fully trust with"
+            echo "  unrestricted shell access on this machine."
+        } >&2
+        local trust_ans
+        trust_ans="$(menu_ask_value "Trust this alias? (y/N)" "N")" || return 0
+        case "${trust_ans,,}" in
+            y|yes) trusted="1"; break ;;
+            n|no|"") trusted="0"; break ;;
+            *) warn "Please answer y or n" >&2 ;;
+        esac
+    done
+
     # Confirmation
     {
         echo "────────────────────────────────────────────"
@@ -380,6 +407,7 @@ _alias_create() {
         local dp="$prompt"
         [ ${#dp} -gt 50 ] && dp="${dp:0:50}…"
         printf '    Prompt:    %s\n' "${dp:-<built-in>}"
+        printf '    Trusted:   %s\n' "$([ "$trusted" = "1" ] && echo "yes (auto-execute)" || echo "no (confirm before run)")"
         echo "────────────────────────────────────────────"
     } >&2
     if ! confirm "Create alias '$name'?" y; then
@@ -392,6 +420,7 @@ _alias_create() {
     _ALIAS_PROVIDERS+=("$provider")
     _ALIAS_SESSIONS+=("$session")
     _ALIAS_PROMPTS+=("$prompt")
+    _ALIAS_TRUSTED+=("$trusted")
     _alias_save
     _alias_sync
     log "Alias '$name' created." >&2
@@ -438,16 +467,18 @@ _alias_edit() {
         local cp="${_ALIAS_PROMPTS[$idx]}"
         [ -z "$cp" ] && cp="(default)"
         printf '    Prompt:    %s\n' "$cp"
+        printf '    Trusted:   %s\n' "$([ "${_ALIAS_TRUSTED[$idx]:-0}" = "1" ] && echo "yes" || echo "no")"
         echo >&2
     } >&2
 
     local new_provider="${_ALIAS_PROVIDERS[$idx]}"
     local new_session="${_ALIAS_SESSIONS[$idx]}"
     local new_prompt="${_ALIAS_PROMPTS[$idx]}"
+    local new_trusted="${_ALIAS_TRUSTED[$idx]:-0}"
     local changed=0
 
     # Edit provider
-    step 1 3 "Provider" >&2
+    step 1 4 "Provider" >&2
     local pidx
     pidx="$(_alias_provider_pick)" || return 0
     local providers=()
@@ -464,7 +495,7 @@ _alias_edit() {
     # Edit session
     local tmp_session=""
     while true; do
-        step 2 3 "Session Name" >&2
+        step 2 4 "Session Name" >&2
         tmp_session="$(menu_ask_value "Session name" "$new_session")" || return 0
         if [ -n "$tmp_session" ] && ! _alias_name_valid "$tmp_session"; then
             warn "Invalid session '$tmp_session' — use letters, digits, hyphens, underscores" >&2
@@ -478,7 +509,7 @@ _alias_edit() {
     # Edit prompt
     local tmp_prompt=""
     while true; do
-        step 3 3 "System Prompt" >&2
+        step 3 4 "System Prompt" >&2
         local default_prompt="${_ALIAS_PROMPTS[$idx]}"
         [ ${#default_prompt} -gt 80 ] && default_prompt="${default_prompt:0:80}…"
         [ -z "$default_prompt" ] && default_prompt=""
@@ -498,6 +529,19 @@ _alias_edit() {
     fi
     [ "$new_prompt" != "${_ALIAS_PROMPTS[$idx]}" ] && changed=1
 
+    # Edit trust
+    step 4 4 "Trust Level" >&2
+    local cur_trust_label="no"
+    [ "$new_trusted" = "1" ] && cur_trust_label="yes"
+    local trust_ans
+    trust_ans="$(menu_ask_value "Trust this alias? (y/N)" "$cur_trust_label")" || return 0
+    case "${trust_ans,,}" in
+        y|yes) new_trusted="1" ;;
+        n|no|"") new_trusted="$new_trusted" ;;
+        *) warn "Please answer y or n" >&2 ;;
+    esac
+    [ "$new_trusted" != "${_ALIAS_TRUSTED[$idx]:-0}" ] && changed=1
+
     # No changes?
     if [ "$changed" -eq 0 ]; then
         log "No changes — nothing to save." >&2
@@ -508,15 +552,17 @@ _alias_edit() {
     {
         echo "────────────────────────────────────────────"
         printf '  Save changes to '\''%s'\''?\n' "$name"
-        local tag_p tag_s tag_pr
+        local tag_p tag_s tag_pr tag_t
         [ "$new_provider" = "${_ALIAS_PROVIDERS[$idx]}" ] && tag_p="(unchanged)" || tag_p="(changed)"
         [ "$new_session" = "${_ALIAS_SESSIONS[$idx]}" ] && tag_s="(unchanged)" || tag_s="(changed)"
         [ "$new_prompt" = "${_ALIAS_PROMPTS[$idx]}" ] && tag_pr="(unchanged)" || tag_pr="(changed)"
+        [ "$new_trusted" = "${_ALIAS_TRUSTED[$idx]:-0}" ] && tag_t="(unchanged)" || tag_t="(changed)"
         printf '    Provider:  %-12s %s\n' "$new_provider" "$tag_p"
         printf '    Session:   %-12s %s\n' "$new_session" "$tag_s"
         local dp="$new_prompt"
         [ -z "$dp" ] && dp="<built-in>"
         printf '    Prompt:    %s %s\n' "${dp:0:40}" "$tag_pr"
+        printf '    Trusted:   %-12s %s\n' "$([ "$new_trusted" = "1" ] && echo "yes" || echo "no")" "$tag_t"
         echo "────────────────────────────────────────────"
     } >&2
     if ! confirm "Save changes to '$name'?" y; then
@@ -528,6 +574,7 @@ _alias_edit() {
     _ALIAS_PROVIDERS[$idx]="$new_provider"
     _ALIAS_SESSIONS[$idx]="$new_session"
     _ALIAS_PROMPTS[$idx]="$new_prompt"
+    _ALIAS_TRUSTED[$idx]="$new_trusted"
     _alias_save
     _alias_sync
     log "Alias '$name' updated — the change is live on next invocation." >&2
@@ -610,8 +657,11 @@ usage() {
 Usage: pos ai alias [subcommand] [args]
 
 Manage named AI agent aliases — create, edit, remove, list, and show
-configured aliases. Each alias maps a name to a provider, session, and
-optional system prompt.
+configured aliases. Each alias maps a name to a provider, session,
+optional system prompt, and a trust level.
+
+Trusted aliases auto-execute the agent's commands without asking for
+confirmation. Only enable for aliases you fully trust with shell access.
 
 Subcommands:
   (no args)         Interactive menu

@@ -2,7 +2,7 @@
 set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
-# POS_FLAGS: --provider --model --session --system --full --last
+# POS_FLAGS: --provider --model --session --system --full --last --trust
 # POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -37,7 +37,7 @@ LEGACY_OPENROUTER_CONFIG="$HOME/.config/linux_post_install/ai-openrouter.env"
 
 usage() {
     cat <<EOF
-Usage: pos ai [subcommand] [--provider <name>] [--model <id>] [--session <name>] [--system <text>] [--full] [--last]
+Usage: pos ai [subcommand] [--provider <name>] [--model <id>] [--session <name>] [--system <text>] [--full] [--last] [--trust]
 
 AI assistant with pluggable providers (gemini, openrouter).
 
@@ -72,6 +72,9 @@ Options:
                     order: (1) newest pos log, (2) captured output from
                     'capture'. Notes on stderr which source was attached and
                     its age; warns when stale (>60 min).
+  --trust           Auto-execute agent-detected commands without confirmation.
+                    Used by trusted alias wrappers — do NOT pass manually
+                    unless you fully trust the agent's output.
   -h|--help         This help.
 
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
@@ -371,11 +374,17 @@ _extract_commands() {
 
 # ── Interactive prompt to run extracted commands ─────────────────
 _prompt_run_command() {
-    local cmd="$1"
+    local cmd="$1" trusted="${2:-0}"
     # Only prompt on interactive terminals with a controlling tty
     [ -w /dev/tty ] || return 0
     printf '\n%s\n' "Command detected:" >&2
     printf '  %s\n\n' "$cmd" >&2
+    if [ "$trusted" -eq 1 ]; then
+        printf '[trusted] Auto-executing (no confirmation)\n\n' >&2
+        printf '%s\n' "$cmd"
+        run eval "$cmd"
+        return
+    fi
     printf 'Run this command? [Y/n] ' >&2
     local choice
     IFS= read -r choice </dev/tty || choice=""
@@ -514,7 +523,7 @@ cmd_ask() {
     # Command execution prompt: extract commands from response and offer to run
     local _cmd
     _cmd="$(_extract_commands "$out")"
-    [ -n "$_cmd" ] && _prompt_run_command "$_cmd"
+    [ -n "$_cmd" ] && _prompt_run_command "$_cmd" "$TRUST_MODE"
 }
 
 cmd_chat() {
@@ -551,7 +560,7 @@ cmd_chat() {
         # Command execution prompt: extract commands from response and offer to run
         local _cmd
         _cmd="$(_extract_commands "$answer")"
-        [ -n "$_cmd" ] && _prompt_run_command "$_cmd"
+        [ -n "$_cmd" ] && _prompt_run_command "$_cmd" "$TRUST_MODE"
         printf '\n\n'
     done
     echo
@@ -622,6 +631,7 @@ cmd_providers() {
 MODEL_OVERRIDE=""
 FULL_MODE=0
 LAST_MODE=0
+TRUST_MODE=0
 PROVIDER=""
 cmd=""
 args=()
@@ -644,6 +654,8 @@ while [ $# -gt 0 ]; do
             FULL_MODE=1; shift ;;
         --last)
             LAST_MODE=1; shift ;;
+        --trust)
+            TRUST_MODE=1; shift ;;
         -*) err "Unknown option '$1' (see --help)" ;;
         *)
             if [ -z "$cmd" ]; then

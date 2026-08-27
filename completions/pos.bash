@@ -20,7 +20,7 @@ _pos_flags[share-usb-server]="--ls --ls-shared --share --unshare --auto-share --
 _pos_flags[system-backup]="--service --no-encrypt"
 _pos_flags[system-schedule]="--dry-run"
 _pos_flags[system-uninstall]="--yes --config --data"
-_pos_flags[ai]="--provider --model --session --system --full --last"
+_pos_flags[ai]="--provider --model --session --system --full --last --trust"
 _pos_flags[tree]="--depth"
 # GEN:END posflags
 # GEN:START possubcmds
