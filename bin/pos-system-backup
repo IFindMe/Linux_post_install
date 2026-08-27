@@ -4,6 +4,7 @@ set -euo pipefail
 # POS_FLAGS: --service --no-encrypt
 # POS_SUBCMDS: menu
 # POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram) — shared by backup, firewall, share nfs client/server
+# POS_DEPS: tar
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"

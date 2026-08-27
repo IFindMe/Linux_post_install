@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–200 |
-| ## 3. Installation Flow | 201–254 |
-| ## 4. The `pos` CLI System | 255–332 |
-| ## 5. Shared Library — `lib/common.sh` | 333–364 |
-| ## 6. Docker Compose / ScaleTail | 365–407 |
-| ## 7. Optional Apps (`apps/`) | 408–437 |
-| ## 8. Entertainment Module | 438–451 |
-| ## 9. Systemd Services | 452–463 |
-| ## 10. Configuration Files | 464–490 |
-| ## 11. Coding Conventions | 491–523 |
-| ## 12. Development Workflow | 524–576 |
-| ## 13. Key File Quick Reference | 577–648 |
-| ## 14. Common Tasks for Agents | 649–682 |
+| ## 2. Directory Structure | 44–204 |
+| ## 3. Installation Flow | 205–258 |
+| ## 4. The `pos` CLI System | 259–336 |
+| ## 5. Shared Library — `lib/common.sh` | 337–368 |
+| ## 6. Docker Compose / ScaleTail | 369–411 |
+| ## 7. Optional Apps (`apps/`) | 412–441 |
+| ## 8. Entertainment Module | 442–455 |
+| ## 9. Systemd Services | 456–467 |
+| ## 10. Configuration Files | 468–494 |
+| ## 11. Coding Conventions | 495–527 |
+| ## 12. Development Workflow | 528–580 |
+| ## 13. Key File Quick Reference | 581–652 |
+| ## 14. Common Tasks for Agents | 653–686 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -72,6 +72,7 @@ Linux_post_install/
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
 │   ├── pos-docker-ps                       # Enhanced container overview (health, IPs, ports, uptime)
+│   │   [deps: docker]
 │   ├── pos-docker-stack                    # Containers grouped by compose stack (project); standalone group; -a/--all includes stopped
 │   ├── pos-docker-vbox                     # Disposable Docker-based VMs (create/enter/start/stop/rm/ls)
 │   ├── pos-entertainment-config            # Show or edit the entertainment config (ENABLED auto-trigger list, weather location)
@@ -82,9 +83,11 @@ Linux_post_install/
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
 │   ├── pos-media-sync                      # Incremental Music → USB sync (mp3/mp4, add/update only)
+│   │   [deps: lsblk jq]
 │   ├── pos-media-ytsync                    # Incrementally sync YouTube channels/playlists into ~/Videos
 │   ├── pos-network-checkport               # Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
 │   ├── pos-network-download                # aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
+│   │   [deps: aria2c jq curl]
 │   ├── pos-network-hotspot                 # Wi-Fi hotspot via create_ap + wihotspot-gui
 │   ├── pos-network-ip                      # Show interfaces, routes, public IP + location
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
@@ -95,6 +98,7 @@ Linux_post_install/
 │   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
+│   │   [deps: tar]
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
@@ -268,50 +272,50 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 
 ### Available Commands
 
-| Category | Command | Script | Description |
-|----------|---------|--------|-------------|
 <!-- GEN:START dispatch -->
-| ai | alias | `pos-ai-alias` | manage AI agent aliases |
-| ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |
-| ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |
-| communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |
-| communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |
-| communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |
-| communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |
-| docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
-| docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |
-| docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) |
-| docker | stack | `pos-docker-stack` | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |
-| docker | vbox | `pos-docker-vbox` | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
-| entertainment | config | `pos-entertainment-config` | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
-| entertainment | disable | `pos-entertainment-disable` | Disable a plugin's auto-trigger (remove it from ENABLED) |
-| entertainment | enable | `pos-entertainment-enable` | Enable an auto-trigger for a plugin on a schedule |
-| entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via the configured notify platforms |
-| entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |
-| media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |
-| media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |
-| media | sync | `pos-media-sync` | Incremental Music → USB sync (mp3/mp4, add/update only) |
-| media | ytsync | `pos-media-ytsync` | Incrementally sync YouTube channels/playlists into ~/Videos |
-| network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| network | download | `pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
-| network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |
-| network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |
-| network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |
-| share | nfs-client | `pos-share-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |
-| share | nfs-server | `pos-share-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
-| share | smb-client | `pos-share-smb-client` | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
-| share | smb-server | `pos-share-smb-server` | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
-| share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |
-| system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| system | firewall | `pos-system-firewall` | Interactive UFW management |
-| system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
-| system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
-| system | uninstall | `pos-system-uninstall` | Remove pos toolkit binaries, services, shell integration, config, and data |
-|  | ai | `pos-ai` | AI assistant: ask, chat, sessions, capture, models, providers |
-|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
-|  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |
+| Category | Command | Script | Description | Deps | Examples |
+|----------|---------|--------|-------------|------|----------|
+| ai | alias | `pos-ai-alias` | manage AI agent aliases |  |  |
+| ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |  |  |
+| ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |  |  |
+| communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |  |  |
+| communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |  |  |
+| communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |  |  |
+| communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |  |  |
+| communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |  |  |
+| docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |  |  |
+| docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |  |  |
+| docker | ps | `pos-docker-ps` | Enhanced container overview (health, IPs, ports, uptime) | docker |  |
+| docker | stack | `pos-docker-stack` | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |  |  |
+| docker | vbox | `pos-docker-vbox` | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |  |  |
+| entertainment | config | `pos-entertainment-config` | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |  |  |
+| entertainment | disable | `pos-entertainment-disable` | Disable a plugin's auto-trigger (remove it from ENABLED) |  |  |
+| entertainment | enable | `pos-entertainment-enable` | Enable an auto-trigger for a plugin on a schedule |  |  |
+| entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via the configured notify platforms |  |  |
+| entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |  |  |
+| media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |  |  |
+| media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |  |  |
+| media | sync | `pos-media-sync` | Incremental Music → USB sync (mp3/mp4, add/update only) | lsblk jq | pos media sync --mp3 → Sync only MP3 files to USB · pos media sync --mp4 --dry-run → Preview MP4 sync without copying |
+| media | ytsync | `pos-media-ytsync` | Incrementally sync YouTube channels/playlists into ~/Videos |  |  |
+| network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |  |  |
+| network | download | `pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) | aria2c jq curl | pos network download add https://example.com/file.zip → Enqueue an HTTP download (auto-starts daemon) · pos network download status → Daemon health + global transfer stats · pos network download watch → Live progress view |
+| network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |  |  |
+| network | ip | `pos-network-ip` | Show interfaces, routes, public IP + location |  |  |
+| network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |  |  |
+| share | nfs-client | `pos-share-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |  |  |
+| share | nfs-server | `pos-share-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |  |  |
+| share | smb-client | `pos-share-smb-client` | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |  |  |
+| share | smb-server | `pos-share-smb-server` | Manage the Samba server (status, share/unshare exports, users, enable/disable) |  |  |
+| share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |  |  |
+| ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |  |  |
+| system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) | tar |  |
+| system | firewall | `pos-system-firewall` | Interactive UFW management |  |  |
+| system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |  |  |
+| system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |  |  |
+| system | uninstall | `pos-system-uninstall` | Remove pos toolkit binaries, services, shell integration, config, and data |  |  |
+|  | ai | `pos-ai` | AI assistant: ask, chat, sessions, capture, models, providers |  |  |
+|  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |  |  |
+|  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |  |  |
 <!-- GEN:END dispatch -->
 
 ### Legacy Wrappers
@@ -598,8 +602,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 50 | Boot-time feature (moved from `bin/`, flag-gated service) |
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 295 | CLI dispatcher with smart arg matching + logging + category help |
-| `bin/pos-ai-alias` | 542 | manage AI agent aliases |
+| `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos-ai-alias` | 658 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
@@ -609,7 +613,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
-| `bin/pos-docker-ps` | 125 | Enhanced container overview (health, IPs, ports, uptime) |
+| `bin/pos-docker-ps` | 126 | Enhanced container overview (health, IPs, ports, uptime) |
 | `bin/pos-docker-stack` | 101 | Containers grouped by compose stack (project); standalone group; -a/--all includes stopped |
 | `bin/pos-docker-vbox` | 1125 | Disposable Docker-based VMs (create/enter/start/stop/rm/ls) |
 | `bin/pos-entertainment-config` | 143 | Show or edit the entertainment config (ENABLED auto-trigger list, weather location) |
@@ -619,10 +623,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
-| `bin/pos-media-sync` | 216 | Incremental Music → USB sync (mp3/mp4, add/update only) |
+| `bin/pos-media-sync` | 219 | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | `bin/pos-media-ytsync` | 1191 | Incrementally sync YouTube channels/playlists into ~/Videos |
 | `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 1104 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 1108 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
@@ -632,11 +636,11 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 292 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-backup` | 293 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
-| `bin/pos-system-uninstall` | 415 | Remove pos toolkit binaries, services, shell integration, config, and data |
+| `bin/pos-system-uninstall` | 435 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 680 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |

@@ -4,6 +4,7 @@ set -euo pipefail
 # POS_FLAGS: --depth
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/registry.sh" 2>/dev/null || source "$(dirname "$0")/registry.sh"
 
 usage() {
     cat <<EOF
@@ -44,12 +45,17 @@ add() {
     meta["$path"]="$type|$desc"
 }
 
-for f in "$self"/pos-*; do
-    [ -x "$f" ] || continue
-    name="${f##*/pos-}"
-    desc="$(sed -n '/^# POS: /{s/^# POS: //;p;q}' "$f")"
-    desc="${desc#*— }"
-    sc="$(sed -n '/^# POS_SUBCMDS: /{s/^# POS_SUBCMDS: //;p;q}' "$f")"
+reg_scan "$self"
+
+for tool_key in $(reg_list); do
+    cat="$(reg_lookup "$tool_key" cat)"
+    desc="$(reg_lookup "$tool_key" desc)"
+    sc="$(reg_lookup "$tool_key" subcmds)"
+    deps="$(reg_lookup "$tool_key" deps)"
+    name="${tool_key}"
+    if [ -n "$deps" ]; then
+        desc="$desc [deps: $deps]"
+    fi
     words=(${name//-/ })
     parent="/"
     for ((i=0; i<${#words[@]}; i++)); do

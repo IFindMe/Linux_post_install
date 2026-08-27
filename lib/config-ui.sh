@@ -5,12 +5,22 @@
 # (mirrors lib/notify.sh). Sourced opt-in by bin/pos-config.
 #
 # Header grammar — one "# POS_CONFIG:" line per scope a tool exposes:
-#   # POS_CONFIG: <scope> | <env-file> | <KEY>=<flags>:<desc>[::<example>] | ... | *plugins
+#   # POS_CONFIG: <scope> | <env-file> | <field> | ... | *plugins
 #     <env-file>  basename of the config file under ~/.config/linux_post_install/
+#     <field> := <KEY>=<flags>:<desc>[::<example>]
+#              | @<caption>                        group caption (unconditional)
+#              | @[<KEY>=<alt>[|…]] <caption>      conditional group caption —
+#                                                  active iff KEY's current value
+#                                                  equals a listed alt; an empty
+#                                                  alt segment ("gemini|") means
+#                                                  "or unset (= default)"
 #     <flags>     secret (masked display + stty -echo input) | digits | num | float
 #     <example>   optional value format hint shown in the editor, e.g. "weather,5m joke,10m"
 #     *plugins    marker: also list every key declared by the installed
 #                 entertainment plugins' "# POS_KEYS:" headers (dynamic)
+#     *providers[=<tag>]  marker: keys from lib/ai-providers/*.sh adapters;
+#                 with =<tag>, only from <tag>.sh (zero match → warn + the
+#                 preceding caption is suppressed)
 #   Example:
 #     # POS_CONFIG: telegram | telegram.env | TELEGRAM_BOT_TOKEN=secret:Bot token | TELEGRAM_CHAT_ID=digits:Numeric chat id
 #
@@ -27,8 +37,18 @@ declare -F warn >/dev/null || warn() { echo "[!] $*"; }
 declare -F err  >/dev/null || err()  { echo "ERROR: $*" >&2; exit 1; }
 declare -F ok   >/dev/null || ok()   { echo "  OK $*"; }
 
+# Color tokens (guarded — mirrors lib/menu-lib.sh): degrade to plain text when
+# common.sh didn't define them, never an error on standalone sourcing.
+BOLD="${BOLD:-}"
+DIM="${DIM:-}"
+CYAN="${CYAN:-}"
+RESET="${RESET:-}"
+
 _cfg_scope=""               # scope being edited (drives the post-write hook)
 declare -A _cfg_seen=()     # key dedupe registry for cfg_scope_keys
+_CS=$'\x1f'                 # unit-separator for caption records — never in env
+                            # names or alt strings, avoids collision with | in
+                            # alternation syntax (AI_PROVIDER=gemini|)
 
 # ── tool directory ─────────────────────────────────────────────────
 # Repo layout: lib/config-ui.sh → tools live in ../bin.
@@ -86,6 +106,29 @@ cfg_scope_envfile() {
     return 1
 }
 
+# Split a POS_CONFIG keystring into fields on "|", IGNORING separators inside
+# [...] condition brackets (caption conditions legitimately contain pipes,
+# e.g. @[AI_PROVIDER=gemini|]). Byte-identical output to IFS='|' splitting for
+# any string without brackets — fully backward compatible.
+_cfg_split_fields() {   # $1=keystring → one field per line
+    local s="$1" cur="" i ch depth=0
+    for ((i = 0; i < ${#s}; i++)); do
+        ch="${s:i:1}"
+        if [ "$ch" = "[" ]; then
+            depth=$((depth + 1))
+        elif [ "$ch" = "]" ] && [ "$depth" -gt 0 ]; then
+            depth=$((depth - 1))
+        fi
+        if [ "$ch" = "|" ] && [ "$depth" -eq 0 ]; then
+            printf '%s\n' "$cur"
+            cur=""
+        else
+            cur+="$ch"
+        fi
+    done
+    printf '%s\n' "$cur"
+}
+
 # One key field → "KEY|flags|description|example" (deduped via _cfg_seen).
 # The optional example is "desc::example" — a literal "::" separates the
 # value-format hint from the description.
@@ -136,13 +179,43 @@ _cfg_plugin_keys() {
     return 0
 }
 
+# Emit the "# PROVIDER_CONFIG:" keys of ONE adapter file (helper for
+# _cfg_provider_keys; keeps the tag-filter path and the all-adapters path DRY).
+_cfg_provider_file() {
+    local pfile="$1" line key desc flags rest
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        # Format: KEY=flags:description (same as POS_CONFIG key fields)
+        key="${line%%=*}"
+        [ -n "$key" ] || continue
+        [ -n "${_cfg_seen[$key]:-}" ] && continue
+        _cfg_seen[$key]=1
+        rest="${line#*=}" flags="" desc=""
+        if [[ "$rest" == *":"* ]]; then
+            flags="${rest%%:*}"
+            desc="${rest#*:}"
+        else
+            flags="$rest"
+        fi
+        printf '%s|%s|%s|\n' "$key" "$flags" "$desc"
+    done < <(grep '^# PROVIDER_CONFIG:' "$pfile" 2>/dev/null | sed 's/^.*# PROVIDER_CONFIG:[[:space:]]*//' || true)
+    return 0
+}
+
 # "*providers" expansion: keys declared by the installed AI provider
 # adapters' "# PROVIDER_CONFIG:" headers (lib/ai-providers/*.sh).
+# Optional <tag> argument restricts to <tag>.sh; an explicit tag matching zero
+# adapters warns once (stderr) — silent emptiness would hide authoring errors,
+# and the preceding caption is suppressed by cfg_ui's lazy flush. Bare
+# *providers stays silent, exactly as today.
+declare -A _CFG_TAG_WARNED=()
 _cfg_provider_keys() {
+    local want_tag="${1:-}"
     local pdir line key desc flags
     # Repo layout: lib/config-ui.sh → ../lib/ai-providers/
     # Installed layout: /usr/local/bin/config-ui.sh → ./ai-providers/
     pdir=""
+    local candidate
     for candidate in \
         "$(dirname "${BASH_SOURCE[0]}")/../lib/ai-providers" \
         "$(dirname "${BASH_SOURCE[0]}")/ai-providers"; do
@@ -152,6 +225,20 @@ _cfg_provider_keys() {
         fi
     done
     [ -n "$pdir" ] || return 0
+    if [ -n "$want_tag" ]; then
+        local matched=0 pfile
+        for pfile in "$pdir"/*.sh; do
+            [ -f "$pfile" ] || continue
+            [ "$(basename "$pfile" .sh)" = "$want_tag" ] || continue
+            matched=1
+            _cfg_provider_file "$pfile"
+        done
+        if [ "$matched" -eq 0 ] && [ -z "${_CFG_TAG_WARNED[$want_tag]:-}" ]; then
+            _CFG_TAG_WARNED["$want_tag"]=1
+            printf '[!] config scope: *providers=%s matched no adapter in %s\n' "$want_tag" "$pdir" >&2
+        fi
+        return 0
+    fi
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         # Format: KEY=flags:description (same as POS_CONFIG key fields)
@@ -159,8 +246,7 @@ _cfg_provider_keys() {
         [ -n "$key" ] || continue
         [ -n "${_cfg_seen[$key]:-}" ] && continue
         _cfg_seen[$key]=1
-        # Parse flags and description from the rest
-        local rest="${line#*=}" flags="" desc=""
+        rest="${line#*=}" flags="" desc=""
         if [[ "$rest" == *":"* ]]; then
             flags="${rest%%:*}"
             desc="${rest#*:}"
@@ -184,15 +270,33 @@ cfg_scope_keys() {
         [ "$s" = "$scope" ] || continue
         keystring="${line#*|}"
         keystring="${keystring#*|}"          # drop the env-file field
-        IFS='|' read -r -a fields <<<"$keystring"
+        mapfile -t fields < <(_cfg_split_fields "$keystring")
         for field in "${fields[@]}"; do
             field="${field#"${field%%[![:space:]]*}"}"
             field="${field%"${field##*[![:space:]]}"}"
             if [ -n "$field" ]; then
-                if [[ "$field" == "*"* ]]; then
+                if [[ "$field" == "@"* ]]; then
+                    # Caption record (key position ">"): >|cond|caption|
+                    #   @[KEY=alt1|alt2] Caption  →  cond "KEY=alt1|alt2"
+                    #   @Caption                  →  cond "" (always active)
+                    local cond="" cap=""
+                    if [[ "$field" == "@["*"]"* ]]; then
+                        cond="${field:2}"
+                        cond="${cond%%]*}"
+                        cap="${field#*]}"
+                        cap="${cap# }"
+                    else
+                        cap="${field#@}"
+                        cap="${cap# }"
+                    fi
+                    printf '%s\n' ">${_CS}${cond}${_CS}${cap}${_CS}"
+                elif [[ "$field" == "*"* ]]; then
                     case "$field" in
                         *plugins*)  _cfg_plugin_keys ;;
-                        *providers*) _cfg_provider_keys ;;
+                        *providers*)
+                            local ptag=""
+                            [[ "$field" == *"="* ]] && ptag="${field#*=}"
+                            _cfg_provider_keys "$ptag" ;;
                     esac
                 else
                     _cfg_key_line "$field"
@@ -331,53 +435,152 @@ _cfg_edit_one() {
     _cfg_post_write "$key"
 }
 
+# Evaluate a caption condition against the env file: active iff KEY's current
+# value equals any listed alt, or an empty alt segment is present and the value
+# is unset/empty (trailing/double/leading pipe). Empty cond → always active.
+_cfg_cond_active() {   # file cond
+    [ -n "$2" ] || return 0
+    local key alts cur alt hit=0 has_empty=0 oldIFS
+    key="${2%%=*}"
+    alts="${2#*=}"
+    cur="$(cfg_value "$1" "$key")"
+    case "$alts" in
+        "|"*|*"||"*|*"|") has_empty=1 ;;
+    esac
+    oldIFS="$IFS"
+    IFS='|'
+    for alt in $alts; do
+        if [ -n "$alt" ] && [ "$alt" = "$cur" ]; then hit=1; break; fi
+    done
+    IFS="$oldIFS"
+    [ "$hit" -eq 1 ] && return 0
+    [ "$has_empty" -eq 1 ] && [ -z "$cur" ] && return 0
+    return 1
+}
+
+# Word-wrap <text> to <width> columns, prefixing EVERY line with <indent>
+# (hanging indent). Breaks at spaces only, no hyphenation; over-long tokens
+# pass through unbroken.
+_cfg_wrap() {   # text width indent
+    local text="$1" width="$2" indent="$3"
+    local line="" w
+    for w in $text; do
+        if [ -z "$line" ]; then
+            line="$w"
+        elif (( ${#line} + 1 + ${#w} <= width )); then
+            line="$line $w"
+        else
+            printf '%s%s\n' "$indent" "$line"
+            line="$w"
+        fi
+    done
+    [ -n "$line" ] && printf '%s%s\n' "$indent" "$line"
+    return 0
+}
+
 # Interactive numbered-menu editor for one scope. q quits; r re-renders.
+#
+# Rendering contract (menu-lib house pattern): the whole render block goes to
+# stderr — display only, nothing on stdout. Caption records ('>') group keys;
+# conditions are evaluated per render from the env file, so an edit flips group
+# emphasis on the very next redraw. Inactive groups are dimmed with a textual
+# reason — never hidden — so numbering stays stable across edits.
 cfg_ui() {
-    local scope="$1" envfile file line
+    local scope="$1" envfile file line idx
     envfile="$(cfg_scope_envfile "$scope")" || { warn "unknown config scope '$scope'"; return 1; }
     file="$CONFIG_DIR/$envfile"
     _cfg_scope="$scope"
 
-    local -a keys=()
-    while IFS= read -r line; do
-        if [ -n "$line" ]; then
-            keys+=("$line")
-        fi
-    done < <(cfg_scope_keys "$scope")
-    if [ ${#keys[@]} -eq 0 ]; then
+    # Collect records: KEY|flags|desc|example for keys, >|cond|caption| for captions
+    local -a recs=() nums=()
+    mapfile -t recs < <(cfg_scope_keys "$scope")
+    if [ ${#recs[@]} -eq 0 ]; then
         warn "no config keys declared for scope '$scope'"
         return 1
     fi
+    # number→record map: numbers go to keys only, in static header order →
+    # stable across renders and provider switches
+    for idx in "${!recs[@]}"; do
+        [[ "${recs[$idx]}" == ">"* ]] || nums+=("$idx")
+    done
 
-    local choice i k f d e v
+    # Wrap width clamped to 60–120 cols minus the 6-column hanging indent
+    local W="${COLUMNS:-80}"
+    (( W < 60 )) && W=60
+    (( W > 120 )) && W=120
+    local wrapW=$((W - 6))
+    local rule
+    rule="$(printf '─%.0s' $(seq 1 40))"
+
+    local choice k f d e v disp n dim pend_cap="" pend_cond="" ckey cval why
     while true; do
-        echo
-        echo "pos config — ${scope} (${envfile})"
-        echo "------------------------------------"
-        i=0
-        for line in "${keys[@]}"; do
-            i=$((i + 1))
-            IFS='|' read -r k f d e <<<"$line"
-            v="$(cfg_value "$file" "$k")"
-            printf '  %2d) %-28s %s\n' "$i" "$k" "$(cfg_display "$v" "$f")"
-            if [ -n "$d" ]; then
-                printf '      %s\n' "$d"
-            fi
-            if [ -n "$e" ]; then
-                printf '      e.g. %s\n' "$e"
-            fi
-        done
-        echo
-        read -rp "Variable number [q to quit]: " choice || { echo; return 0; }
+        {
+            echo
+            echo "${BOLD}pos config — ${scope} (${envfile})${RESET}"
+            echo "${CYAN}${rule}${RESET}"
+            n=0; dim=0; pend_cap=""; pend_cond=""
+            for idx in "${!recs[@]}"; do
+                # Caption records use \x1f (unit separator) to avoid collision
+                # with | in alternation syntax; key records use | as before.
+                if [[ "${recs[$idx]}" == ">"* ]]; then
+                    # Caption record: >\x1fcond\x1fcaption\x1f
+                    # Strip leading > and first \x1f, then split on next \x1f
+                    pend_cond="${recs[$idx]#>}"
+                    pend_cond="${pend_cond#$_CS}"
+                    pend_cond="${pend_cond%%$_CS*}"
+                    pend_cap="${recs[$idx]#>}"
+                    pend_cap="${pend_cap#$_CS}"
+                    pend_cap="${pend_cap#*$_CS}"
+                    pend_cap="${pend_cap%%$_CS*}"
+                    continue
+                fi
+                IFS='|' read -r k f d e <<<"${recs[$idx]}"
+                if [ -n "$pend_cap" ]; then
+                    if _cfg_cond_active "$file" "$pend_cond"; then
+                        dim=0
+                        printf '\n%s  ── %s%s\n' "$DIM" "$pend_cap" "$RESET"
+                    else
+                        dim=1
+                        ckey="${pend_cond%%=*}"
+                        cval="$(cfg_value "$file" "$ckey")"
+                        if [ -z "$cval" ]; then why="— inactive (${ckey} not set)"
+                        else why="— inactive while ${ckey}=${cval}"; fi
+                        printf '\n%s  ── %s %s%s\n' "$DIM" "$pend_cap" "$why" "$RESET"
+                    fi
+                    pend_cap=""
+                fi
+                n=$((n + 1))
+                v="$(cfg_value "$file" "$k")"
+                disp="$(cfg_display "$v" "$f")"
+                [ "$disp" = "(not set)" ] && disp="${DIM}(not set)${RESET}"
+                if [ "$dim" -eq 1 ]; then
+                    printf '%s  %2d) %-28s %s%s\n' "$DIM" "$n" "$k" "$disp" "$RESET"
+                else
+                    printf '  %s%2d)%s %s%-28s%s %s\n' "$DIM" "$n" "$RESET" "$BOLD" "$k" "$RESET" "$disp"
+                fi
+                if [ -n "$d" ]; then
+                    [ "$dim" -eq 1 ] && printf '%s' "$DIM"
+                    _cfg_wrap "$d" "$wrapW" "      "
+                    [ "$dim" -eq 1 ] && printf '%s' "$RESET"
+                fi
+                if [ -n "$e" ]; then
+                    printf '%s' "$DIM"
+                    _cfg_wrap "e.g. $e" "$wrapW" "      "
+                    printf '%s' "$RESET"
+                fi
+            done
+            echo
+            read -rp "Number to edit [r=refresh, q=quit]: " choice || { echo; return 0; }
+        } >&2
         case "$choice" in
             q|Q|quit|exit) echo; return 0 ;;
             r|R|refresh) continue ;;
             "") continue ;;
             *)
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#keys[@]} )); then
-                    _cfg_edit_one "$file" "${keys[$((choice - 1))]}"
+                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#nums[@]} )); then
+                    _cfg_edit_one "$file" "${recs[${nums[$((choice - 1))]}]}"
                 else
-                    warn "invalid number '$choice' (1-${#keys[@]})"
+                    warn "invalid number '$choice' (1-${#nums[@]})"
                 fi
                 ;;
         esac

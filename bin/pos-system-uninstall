@@ -95,6 +95,15 @@ scan_tier1() {
     # User-local binaries
     [ -f "$HOME/.local/bin/pos-ai-hook.sh" ] && found+=("$HOME/.local/bin/pos-ai-hook.sh")
 
+    # pos ai alias wrapper scripts (marker-managed)
+    if [ -d "$HOME/.local/bin" ]; then
+        local awf
+        for awf in "$HOME/.local/bin"/*; do
+            [ -f "$awf" ] || continue
+            grep -q 'Managed by pos ai alias' "$awf" 2>/dev/null && found+=("$awf")
+        done
+    fi
+
     # Completion file
     [ -f /usr/local/share/bash-completion/completions/pos.bash ] && found+=("/usr/local/share/bash-completion/completions/pos.bash")
 
@@ -259,6 +268,17 @@ remove_tier1() {
 
     # User-local binaries
     [ -f "$HOME/.local/bin/pos-ai-hook.sh" ] && { rm -f "$HOME/.local/bin/pos-ai-hook.sh" && count=$((count+1)); }
+
+    # pos ai alias wrapper scripts (marker-managed only — foreign files untouched)
+    if [ -d "$HOME/.local/bin" ]; then
+        local arwf
+        for arwf in "$HOME/.local/bin"/*; do
+            [ -f "$arwf" ] || continue
+            if grep -q 'Managed by pos ai alias' "$arwf" 2>/dev/null; then
+                rm -f "$arwf" && count=$((count+1))
+            fi
+        done
+    fi
 
     # Completion file
     [ -f /usr/local/share/bash-completion/completions/pos.bash ] && { rm -f /usr/local/share/bash-completion/completions/pos.bash && count=$((count+1)); }

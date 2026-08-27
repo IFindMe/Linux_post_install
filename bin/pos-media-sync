@@ -3,6 +3,9 @@ set -euo pipefail
 # POS: media sync — Incremental Music → USB sync (mp3/mp4, add/update only)
 # POS_FLAGS: --mp3 --mp4 --source --dry-run
 # POS_SUBCMDS: menu
+# POS_DEPS: lsblk jq
+# POS_EXAMPLES: pos media sync --mp3 | Sync only MP3 files to USB
+# POS_EXAMPLES: pos media sync --mp4 --dry-run | Preview MP4 sync without copying
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"

@@ -12,6 +12,12 @@ Everything that runs during the bootstrap install: `install.sh`, `preinstall.sh`
 - [lib/common.sh — shared library](#libcommonsh--shared-library)
 - [lib/flags.sh — feature flags](#libflagssh--feature-flags)
 - [lib/notify.sh — multi-platform alerting](#libnotifysh--multi-platform-alerting)
+- [lib/entertainment-lib.sh — entertainment module](#libentertainmentlibsh--entertainment-module)
+- [lib/user-timers-lib.sh — shared systemd user timers](#libusertimerslibsh--shared-systemd-user-timers)
+- [lib/usb-lib.sh — shared USB-storage detection](#libusblibsh--shared-usb-storage-detection)
+- [lib/share-lib.sh — share-suite domain layer + compat shims](#sharelibsh--share-suite-domain-layer--compat-shims)
+- [lib/menu-lib.sh — category-neutral menu primitives](#libmenulibsh--category-neutral-menu-primitives)
+- [lib/registry.sh — tool metadata query API](#libregistrysh--tool-metadata-query-api)
 - [features/autostart.sh — boot-time feature](#featuresautostartsh--boot-time-feature)
 - [features/usb-automount.sh — USB automount feature](#featuresusb-automountsh--usb-automount-feature)
 - [x64_bin/ — precompiled binaries](#x64_bin--precompiled-binaries)
@@ -38,7 +44,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` + `lib/registry.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -225,6 +231,15 @@ Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib
 
 **File:** `lib/menu-lib.sh` (installed to `/usr/local/bin/menu-lib.sh`)
 **Purpose:** the generic interactive half extracted from the former share-lib interactive layer, open to any category's tool — `menu_guard` (non-tty guard: one-line hint instead of a hanging menu), `menu_run` (looping numbered boxed menu, quits on EOF), `menu_pick` (numbered picker with type-to-filter `/filter`, `0` cancel, EOF-safe), and `menu_ask_value` (prompted string with optional default). Sourced by `lib/share-lib.sh` (compat shims keep the `share_*` names working); defines only `menu_*`. Display→stderr / result→stdout, reads fail closed on EOF or non-tty, so the functions are safe under the dispatcher's logging tee and inside command substitution; standalone-sourced it degrades to plain text via guarded `CYAN`/`RESET` fallbacks.
+
+---
+
+## lib/registry.sh — tool metadata query API
+
+**File:** `lib/registry.sh` (installed to `/usr/local/bin/registry.sh`)
+**Purpose:** the one query API over the tools' `# POS_*:` metadata headers, so consumers source it instead of re-implementing sed/grep header scans. `reg_scan [dir]` reads every executable `pos-*` file once — sorted under `LC_ALL=C`, and cheap enough to call lazily (plain dispatch paths skip it entirely); each tool's key is its filename after `pos-` with the category split off at the first dash (category-less tools carry an empty category). The populated stores serve `reg_list`, `reg_categories`, `reg_tools_in` and `reg_lookup <tool> <field>` with fields `cat|desc|flags|subcmds|deps|examples` (`deps`/`examples` come from the optional `# POS_DEPS:` / `# POS_EXAMPLES:` headers); the multi-line `# POS_CONFIG:` registry gets its own helpers (`reg_config_scopes`, `reg_config_keys`, `reg_config_envfile`); `reg_each <callback>` iterates every tool calling `cb(category, tool_key, description)`; `reg_tool_exists` is the membership probe. Like `lib/config-ui.sh` it defines guarded `log`/`warn`/`err` fallbacks so it sources cleanly without `lib/common.sh`; no shebang and never executed (installed 644).
+
+Sourced by `bin/pos-tree` (tree rendering incl. the `[deps: …]` annotations) and by `bin/pos` `_pos_category_help()` for `pos <category> --help` (lazy load there, so plain dispatch never pays the scan cost). `scripts/gen-docs.sh` predates the registry and keeps parsing the same headers independently for its generated blocks; new consumers should prefer the registry.
 
 ---
 

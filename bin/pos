@@ -66,21 +66,27 @@ _pos_category_exists() {
 }
 
 _pos_category_help() {
-    local cat="$1" f
-    local files=() s d
-    for f in "$self"/pos-"$cat"-*; do
-        [ -x "$f" ] || continue
-        files+=("${f##*/pos-$cat-}")
-    done
+    local cat="$1" s s2 extra d sc deps
+    # Lazy registry load — plain dispatch paths never pay the scan cost.
+    source "$self/../lib/registry.sh" 2>/dev/null || source "$self/registry.sh"
+    reg_scan "$self"
+
+    local files=()
+    local t
+    while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        files+=("${t#"$cat"-}")
+    done < <(reg_tools_in "$cat")
     mapfile -t files < <(printf '%s\n' "${files[@]}" | sort -u)
 
-    local -A desc subcmds
-    local sc
+    local -A desc subcmds _deps
     for s in "${files[@]}"; do
-        d="$(sed -n '/^# POS: /{s/^# POS: //;p;q}' "$self/pos-$cat-$s" 2>/dev/null)"
-        [ -n "$d" ] && desc["$s"]="${d#*— }"
-        sc="$(sed -n '/^# POS_SUBCMDS: /{s/^# POS_SUBCMDS: //;p;q}' "$self/pos-$cat-$s" 2>/dev/null)"
+        d="$(reg_lookup "$cat-$s" desc)"
+        [ -n "$d" ] && desc["$s"]="$d"
+        sc="$(reg_lookup "$cat-$s" subcmds)"
         [ -n "$sc" ] && subcmds["$s"]="$sc"
+        deps="$(reg_lookup "$cat-$s" deps)"
+        [ -n "$deps" ] && _deps["$s"]="$deps"
     done
 
     # Nested sub-tools: pos-<cat>-<a>-<b> lists "b" under <a>.
@@ -113,6 +119,7 @@ _pos_category_help() {
         done
         [ "$is_nested" -eq 1 ] && continue
         printf '  %-28s%s\n' "$s" "${desc[$s]:-}"
+        [ -n "${_deps[$s]:-}" ] && printf '    [deps: %s]\n' "${_deps[$s]}"
         for c in ${subcmds[$s]:-}; do
             printf '    %s %s\n' "$s" "$c"
         done
@@ -259,7 +266,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter system-schedule entertainment-config config"
+INTERACTIVE_CMDS="docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter ai-alias system-schedule entertainment-config config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

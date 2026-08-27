@@ -10,6 +10,8 @@ set -euo pipefail
 #   - "# POS:" header line → one-line description
 #   - "# POS_FLAGS:" line  → flag completion list (flag-style tools only)
 #   - "# POS_SUBCMDS:" line → subcommand completion list (multi-command tools)
+#   - "# POS_DEPS:" line   → runtime binary dependencies (optional)
+#   - "# POS_EXAMPLES:" line → curated usage examples (optional, multi-line)
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 mode="write"
@@ -22,7 +24,7 @@ export LC_ALL=C
 ctx="$root/DOC/AGENT_Context_Project.md"
 comp="$root/completions/pos.bash"
 
-# ── Collect tools: "cat|sub|desc|flags|subcmds" ────────────────
+# ── Collect tools: "cat|sub|desc|flags|subcmds|deps|examples" ──
 # Category-less tools (pos-<cat>, e.g. pos-config) get an empty cat.
 # tooldisp <cat> <sub> → display name (pos-config / pos-communication-telegram-sender).
 tooldisp() { printf 'pos-%s%s' "${1:+$1-}" "$2"; }
@@ -42,31 +44,55 @@ for f in "$root"/bin/pos-*; do
     desc="${desc#*— }"
     flags="$(sed -n '/^# POS_FLAGS: /{s/^# POS_FLAGS: //;p;q}' "$f")"
     subcmds="$(sed -n '/^# POS_SUBCMDS: /{s/^# POS_SUBCMDS: //;p;q}' "$f")"
-    tools+=("$cat|$sub|$desc|$flags|$subcmds")
+    deps="$(sed -n '/^# POS_DEPS: /{s/^# POS_DEPS: //;p;q}' "$f")"
+    examples="$(grep '^# POS_EXAMPLES:' "$f" 2>/dev/null | sed 's/^# POS_EXAMPLES:[[:space:]]*//' | awk 'NR>1{printf " · "}{printf "%s", $0}END{print ""}' || true)"
+    tools+=("$cat|$sub|$desc|$flags|$subcmds|$deps|$examples")
 done
 mapfile -t tools < <(printf '%s\n' "${tools[@]}" | sort)
 
 # ── Block generators (emit inner content only, no markers) ──────
+# Check whether any tool has non-empty deps or examples (for conditional columns)
+_has_deps_examples=0
+for t in "${tools[@]}"; do
+    IFS='|' read -r _ _ _ _ _ _tdeps _texamples <<<"$t"
+    if [ -n "$_tdeps" ] || [ -n "$_texamples" ]; then
+        _has_deps_examples=1
+        break
+    fi
+done
+
 gen_tree() {
-    local width=0 cat sub desc flags name t
+    local width=0 cat sub desc flags name t deps examples
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
         name="$(tooldisp "$cat" "$sub")"
         [ ${#name} -gt "$width" ] && width=${#name}
     done
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
         name="$(tooldisp "$cat" "$sub")"
         printf '│   ├── %-*s# %s\n' "$((width + 1))" "$name" "$desc"
+        if [ -n "$deps" ]; then
+            printf '│   %*s│   [deps: %s]\n' "" "" "$deps"
+        fi
     done
 }
 
 gen_dispatch() {
-    local cat sub desc flags t
-    for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
-        printf '| %s | %s | `%s` | %s |\n' "$cat" "$sub" "$(tooldisp "$cat" "$sub")" "$desc"
-    done
+    local cat sub desc flags t deps examples
+    if [ "$_has_deps_examples" -eq 1 ]; then
+        printf '| Category | Command | Script | Description | Deps | Examples |\n'
+        printf '|----------|---------|--------|-------------|------|----------|\n'
+        for t in "${tools[@]}"; do
+            IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
+            printf '| %s | %s | `%s` | %s | %s | %s |\n' "$cat" "$sub" "$(tooldisp "$cat" "$sub")" "$desc" "$deps" "$(printf '%s' "$examples" | sed 's/ | / → /g')"
+        done
+    else
+        for t in "${tools[@]}"; do
+            IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
+            printf '| %s | %s | `%s` | %s |\n' "$cat" "$sub" "$(tooldisp "$cat" "$sub")" "$desc"
+        done
+    fi
 }
 
 gen_selfcontained() {
@@ -83,10 +109,10 @@ gen_selfcontained() {
 }
 
 gen_filetable() {
-    local cat sub desc flags name t
+    local cat sub desc flags name t deps examples
     printf '| `bin/pos` | %s | CLI dispatcher with smart arg matching + logging + category help |\n' "$(wc -l < "$root/bin/pos")"
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
         name="bin/$(tooldisp "$cat" "$sub")"
         printf '| `%s` | %s | %s |\n' "$name" "$(wc -l < "$root/$name")" "$desc"
     done
@@ -94,10 +120,10 @@ gen_filetable() {
 }
 
 gen_posflags() {
-    local cat sub desc flags t
+    local cat sub desc flags t deps examples
     echo "declare -A _pos_flags"
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
         [ -n "$flags" ] || continue
         printf '_pos_flags[%s]="%s"\n' "$(tooldisp "$cat" "$sub" | sed 's/^pos-//')" "$flags"
     done
@@ -106,10 +132,10 @@ gen_posflags() {
 gen_possubcmds() {
     # Subcommand completion: "# POS_SUBCMDS:" list + nested sub-tools from
     # filenames (pos-<cat>-<sub>-<extra> → "extra" completes under <cat>-<sub>).
-    local cat sub desc flags subcmds rest f t
+    local cat sub desc flags subcmds deps examples rest f t
     echo "declare -A _pos_subcmds"
     for t in "${tools[@]}"; do
-        IFS='|' read -r cat sub desc flags subcmds <<<"$t"
+        IFS='|' read -r cat sub desc flags subcmds deps examples <<<"$t"
         subcmds="${subcmds:-}"
         for f in "$root"/bin/"$(tooldisp "$cat" "$sub")"-*; do
             [ -x "$f" ] || continue

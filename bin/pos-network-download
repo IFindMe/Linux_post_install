@@ -3,6 +3,10 @@ set -euo pipefail
 # POS: network download — aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
 # POS_SUBCMDS: start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace menu
 # POS_FLAGS: --dir --out --split --seed --force --upload --gid --tmux
+# POS_DEPS: aria2c jq curl
+# POS_EXAMPLES: pos network download add https://example.com/file.zip | Enqueue an HTTP download (auto-starts daemon)
+# POS_EXAMPLES: pos network download status | Daemon health + global transfer stats
+# POS_EXAMPLES: pos network download watch | Live progress view
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"

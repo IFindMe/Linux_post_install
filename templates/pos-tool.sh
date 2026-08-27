@@ -9,6 +9,9 @@ set -euo pipefail
 #               lines (single source of truth for generated docs):
 #                 # POS: <category> <command> — one-line description
 #                 # POS_FLAGS: --flag1 --flag2   (flag-style tools only)
+#                 # POS_SUBCMDS: sub1 sub2       (multi-command tools only)
+#                 # POS_DEPS: binary1 binary2    (runtime deps, optional)
+#                 # POS_EXAMPLES: pos <tool> <args> | Description  (optional)
 #  3. Exec bit: chmod +x bin/pos-<category>-<command>
 #  4. If it reads stdin (password/selection prompts), add it to
 #     INTERACTIVE_CMDS in bin/pos or its prompt breaks under the log tee.

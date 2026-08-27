@@ -275,6 +275,17 @@ Recommended fix: add rows to the POS.md command table (and cross-check HOWTO for
 Verification: lint WARNs gone; `grep` shows each tool in POS.md.
 Fix (2026-08-14): the tools were documented by command name but not by filename (the lint references basenames). Added `**File:** bin/pos-config` (config section), `**File:** bin/pos-tree` (tree section), and a file list on the entertainment section header covering `bin/pos-entertainment-{config,enable,disable,status}`. Verified: lint 0 WARN. HOWTO already covers the entertainment group via `pos entertainment *` command forms.
 
+### M-024
+Status: VERIFIED
+Severity: LOW
+Category: docs
+Files: AGENTS.md:17-18; DOC/SCRIPTS.md (Phase-2 lib list, TOC, new lib section)
+Evidence: the command-registry feature landed (`lib/registry.sh`, 199 lines; optional `# POS_DEPS:`/`# POS_EXAMPLES:` headers already codified in `templates/pos-tool.sh:13-14` and `DOC/DEV.md:126-134`) but three docs kept describing the old reality: AGENTS.md Quick facts enumerated only `POS_FLAGS`/`SUBCMDS`/`CONFIG` with no mention of the shared query API; DOC/SCRIPTS.md's Phase-2 lib list omitted `registry.sh` and had no section for it (its TOC also lacked five pre-existing lib sections).
+Expected: docs describe what IS — code + `# POS:` headers are ground truth (Phase 0 rule 4).
+Recommended fix: sync the three drifted docs to implemented reality; no code/template/completion changes.
+Verification: `make gen` produces zero diff beyond pre-existing work; `make check` green; `make lint` 0 FAIL / 0 WARN; `grep -n "POS_DEPS"` hits AGENTS.md, DEV.md, SCRIPTS.md.
+Fix (2026-08-26): template `templates/pos-tool.sh` now documents the optional `# POS_DEPS:`/`# POS_EXAMPLES:` headers (pre-existing); `lib/registry.sh` added as the shared query API over all `POS_*` headers (`reg_scan` + `reg_list`/`reg_lookup`/…) — AGENTS.md Tool-model + Categories bullets updated, DOC/SCRIPTS.md got the lib-list row (install.sh:143 order), a per-lib reference section, and a completed TOC. Consumers were already migrated (`bin/pos-tree`, `bin/pos` `_pos_category_help()`); lint unchanged (0 FAIL / 0 WARN).
+
 ### P3 — intentional / legacy (no action)
 - install.sh:123,135,155,185 — installer writes to /usr/local/bin are its purpose; no seam needed (lint excludes install scripts).
 - network-download RPC_SECRET at :150 — generated at runtime (`/dev/urandom`), not a committed secret.
