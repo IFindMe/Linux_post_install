@@ -97,6 +97,21 @@ pos communication telegram listener --disable   # remove it
 - **Runs as you:** mapped commands execute as your user with a 60s timeout,
   stdout + stderr are replied to the chat (truncated ~3800 chars; empty → `OK`).
   `sudo` inside a command needs a NOPASSWD rule.
+- **Text-prefix map (apps):** `~/.config/linux_post_install/telegram_prefixes.env`
+  (chmod 600), one `<word>=command` per line — a non-command message
+  `<word> <text>` runs the app with `<text>` appended as ONE quoted argument,
+  e.g. `opencode=opencode` turns "opencode check cpu" into `opencode "check cpu"`.
+  First match wins (file order), case-insensitive, word must be space-delimited.
+  Manage it with `pos communication telegram listener prefix <word> <command...>`
+  (bare `prefix` lists, `prefix <word>` shows one, `prefix -r <word>` removes):
+  ```bash
+  pos communication telegram listener prefix opencode opencode
+  # then message:  opencode check cpu   → runs  opencode "check cpu"
+  pos communication telegram listener prefix ai "pos ai gemini ask --session telegram-\$TELEGRAM_CHAT_ID"
+  # overrides the built-in Gemini bridge for the word 'ai'
+  ```
+  Routing order per non-command message: text-prefix map → AI bridge →
+  `/command` map → "Unknown command".
 - **`@quiet` prefix:** a map value starting with `@quiet ` runs the command but
   does NOT reply — for commands that already send their own notification, so
   you don't get it twice. `pos system backup` self-notifies, so

@@ -67,7 +67,7 @@ Linux_post_install/
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
 │   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
 │   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
-│   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash, run them on chat messages
+│   ├── pos-communication-telegram-listener # Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages
 │   ├── pos-communication-telegram-sender   # Send Telegram messages/files/links/stickers via Bot API (send, test)
 │   ├── pos-docker-compose                  # Docker Compose service manager (ls/up/down/restart/logs/update/config)
 │   ├── pos-docker-health                   # One-glance container health dashboard (exits 1 if unhealthy)
@@ -281,7 +281,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |  |  |
 | communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |  |  |
 | communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |  |  |
-| communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash, run them on chat messages |  |  |
+| communication | telegram-listener | `pos-communication-telegram-listener` | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |  |  |
 | communication | telegram-sender | `pos-communication-telegram-sender` | Send Telegram messages/files/links/stickers via Bot API (send, test) |  |  |
 | docker | compose | `pos-docker-compose` | Docker Compose service manager (ls/up/down/restart/logs/update/config) |  |  |
 | docker | health | `pos-docker-health` | One-glance container health dashboard (exits 1 if unhealthy) |  |  |
@@ -609,7 +609,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| `bin/pos-communication-telegram-listener` | 623 | Telegram bot listener: map /command → bash, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 782 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |

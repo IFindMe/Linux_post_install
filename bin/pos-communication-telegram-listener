@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: communication telegram-listener — Telegram bot listener: map /command → bash, run them on chat messages
+# POS: communication telegram-listener — Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages
 # POS_FLAGS: --enable --disable --status --sync-commands --run
 # POS_SUBCMDS: prefix
 
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
 MAP_FILE="$CONFIG_DIR/telegram_commands.env"
+PREFIX_FILE="$CONFIG_DIR/telegram_prefixes.env"
 API="https://api.telegram.org"
 SERVICE="pos-telegram-listener.service"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -14,8 +15,8 @@ USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 # System prompt for the "<prefix> " AI bridge (default prefix: "ai"): replies
 # are posted straight into the chat, so ask for concise, emoji-friendly
 # Telegram-style answers. The trigger word is configurable via
-# TELEGRAM_AI_PREFIX in telegram.env ('pos communication telegram listener
-# prefix <word>' or 'pos config telegram').
+# TELEGRAM_AI_PREFIX in telegram.env ('pos config telegram', default 'ai');
+# the text-prefix map checked before it can override any word.
 AI_SYSTEM="You are a friendly assistant chatting in a Telegram chat. Keep replies concise, use emojis and light formatting to make them lively, and never claim to send messages yourself."
 
 err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -36,15 +37,25 @@ Commands:
   --sync-commands
                Push the mapped /commands to the bot's "/" menu (setMyCommands)
   --run        Run the polling loop in the foreground (used by the service)
-  prefix [word]
-               Show (no argument) or set the AI-bridge trigger word — any
-               non-command message starting with '<word> ' is answered by
-               Gemini (default 'ai'). Restore the default with 'prefix ai'.
+  prefix [word [command...]]
+               Manage the text-prefix map (telegram_prefixes.env): any
+               non-command message '<prefix> <text>' runs the mapped command
+               with <text> as ONE argument. Bare: list; <word>: show one;
+               <word> <command...>: map (e.g. 'prefix opencode opencode' →
+               "opencode check cpu" runs 'opencode "check cpu"');
+               -r <word>: remove. Built-in Gemini bridge word (default 'ai')
+               is set via 'pos config telegram' (TELEGRAM_AI_PREFIX).
 
 Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
          TELEGRAM_AI_PREFIX — edit with 'pos config telegram')
 Map:     $MAP_FILE — '/cmd=bash command' per line (optional
          '/cmd::short description=bash command' shown in the bot menu)
+Prefix map: $PREFIX_FILE — '<word>=command' per line: a non-command
+         message starting with '<word> <text>' runs the command with <text>
+         appended as ONE quoted argument. First match wins (file order),
+         case-insensitive; a mapped word shadows the built-in Gemini 'ai'
+         bridge. Routing order: text-prefix map → AI bridge → /command map →
+         'Unknown command'. Manage it with the 'prefix' verb.
 
 Prefix a map value with '@quiet ' to run the command without replying —
 for commands that already send their own notification, so you don't get it
@@ -250,6 +261,105 @@ strip_quiet() {
     fi
 }
 
+# ── text-prefix map (PREFIX_FILE) ───────────────────────────────
+# Lines: <word>=command. Unlike the /command map (exact match on the whole
+# message), a matching <word> at the START of a non-command message routes
+# the REST of the message to the mapped command as ONE quoted argument:
+#   'opencode=opencode' + message "opencode check cpu" → 'opencode "check cpu"'
+# The map is re-read per message (edits apply without restarting), matching
+# is case-insensitive, the FIRST matching line wins (file order), a bare
+# <word> with no trailing space does NOT match, and a mapped word shadows the
+# built-in Gemini bridge in handle_message.
+
+prefix_map_find() {
+    [ -f "$PREFIX_FILE" ] || return 1
+    local text="$1" line word cmd rem
+    shopt -s nocasematch
+    while IFS= read -r line; do
+        case "$line" in \#*|'') continue ;; esac
+        word="${line%%=*}"
+        cmd="${line#*=}"
+        word="${word# }"
+        cmd="${cmd# }"
+        [[ -n "$word" && -n "$cmd" ]] || continue
+        if [[ "$text" =~ ^"$word"[[:space:]](.*)$ ]]; then
+            rem="${BASH_REMATCH[1]}"
+            [ -n "$rem" ] || continue
+            shopt -u nocasematch
+            printf '%s\x1f%s\n' "$cmd" "$rem"
+            return 0
+        fi
+    done < "$PREFIX_FILE"
+    shopt -u nocasematch
+    return 1
+}
+
+prefix_map_set() {
+    local word="$1" cmd="$2"
+    if ! [[ "$word" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+        err "invalid prefix '$word' — use one word of letters, digits, '-' or '_' (no spaces)"
+    fi
+    local errs
+    errs="$(check_syntax "$cmd" 2>&1)" || err "invalid command for '$word': $errs"
+    mkdir -p "$CONFIG_DIR"
+    touch "$PREFIX_FILE"
+    chmod 600 "$PREFIX_FILE"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$word" 'index($0, k "=") != 1 { print }' "$PREFIX_FILE" > "$tmp"
+    printf '%s=%s\n' "$word" "$cmd" >> "$tmp"
+    mv "$tmp" "$PREFIX_FILE"
+    chmod 600 "$PREFIX_FILE"
+}
+
+prefix_map_del() {
+    [ -f "$PREFIX_FILE" ] || return 1
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$1" 'index($0, k "=") != 1 { print }' "$PREFIX_FILE" > "$tmp"
+    if cmp -s "$tmp" "$PREFIX_FILE"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$PREFIX_FILE"
+    chmod 600 "$PREFIX_FILE"
+    return 0
+}
+
+prefix_map_show() {
+    local word="$1" line key
+    [ -f "$PREFIX_FILE" ] || return 1
+    while IFS= read -r line; do
+        case "$line" in \#*|'') continue ;; esac
+        key="${line%%=*}"
+        if [ "$key" = "$word" ]; then
+            printf '%s -> %s\n' "$key" "${line#*=}"
+            return 0
+        fi
+    done < "$PREFIX_FILE"
+    return 1
+}
+
+# Run a mapped command line and reply with its output: empty output → "OK",
+# non-zero exit → "exit <rc>" + output; quiet=1 suppresses the reply (for
+# '@quiet ' entries that self-notify). Used by the /command map (60s cap)
+# and the text-prefix bridge (120s cap for app calls).
+run_and_reply() {
+    local cmdline="$1" msg_id="$2" tmo="${3:-120}" quiet="${4:-0}" output rc
+    if output="$(timeout "$tmo" bash -c "$cmdline" 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    [ "$quiet" -eq 1 ] && return
+    [ -n "$output" ] || output="OK"
+    if [ "$rc" -ne 0 ]; then
+        reply "$(printf 'exit %s\n%s' "$rc" "$output")" "$msg_id" "$rc"
+    else
+        reply "$output" "$msg_id"
+    fi
+}
+
 ui_run_command() {
     local value="$1" output rc
     value="$(strip_quiet "$value")"
@@ -426,6 +536,7 @@ status() {
     fi
     echo "config:    $CONFIG_FILE"
     echo "map file:  $MAP_FILE"
+    echo "prefix map: $PREFIX_FILE"
     load_config
     echo "ai prefix: ${TELEGRAM_AI_PREFIX:-ai}"
     load_map
@@ -434,34 +545,76 @@ status() {
     for ((i=1; i<=MAP_N; i++)); do
         printf '  %-16s -> %s%s\n' "${MAP_CMDS[$i]}" "${MAP_VALS[$i]}" "${MAP_DESCS[$i]:+ (${MAP_DESCS[$i]})}"
     done
+    if [ -f "$PREFIX_FILE" ] && [ -s "$PREFIX_FILE" ]; then
+        local pline pword pcmd pn=0
+        echo "prefixes:  ('<prefix> <text>' routes to the mapped app)"
+        while IFS= read -r pline; do
+            case "$pline" in \#*|'') continue ;; esac
+            pword="${pline%%=*}" pcmd="${pline#*=}"
+            pn=$((pn + 1))
+            printf '  %-16s -> %s\n' "$pword" "$pcmd"
+        done < "$PREFIX_FILE"
+        [ "$pn" -gt 0 ] || echo "  (none)"
+    else
+        echo "prefixes:  (none)"
+    fi
 }
 
-# ── AI-bridge trigger word (TELEGRAM_AI_PREFIX) ─────────────────
-# Show or set the word that starts the AI bridge in handle_message.
-# Default 'ai'; a word is [A-Za-z0-9][A-Za-z0-9_-]* (no spaces, no pattern
-# metacharacters — the match is a literal, case-insensitive prefix).
+# ── text-prefix map + built-in Gemini bridge word (prefix verb) ──
+# 'prefix' manages PREFIX_FILE (word → command). The built-in Gemini bridge
+# word (TELEGRAM_AI_PREFIX, default 'ai') is set via 'pos config telegram';
+# it is only reached when no text-prefix entry matches first.
 prefix_cmd() {
-    local val="${1:-}"
-    if [ -z "$val" ]; then
+    local arg="${1:-}" rest="${*:2}"
+    if [ -z "$arg" ]; then
         load_config
-        echo "AI bridge prefix: ${TELEGRAM_AI_PREFIX:-ai}"
-        echo "Non-command messages starting with '<prefix> ' are answered by Gemini."
-        echo "Set it with: pos communication telegram listener prefix <word>  (default: ai)"
+        echo "Text-prefix map ($PREFIX_FILE): messages like '<prefix> <text>' run the"
+        echo "mapped command with <text> passed as ONE argument. First match wins"
+        echo "(file order), case-insensitive; a mapped word shadows the built-in"
+        echo "Gemini bridge. A bare <prefix> with no trailing space does not match."
+        echo
+        if [ -f "$PREFIX_FILE" ] && [ -s "$PREFIX_FILE" ]; then
+            local line word cmd
+            while IFS= read -r line; do
+                case "$line" in \#*|'') continue ;; esac
+                word="${line%%=*}" cmd="${line#*=}"
+                printf '  %-16s -> %s\n' "$word" "$cmd"
+            done < "$PREFIX_FILE"
+        else
+            echo "  (none)"
+        fi
+        echo
+        echo "Built-in Gemini bridge word: ${TELEGRAM_AI_PREFIX:-ai}  (set via 'pos config telegram')"
+        echo
+        echo "Usage:"
+        echo "  prefix                          list this map + the Gemini bridge word"
+        echo "  prefix <word>                   show one mapping"
+        echo "  prefix <word> <command...>      map <word> to a command"
+        echo "  prefix -r <word>                remove a mapping"
+        echo "Examples:"
+        echo "  pos communication telegram listener prefix opencode opencode"
+        echo "  # then sending 'opencode check cpu' runs: opencode \"check cpu\""
         return 0
     fi
-    if ! [[ "$val" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
-        err "invalid prefix '$val' — use one word of letters, digits, '-' or '_' (no spaces)"
+    case "$arg" in
+        -r|--remove)
+            [ -n "$rest" ] || err "usage: prefix -r <word>"
+            if prefix_map_del "$rest"; then
+                log "removed prefix mapping '$rest'"
+            else
+                warn "no prefix mapping for '$rest'"
+            fi
+            return 0 ;;
+    esac
+    if [ -z "$rest" ]; then
+        prefix_map_show "$arg" && return 0
+        warn "no prefix mapping for '$arg'"
+        echo "Map one with: prefix <word> <command...>   (e.g. prefix opencode opencode)"
+        echo "The built-in Gemini bridge word is set via 'pos config telegram' (TELEGRAM_AI_PREFIX)."
+        return 1
     fi
-    mkdir -p "$CONFIG_DIR"
-    touch "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
-    local tmp
-    tmp="$(mktemp)"
-    grep -vE '^TELEGRAM_AI_PREFIX=' "$CONFIG_FILE" > "$tmp" || true
-    printf 'TELEGRAM_AI_PREFIX=%s\n' "$val" >> "$tmp"
-    mv "$tmp" "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
-    log "AI bridge prefix set to '$val' — messages starting with '$val ' go to Gemini (takes effect immediately, no restart)"
+    prefix_map_set "$arg" "$rest"
+    log "prefix '$arg' -> '$rest' — sending '<$arg> <text>' runs: $rest \"<text>\" (takes effect immediately, no restart)"
 }
 
 # Current AI-bridge trigger word. Like the command map, re-read per message so
@@ -503,19 +656,38 @@ strip_markdown() {
 }
 
 handle_message() {
-    local text="$1" msg_id="$2" reply_text="${3:-}" value output rc quiet=0
+    local text="$1" msg_id="$2" reply_text="${3:-}" value quiet=0
     case "$text" in
         /help|/start)
             reply "Mapped commands: $(map_cmds_list)" "$msg_id"
             return ;;
     esac
+    # Text-prefix bridge: '<prefix> <text>' runs the mapped command with
+    # <text> passed as ONE quoted argument (telegram_prefixes.env), e.g.
+    # 'opencode=opencode' → sending "opencode check cpu" runs
+    # 'opencode "check cpu"'. Re-read per message, first match wins (file
+    # order), case-insensitive; a mapped word shadows the built-in Gemini
+    # bridge below. A bare <prefix> with no trailing space does not match.
+    local pv cmd t qtext
+    if pv="$(prefix_map_find "$text")"; then
+        cmd="${pv%%$'\x1f'*}"
+        t="${pv#*$'\x1f'}"
+        if [ "${cmd#"$QUIET_PREFIX "}" != "$cmd" ]; then
+            quiet=1
+            cmd="${cmd#"$QUIET_PREFIX "}"
+        fi
+        qtext="$(printf '%q' "$t")"
+        log "prefix: $text"
+        run_and_reply "$cmd $qtext" "$msg_id" 120 "$quiet"
+        return
+    fi
     # AI bridge: non-command text starting with "<prefix> " (default "ai",
-    # case-insensitive, configurable via 'pos communication telegram listener
-    # prefix <word>' / TELEGRAM_AI_PREFIX) is forwarded to Gemini; the model's
-    # answer is replied verbatim. Each chat gets its own persistent memory
-    # session ("telegram-<chat_id>"); the exact prompt "<prefix> /reset"
-    # clears it. Future non-command intents (e.g. reminders) slot in as more
-    # case arms here.
+    # case-insensitive, configurable via TELEGRAM_AI_PREFIX in 'pos config
+    # telegram') is forwarded to Gemini; the model's answer is replied
+    # verbatim. Each chat gets its own persistent memory session
+    # ("telegram-<chat_id>"); the exact prompt "<prefix> /reset" clears it.
+    # Future non-command intents (e.g. reminders) slot in as more case arms
+    # here.
     local prefix
     prefix="$(ai_bridge_prefix)"
     shopt -s nocasematch
@@ -555,20 +727,7 @@ handle_message() {
         value="${value#"$QUIET_PREFIX "}"
     fi
     log "exec: $text"
-    if output="$(timeout 60 bash -c "$value" 2>&1)"; then
-        rc=0
-    else
-        rc=$?
-    fi
-    [ "$quiet" -eq 1 ] && return
-    if [ -z "$output" ]; then
-        output="OK"
-    fi
-    if [ "$rc" -ne 0 ]; then
-        reply "$(printf 'exit %s\n%s' "$rc" "$output")" "$msg_id" "$rc"
-    else
-        reply "$output" "$msg_id"
-    fi
+    run_and_reply "$value" "$msg_id" 60 "$quiet"
 }
 
 run_daemon() {
@@ -617,7 +776,7 @@ case "${1:-}" in
     --status)  status ;;
     --sync-commands) sync_bot_commands ;;
     --run)     run_daemon ;;
-    prefix)    prefix_cmd "${2:-}" ;;
+    prefix)    prefix_cmd "${@:2}" ;;
     "")        ui ;;
     *)         err "Unknown option '$1' (see --help)" ;;
 esac

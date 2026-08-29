@@ -150,10 +150,18 @@ you:    ai what is Nvidia
 bot:    NVIDIA is a company best known for GPUs...
 ```
 
-The trigger word is configurable via `pos communication telegram listener
-prefix <word>` (or `pos config telegram` → `TELEGRAM_AI_PREFIX`); it takes
-effect immediately, so with prefix `bot` you'd message `bot what is Nvidia`.
-`pos communication telegram listener prefix` shows the current value.
+The trigger word is configurable via `pos config telegram` →
+`TELEGRAM_AI_PREFIX` (default `ai`); it takes effect immediately, so with
+prefix `bot` you'd message `bot what is Nvidia`. `pos communication telegram
+listener prefix` shows the current value.
+
+The listener also has a generic **text-prefix map** (`telegram_prefixes.env`,
+managed with `pos communication telegram listener prefix <word> <command...>`)
+that runs any app with the rest of the message as one argument — e.g.
+`prefix opencode opencode` turns the message `opencode check cpu` into
+`opencode "check cpu"`. Routing order per non-command message: text-prefix
+map → AI bridge → `/command` map, so mapping a word in the prefix map
+shadows the Gemini bridge for that word.
 
 The bridge lives in the Telegram listener's `handle_message` (it calls
 `pos ai ask`); only the owner chat is served, so your key stays private.
