@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–204 |
-| ## 3. Installation Flow | 205–258 |
-| ## 4. The `pos` CLI System | 259–336 |
-| ## 5. Shared Library — `lib/common.sh` | 337–368 |
-| ## 6. Docker Compose / ScaleTail | 369–411 |
-| ## 7. Optional Apps (`apps/`) | 412–441 |
-| ## 8. Entertainment Module | 442–455 |
-| ## 9. Systemd Services | 456–467 |
-| ## 10. Configuration Files | 468–494 |
-| ## 11. Coding Conventions | 495–527 |
-| ## 12. Development Workflow | 528–580 |
-| ## 13. Key File Quick Reference | 581–652 |
-| ## 14. Common Tasks for Agents | 653–686 |
+| ## 2. Directory Structure | 44–205 |
+| ## 3. Installation Flow | 206–259 |
+| ## 4. The `pos` CLI System | 260–338 |
+| ## 5. Shared Library — `lib/common.sh` | 339–370 |
+| ## 6. Docker Compose / ScaleTail | 371–413 |
+| ## 7. Optional Apps (`apps/`) | 414–443 |
+| ## 8. Entertainment Module | 444–457 |
+| ## 9. Systemd Services | 458–469 |
+| ## 10. Configuration Files | 470–496 |
+| ## 11. Coding Conventions | 497–529 |
+| ## 12. Development Workflow | 530–582 |
+| ## 13. Key File Quick Reference | 583–655 |
+| ## 14. Common Tasks for Agents | 656–689 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -80,6 +80,7 @@ Linux_post_install/
 │   ├── pos-entertainment-enable            # Enable an auto-trigger for a plugin on a schedule
 │   ├── pos-entertainment-send              # Run a public-API plugin and send its output via the configured notify platforms
 │   ├── pos-entertainment-status            # Show enabled plugins and scheduler state
+│   ├── pos-media-grab                      # Auto-download URL as audio or video (classify + route)
 │   ├── pos-media-mp3                       # Download audio as MP3 (yt-dlp)
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
 │   ├── pos-media-sync                      # Incremental Music → USB sync (mp3/mp4, add/update only)
@@ -293,6 +294,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | entertainment | enable | `pos-entertainment-enable` | Enable an auto-trigger for a plugin on a schedule |  |  |
 | entertainment | send | `pos-entertainment-send` | Run a public-API plugin and send its output via the configured notify platforms |  |  |
 | entertainment | status | `pos-entertainment-status` | Show enabled plugins and scheduler state |  |  |
+| media | grab | `pos-media-grab` | Auto-download URL as audio or video (classify + route) |  |  |
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |  |  |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |  |  |
 | media | sync | `pos-media-sync` | Incremental Music → USB sync (mp3/mp4, add/update only) | lsblk jq | pos media sync --mp3 → Sync only MP3 files to USB · pos media sync --mp4 --dry-run → Preview MP4 sync without copying |
@@ -609,7 +611,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| `bin/pos-communication-telegram-listener` | 782 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 805 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
@@ -621,6 +623,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 95 | Run a public-API plugin and send its output via the configured notify platforms |
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
+| `bin/pos-media-grab` | 227 | Auto-download URL as audio or video (classify + route) |
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-media-sync` | 219 | Incremental Music → USB sync (mp3/mp4, add/update only) |
@@ -644,7 +647,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 692 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 308 | Dynamic bash completion |
+| `completions/pos.bash` | 309 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

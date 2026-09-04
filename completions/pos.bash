@@ -9,6 +9,7 @@ _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-pr
 _pos_flags[docker-stack]="-a --all"
 _pos_flags[docker-vbox]="--dir --gpu --device --port --cpus --memory --network"
 _pos_flags[entertainment-send]="--print --markdown"
+_pos_flags[media-grab]="--audio --video --best --worst --output --no-playlist --cookies --dry-run"
 _pos_flags[media-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
 _pos_flags[media-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
 _pos_flags[media-sync]="--mp3 --mp4 --source --dry-run"
@@ -46,7 +47,7 @@ _pos_subcmds[system-schedule]="run list config enable disable status migrate men
 _pos_subcmds[ai]="ask chat sessions capture models providers alias gemini openrouter"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
-declare -a _pos_config_scopes=(ai compose entertainment matrix notify scrcpy system telegram ytsync)
+declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)
 # GEN:END posconfigscopes
 
 _pos() {

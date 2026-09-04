@@ -1,11 +1,13 @@
 # How-To: `pos media`
 
-Download audio and video from the web via `yt-dlp`, sync your library to a
-USB stick, and keep YouTube channels incrementally up to date.
-Tools: `mp3`, `mp4`, `sync`, `ytsync`.
+Download audio and video from the web via `yt-dlp`, auto-classify URLs,
+sync your library to a USB stick, and keep YouTube channels incrementally
+up to date.
+Tools: `grab`, `mp3`, `mp4`, `sync`, `ytsync`.
 
 | Tool | What it does |
 |------|--------------|
+| `pos media grab` | Auto-classify URL and download as audio or video |
 | `pos media mp3` | Download audio, convert to MP3 |
 | `pos media mp4` | Download video with smart/interactive format selection |
 | `pos media sync` | Incrementally copy `~/Music` onto a USB stick (mp3/mp4) |
@@ -85,6 +87,56 @@ thumbnail embedded (`--embed-metadata --embed-chapters --embed-subs
 
 **Recipe:** grab a 4K stream for later — `--best` already picks the best
 video+audio and merges them.
+
+---
+
+## `pos media grab` — auto-classify URL and download
+
+```bash
+pos media grab <url>
+```
+
+Smart URL classifier that routes to `pos media mp3` or `pos media mp4`
+automatically based on the domain. Send a URL from your phone via Telegram and
+the bot downloads it to the right place without you thinking about it.
+
+**Classification rules:**
+
+| Domain | Routes to | Why |
+|--------|-----------|-----|
+| `music.youtube.com` | mp3 | Audio streaming |
+| `soundcloud.com` | mp3 | Audio-first platform |
+| `bandcamp.com` | mp3 | Audio-first platform |
+| `youtube.com` / `youtu.be` | mp4 | Video content |
+| `vimeo.com` / `twitch.tv` | mp4 | Video platforms |
+| Everything else | mp4 (default) | Safe fallback |
+
+Override the classification with `--audio` or `--video`. The default for
+unrecognized domains is `video` — change it with `pos config grab` or set
+`GRAB_DEFAULT=audio` in `~/.config/linux_post_install/grab.env`.
+
+```bash
+pos media grab https://music.youtube.com/watch?v=abc          # → ~/Music
+pos media grab https://youtube.com/watch?v=xyz                # → ~/Videos
+pos media grab --audio https://vimeo.com/123                  # force mp3
+pos media grab --worst https://youtu.be/abc                   # lowest quality
+pos media grab --dry-run https://soundcloud.com/artist/track  # preview only
+```
+
+Non-interactive by design — `pos media mp4` receives `--best` by default so it
+never prompts for a format (critical for Telegram bot context where there's no
+TTY). Pass `--worst` if you want the smallest file.
+
+| Flag | Meaning |
+|------|---------|
+| `--audio` | Force audio (mp3) download |
+| `--video` | Force video (mp4) download |
+| `--best` | Best quality for video (default) |
+| `--worst` | Lowest quality for video |
+| `-o, --output <dir>` | Output directory (passed to mp3/mp4) |
+| `--no-playlist` | Download only the single video |
+| `--cookies <file>` | Netscape cookies.txt for age-gated content |
+| `--dry-run` | Print the command that would run, don't execute |
 
 ---
 

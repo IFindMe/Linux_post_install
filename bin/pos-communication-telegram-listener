@@ -655,6 +655,22 @@ strip_markdown() {
     printf '%s' "$t"
 }
 
+# Detect a bare URL in message text. Extracts the first http(s) URL.
+# Returns 0 + prints the URL on success, 1 if no URL found.
+url_detect() {
+    local text="$1"
+    local url=""
+    if [[ "$text" =~ (https?://[^[:space:]]+) ]]; then
+        url="${BASH_REMATCH[1]}"
+        url="${url%%[,.\)!?:;]}"
+        url="${url%%\>*}"
+        [ -n "$url" ] || return 1
+        printf '%s' "$url"
+        return 0
+    fi
+    return 1
+}
+
 handle_message() {
     local text="$1" msg_id="$2" reply_text="${3:-}" value quiet=0
     case "$text" in
@@ -679,6 +695,13 @@ handle_message() {
         qtext="$(printf '%q' "$t")"
         log "prefix: $text"
         run_and_reply "$cmd $qtext" "$msg_id" 120 "$quiet"
+        return
+    fi
+    # URL detect: bare HTTP(S) URLs → pos media grab
+    local grab_url
+    if grab_url="$(url_detect "$text")"; then
+        log "grab: $grab_url"
+        run_and_reply "pos media grab --best \"$grab_url\"" "$msg_id" 600
         return
     fi
     # AI bridge: non-command text starting with "<prefix> " (default "ai",
