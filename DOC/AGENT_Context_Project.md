@@ -613,7 +613,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
-| `bin/pos-ai-hf` | 495 | Download AI models from Hugging Face (search, download, manage) |
+| `bin/pos-ai-hf` | 506 | Download AI models from Hugging Face (search, download, manage) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-ai-server` | 444 | llama.cpp local inference server (start, stop, status, models, logs) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |

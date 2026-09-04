@@ -199,7 +199,10 @@ hf_repo_files() {
     local endpoint="/models/${ns}/${repo}/tree/${branch}"
     local result
     if result="$(hf_api "$endpoint" 2>/dev/null)"; then
-        printf '%s' "$result"
+        # Tree API returns {type,path,size,oid[,lfs]} per entry — normalize to the
+        # {rfilename,size} shape the rest of the pipeline expects (same as fallback).
+        # Skip "directory" entries and guard non-object entries (error objects crash .[]).
+        printf '%s' "$result" | jq '[.[] | select(type == "object" and .type == "file") | {rfilename: .path, size: (.size // 0)}]'
         return 0
     fi
 
@@ -207,7 +210,7 @@ hf_repo_files() {
     warn "Tree endpoint unavailable, using repo metadata"
     local fallback
     fallback="$(hf_api "/models/${ns}/${repo}")" || err "Failed to fetch repo info for $repo_id"
-    printf '%s' "$fallback" | jq '[.siblings[] | {rfilename: .rfilename, size: (.size // 0)}]'
+    printf '%s' "$fallback" | jq '[.siblings[]? | select(type == "object") | {rfilename: (.rfilename // ""), size: (.size // 0)}]'
 }
 
 hf_search() {
@@ -333,7 +336,7 @@ cmd_download() {
         filtered_files="$(printf '%s' "$files_json" | jq -c --arg fn "$filename" '[.[] | select(.rfilename == $fn)]')"
     elif [ "$GGUF_ONLY" -eq 1 ]; then
         # GGUF filter
-        filtered_files="$(printf '%s' "$files_json" | jq -c '[.[] | select(.rfilename | endswith(".gguf"))]')"
+        filtered_files="$(printf '%s' "$files_json" | jq -c '[.[] | select((.rfilename | type) == "string" and (.rfilename | endswith(".gguf")))]')"
     else
         # All files
         filtered_files="$(printf '%s' "$files_json" | jq -c '.')"
@@ -341,7 +344,15 @@ cmd_download() {
 
     local file_count
     file_count="$(printf '%s' "$filtered_files" | jq 'length')"
-    [ "$file_count" -gt 0 ] || err "No files to download"
+    if [ "$file_count" -eq 0 ]; then
+        if [ -n "$filename" ]; then
+            err "File not found: $filename in $repo_id (branch: ${branch})"
+        elif [ "$GGUF_ONLY" -eq 1 ]; then
+            err "No .gguf files found in $repo_id${branch:+ (branch: $branch)} — try without --gguf"
+        else
+            err "No files to download"
+        fi
+    fi
 
     # Prepare target directory
     local target_dir
