@@ -652,7 +652,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 435 | Remove pos toolkit binaries, services, shell integration, config, and data |
-| `bin/pos-ai` | 696 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-ai` | 702 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 312 | Dynamic bash completion |

@@ -552,12 +552,15 @@ cfg_ui() {
                 n=$((n + 1))
                 v="$(cfg_value "$file" "$k")"
                 disp="$(cfg_display "$v" "$f")"
-                [ "$disp" = "(not set)" ] && disp="${DIM}(not set)${RESET}"
-                if [ "$dim" -eq 1 ]; then
-                    printf '%s  %2d) %-28s %s%s\n' "$DIM" "$n" "$k" "$disp" "$RESET"
-                else
-                    printf '  %s%2d)%s %s%-28s%s %s\n' "$DIM" "$n" "$RESET" "$BOLD" "$k" "$RESET" "$disp"
+                if [ "$disp" = "(not set)" ]; then
+                    disp="${DIM}(not set)${RESET}"
+                elif [ "$dim" -eq 1 ]; then
+                    # Inactive group: key name stays bold/colored (readable);
+                    # only the value dims — the caption already carries the
+                    # inactive reason, so a fully grey block adds no signal.
+                    disp="${DIM}${disp}${RESET}"
                 fi
+                printf '  %s%2d)%s %s%-28s%s %s\n' "$DIM" "$n" "$RESET" "$BOLD" "$k" "$RESET" "$disp"
                 if [ -n "$d" ]; then
                     [ "$dim" -eq 1 ] && printf '%s' "$DIM"
                     _cfg_wrap "$d" "$wrapW" "      "

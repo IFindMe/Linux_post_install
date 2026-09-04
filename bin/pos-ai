@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
 # POS_FLAGS: --provider --model --session --system --full --last --trust
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset) | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE=num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS=num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS=num:CPU threads (default: nproc) | *providers=llamacpp
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini, openrouter or llamacpp, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @[AI_PROVIDER=llamacpp] llamacpp | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE=num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS=num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS=num:CPU threads (default: nproc) | *providers=llamacpp | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -23,7 +23,7 @@ MAX_SESSION_TURNS=40
 LAST_LOG_MAX_BYTES=4096
 LAST_LOG_STALE_SECS=3600   # --last: warn when the attached log is older than this
 # Built-in terse ask prompt. cmd_ask appends a machine-context clause
-# (see machine_context) unless --system replaces it or --full drops everything.
+# (see machine_context) on EVERY ask — even --system/--full.
 DEFAULT_SYSTEM_PROMPT_HARD="You are a Linux CLI assistant. Rules:
 1. Lead with exact command(s) — no explanations unless asked
 2. One line max per command; short bullets for multi-step only
@@ -78,7 +78,7 @@ Options:
   -h|--help         This help.
 
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
-  AI_PROVIDER         Provider to use (gemini|openrouter, default gemini)
+  AI_PROVIDER         Provider to use (gemini|openrouter|llamacpp, default gemini)
   AI_SYSTEM_PROMPT    Custom system prompt (overrides built-in; empty to reset)
   Provider keys:      auto-discovered from lib/ai-providers/*.sh
                       (AI_GEMINI_API_KEY, OPENROUTER_API_KEY, etc.)
@@ -502,7 +502,8 @@ cmd_ask() {
     fi
     require_key
     # Terse by default: user --system replaces the built-in prompt wholesale;
-    # --full skips everything (built-in text AND machine context).
+    # --full skips the built-in text. The machine-context line (hostname,
+    # distro, kernel, arch) is ALWAYS appended so every ask knows the box.
     system="$SYSTEM_PROMPT"
     if [ -z "$system" ] && [ "$FULL_MODE" -eq 0 ]; then
         # Check AI_SYSTEM_PROMPT config first, then fall back to built-in
@@ -510,9 +511,14 @@ cmd_ask() {
         if [ -z "$system" ]; then
             system="$DEFAULT_SYSTEM_PROMPT_HARD"
         fi
-        mc="$(machine_context)"
+    fi
+    mc="$(machine_context)"
+    if [ -n "$system" ]; then
         [ -n "$mc" ] && mc=" $mc"
         system="$system$mc"
+    else
+        # --full (no system text): carry machine context as the sole system turn
+        system="$mc"
     fi
     # Persistent session memory ('default' unless --session).
     messages="$(session_load)"
