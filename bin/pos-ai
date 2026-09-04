@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
 # POS_FLAGS: --provider --model --session --system --full --last --trust
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | llamacpp | *providers=llamacpp | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset) | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE:num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS:num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS:num:CPU threads (default: nproc)
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset) | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE=num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS=num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS=num:CPU threads (default: nproc) | *providers=llamacpp
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
