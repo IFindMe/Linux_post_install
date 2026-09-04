@@ -55,8 +55,8 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 ### ai
 
-**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` (backward-compat forwarders → `pos ai --provider <name>`), `bin/pos-ai-hf` (Hugging Face model downloader)
-**Provider adapters:** `lib/ai-providers/gemini.sh`, `lib/ai-providers/openrouter.sh`
+**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` (backward-compat forwarders → `pos ai --provider <name>`), `bin/pos-ai-hf` (Hugging Face model downloader), `bin/pos-ai-server` (llama.cpp inference server manager)
+**Provider adapters:** `lib/ai-providers/gemini.sh`, `lib/ai-providers/openrouter.sh`, `lib/ai-providers/llamacpp.sh`
 **Purpose:** AI assistant with pluggable providers. Six subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), `models` (list available models), `providers` (list providers and config status), and `sessions` (list/clear sessions). Providers handle API-specific logic; the main tool handles sessions, rendering, machine context, and all shared logic.
 
 | Command | Behavior |
@@ -110,6 +110,18 @@ Model precedence: `--model` flag > `AI_MODEL` env > provider-specific fallback (
 | `pos ai hf remove <repo-id>` | Remove a downloaded model directory and show freed space |
 
 Auth: `HF_TOKEN` in `~/.config/linux_post_install/ai.env` (same scope as `pos ai`; edit via `pos config ai`). Even for public repos, a token increases rate limits from 500/5min to 1000/5min. Resume: `curl -C -` resumes interrupted downloads. Rate limit handling: on HTTP 429, sleeps `Retry-After` or 60s, retries once.
+
+`pos ai server` — llama.cpp local inference server manager:
+
+| Command | Behavior |
+|---------|----------|
+| `pos ai server start [model]` | Generate and start a systemd user service running llama-server. Model resolution: explicit arg > `LLAMACPP_MODEL` config > interactive pick (TTY only). Auto-detects GPU (CUDA via `nvidia-smi`); sets `--n-gpu-layers` accordingly. Writes unit to `~/.config/systemd/user/pos-ai-server.service`, runs `daemon-reload && enable --now`. Warns about linger if needed |
+| `pos ai server stop` | Stop and disable the systemd user service, remove the unit file |
+| `pos ai server status` | Show service state, loaded model (from `/v1/models`), port, host, GPU, context, threads, autostart, endpoint, and health (from `/health`) |
+| `pos ai server models` | List `.gguf` files found in `HF_DOWNLOAD_DIR` with sizes |
+| `pos ai server logs [lines]` | Show recent server logs via `journalctl --user -u pos-ai-server` (default 50 lines) |
+
+Flags: `--port <port>` (default 8088), `--host <addr>` (default 127.0.0.1), `--model <path>` (overrides arg/config), `--ctx <size>` (context window, default 4096), `--gpu <layers>` (-1=auto, 0=CPU, N=explicit, default -1), `--threads <n>` (default nproc). Config keys in `ai.env`: `LLAMACPP_PORT`, `LLAMACPP_HOST`, `LLAMACPP_MODEL`, `LLAMACPP_CTX_SIZE`, `LLAMACPP_GPU_LAYERS`, `LLAMACPP_THREADS`. Requires `curl` + `jq` and a `llama-server` binary on PATH.
 
 ### network
 

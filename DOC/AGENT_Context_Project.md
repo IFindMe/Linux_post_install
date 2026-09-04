@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–207 |
-| ## 3. Installation Flow | 208–261 |
-| ## 4. The `pos` CLI System | 262–341 |
-| ## 5. Shared Library — `lib/common.sh` | 342–373 |
-| ## 6. Docker Compose / ScaleTail | 374–416 |
-| ## 7. Optional Apps (`apps/`) | 417–446 |
-| ## 8. Entertainment Module | 447–460 |
-| ## 9. Systemd Services | 461–472 |
-| ## 10. Configuration Files | 473–499 |
-| ## 11. Coding Conventions | 500–532 |
-| ## 12. Development Workflow | 533–585 |
-| ## 13. Key File Quick Reference | 586–659 |
-| ## 14. Common Tasks for Agents | 660–693 |
+| ## 2. Directory Structure | 44–209 |
+| ## 3. Installation Flow | 210–263 |
+| ## 4. The `pos` CLI System | 264–344 |
+| ## 5. Shared Library — `lib/common.sh` | 345–376 |
+| ## 6. Docker Compose / ScaleTail | 377–419 |
+| ## 7. Optional Apps (`apps/`) | 420–449 |
+| ## 8. Entertainment Module | 450–463 |
+| ## 9. Systemd Services | 464–475 |
+| ## 10. Configuration Files | 476–502 |
+| ## 11. Coding Conventions | 503–535 |
+| ## 12. Development Workflow | 536–588 |
+| ## 13. Key File Quick Reference | 589–663 |
+| ## 14. Common Tasks for Agents | 664–697 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -66,6 +66,8 @@ Linux_post_install/
 │   ├── pos-ai-hf                           # Download AI models from Hugging Face (search, download, manage)
 │   │   [deps: curl jq]
 │   ├── pos-ai-openrouter                   # Forward to pos ai --provider openrouter (backward compat)
+│   ├── pos-ai-server                       # llama.cpp local inference server (start, stop, status, models, logs)
+│   │   [deps: curl jq]
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
 │   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
 │   ├── pos-communication-scrcpy            # Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info)
@@ -282,6 +284,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |  |  |
 | ai | hf | `pos-ai-hf` | Download AI models from Hugging Face (search, download, manage) | curl jq | pos ai hf search llama 7b → Search Hugging Face for "llama 7b" models · pos ai hf download meta-llama/Llama-3.1-8B-Instruct → Download all files from a repo · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf → Download only GGUF quantized files · pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json → Download a single file · pos ai hf list → List downloaded models · pos ai hf remove meta-llama-Llama-3.1-8B-Instruct → Remove a downloaded model |
 | ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |  |  |
+| ai | server | `pos-ai-server` | llama.cpp local inference server (start, stop, status, models, logs) | curl jq |  |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |  |  |
 | communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |  |  |
 | communication | scrcpy | `pos-communication-scrcpy` | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |  |  |
@@ -612,6 +615,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
 | `bin/pos-ai-hf` | 495 | Download AI models from Hugging Face (search, download, manage) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
+| `bin/pos-ai-server` | 444 | llama.cpp local inference server (start, stop, status, models, logs) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
@@ -648,10 +652,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 435 | Remove pos toolkit binaries, services, shell integration, config, and data |
-| `bin/pos-ai` | 692 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-ai` | 696 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 310 | Dynamic bash completion |
+| `completions/pos.bash` | 312 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers
 # POS_FLAGS: --provider --model --session --system --full --last --trust
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini or openrouter, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | llamacpp | *providers=llamacpp | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset) | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE:num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS:num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS:num:CPU threads (default: nproc)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -167,6 +167,7 @@ resolve_key() {
     case "$p" in
         gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && export AI_API_KEY="$AI_GEMINI_API_KEY" && return 0 ;;
         openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && export AI_API_KEY="$OPENROUTER_API_KEY" && return 0 ;;
+        llamacpp)   return 0 ;;  # No API key needed for local server
     esac
     return 1
 }
@@ -177,6 +178,7 @@ require_key() {
         case "$p" in
             gemini)     err "No Gemini API key — run 'pos config ai' and set AI_GEMINI_API_KEY" ;;
             openrouter) err "No OpenRouter API key — run 'pos config ai' and set OPENROUTER_API_KEY" ;;
+            llamacpp)   ;;  # No key needed for local server
         esac
         err "No API key for provider '$p' — run 'pos config ai'"
     fi
@@ -193,6 +195,7 @@ resolve_model() {
         case "$p" in
             gemini)     [ -n "${AI_GEMINI_MODEL:-}" ] && printf '%s' "$AI_GEMINI_MODEL" && return ;;
             openrouter) [ -n "${OPENROUTER_MODEL:-}" ] && printf '%s' "$OPENROUTER_MODEL" && return ;;
+            llamacpp)   [ -n "${LLAMACPP_MODEL:-}" ] && printf '%s' "$(basename "$LLAMACPP_MODEL")" && return ;;
         esac
         provider_default_model
     fi
@@ -620,6 +623,7 @@ cmd_providers() {
         case "$name" in
             gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && configured="configured" ;;
             openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && configured="configured" ;;
+            llamacpp)   configured="configured" ;;  # Local server — always configured
         esac
         current=""
         [ "$name" = "$active" ] && current=" ← active"

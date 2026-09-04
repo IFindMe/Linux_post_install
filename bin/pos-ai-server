@@ -1,0 +1,444 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: ai server — llama.cpp local inference server (start, stop, status, models, logs)
+# POS_SUBCMDS: start stop status models logs
+# POS_FLAGS: --port --host --model --ctx --gpu --threads
+# POS_DEPS: curl jq
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+# ── Dependencies (before --help) ───────────────────────────────
+command -v curl &>/dev/null || err "curl not found (install curl)"
+command -v jq &>/dev/null || err "jq not found (install jq)"
+
+# ── Config / seams ─────────────────────────────────────────────
+CONFIG_FILE="${CONFIG_FILE:-$HOME/.config/linux_post_install/ai.env}"
+USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
+SERVICE="pos-ai-server.service"
+HF_DOWNLOAD_DIR="${HF_DOWNLOAD_DIR:-$HOME/.local/share/linux_post_install/ai/models}"
+
+# ── Config loader (env-var precedence, same pattern as pos-ai-hf) ──
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        v="${v//$'\r'/}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+load_config
+
+# ── Binary detection ───────────────────────────────────────────
+find_llamacpp() {
+    local candidates=("llama-server" "llama.cpp/server" "server" "llama-server-cuda")
+    local bin
+    for bin in "${candidates[@]}"; do
+        command -v "$bin" &>/dev/null && { echo "$bin"; return 0; }
+    done
+    return 1
+}
+
+# ── GPU detection ──────────────────────────────────────────────
+detect_gpu() {
+    if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null 2>&1; then
+        echo "cuda"
+    else
+        echo "cpu"
+    fi
+}
+
+resolve_gpu_layers() {
+    local configured="${LLAMACPP_GPU_LAYERS:-}"
+    if [ -n "$configured" ] && [ "$configured" != "-1" ]; then
+        echo "$configured"
+        return
+    fi
+    # Auto-detect
+    local gpu
+    gpu="$(detect_gpu)"
+    case "$gpu" in
+        cuda) echo "-1" ;;
+        *)    echo "0" ;;
+    esac
+}
+
+# ── Human-readable size ────────────────────────────────────────
+human_size() {
+    local bytes="$1"
+    if [ "$bytes" -ge 1073741824 ]; then
+        awk "BEGIN { printf \"%.1f GB\", $bytes / 1073741824 }"
+    elif [ "$bytes" -ge 1048576 ]; then
+        awk "BEGIN { printf \"%.1f MB\", $bytes / 1048576 }"
+    elif [ "$bytes" -ge 1024 ]; then
+        awk "BEGIN { printf \"%.1f KB\", $bytes / 1024 }"
+    else
+        printf '%d B' "$bytes"
+    fi
+}
+
+# ── Health check ───────────────────────────────────────────────
+check_health() {
+    local port="${LLAMACPP_PORT:-8088}"
+    local resp
+    resp="$(curl -sf "http://127.0.0.1:$port/health" 2>/dev/null)" || { echo "not running"; return 1; }
+    local status
+    status="$(printf '%s' "$resp" | jq -r '.status // "unknown"' 2>/dev/null)"
+    echo "$status"
+}
+
+# ── Interactive model picker (reads /dev/tty, not stdin) ───────
+pick_model() {
+    local models=() i
+    while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        models+=("$f")
+    done < <(find "$HF_DOWNLOAD_DIR" -name '*.gguf' -type f 2>/dev/null | sort)
+
+    [ ${#models[@]} -gt 0 ] || err "No GGUF models found — run 'pos ai hf download <repo> --gguf'"
+
+    echo "Available models:"
+    for ((i = 0; i < ${#models[@]}; i++)); do
+        local name size
+        name="$(basename "${models[$i]}")"
+        size="$(stat -c%s "${models[$i]}" 2>/dev/null || echo 0)"
+        printf '  %2d) %-50s %s\n' "$((i + 1))" "$name" "$(human_size "$size")"
+    done
+    echo
+    local choice
+    printf 'Pick a model [1-%d]: ' "${#models[@]}"
+    IFS= read -r choice </dev/tty || choice=""
+    [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#models[@]}" ] || err "Invalid selection"
+    printf '%s' "${models[$((choice - 1))]}"
+}
+
+# ── Model resolution ───────────────────────────────────────────
+resolve_model() {
+    local explicit="${1:-}"
+    # 1. Explicit argument
+    if [ -n "$explicit" ]; then
+        # Absolute path
+        if [[ "$explicit" == /* ]]; then
+            [ -f "$explicit" ] || err "Model not found: $explicit"
+            printf '%s' "$explicit"
+            return
+        fi
+        # Relative to HF_DOWNLOAD_DIR
+        local candidate="$HF_DOWNLOAD_DIR/$explicit"
+        if [ -f "$candidate" ]; then
+            printf '%s' "$candidate"
+            return
+        fi
+        # Also try with the name as-is (could be a relative path)
+        [ -f "$explicit" ] && { printf '%s' "$explicit"; return; }
+        err "Model not found: $explicit (also searched $HF_DOWNLOAD_DIR)"
+    fi
+    # 2. Config
+    if [ -n "${LLAMACPP_MODEL:-}" ]; then
+        [ -f "$LLAMACPP_MODEL" ] || err "Configured model not found: $LLAMACPP_MODEL"
+        printf '%s' "$LLAMACPP_MODEL"
+        return
+    fi
+    # 3. Interactive pick (only on TTY)
+    if [ -t 0 ] || [ -w /dev/tty ]; then
+        local picked
+        picked="$(pick_model)"
+        printf '%s' "$picked"
+        return
+    fi
+    err "No model specified and no LLAMACPP_MODEL configured — run 'pos ai server start <model>' or set LLAMACPP_MODEL in ai.env"
+}
+
+# ── Usage ──────────────────────────────────────────────────────
+usage() {
+    cat <<'EOF'
+Usage: pos ai server <command> [args]
+
+Manage a local llama.cpp inference server via systemd user service.
+
+Commands:
+  start [model]       Start the server (model: argument, config, or interactive pick)
+  stop                Stop and disable the server
+  status              Show service state, config, and health
+  models              List available GGUF files
+  logs [lines]        Show recent server logs
+
+Options:
+  --port <port>       Server port (default: 8088)
+  --host <addr>       Bind address (default: 127.0.0.1)
+  --model <path>      Model path (overrides argument and config)
+  --ctx <size>        Context window size (default: 4096)
+  --gpu <layers>      GPU layers: -1=auto, 0=CPU, N=explicit (default: -1)
+  --threads <n>       CPU threads (default: nproc)
+  -h|--help           This help
+
+Examples:
+  pos ai server start mistral-7b-v0.1.Q4_K_M.gguf
+  pos ai server start /path/to/model.gguf --port 9090 --gpu 0
+  pos ai server status
+  pos ai server logs 50
+  pos ai server models
+  pos ai server stop
+
+Config (~/.config/linux_post_install/ai.env):
+  LLAMACPP_PORT       Server port (default 8088)
+  LLAMACPP_HOST       Bind address (default 127.0.0.1)
+  LLAMACPP_MODEL      Default model path (GGUF file)
+  LLAMACPP_CTX_SIZE   Context window size (default 4096)
+  LLAMACPP_GPU_LAYERS GPU layers: -1=auto, 0=CPU only (default -1)
+  LLAMACPP_THREADS    CPU threads (default: nproc)
+
+Requires: llama-server binary (install llama.cpp: https://github.com/ggerganov/llama.cpp)
+EOF
+    exit 0
+}
+
+# ── Parse flags ────────────────────────────────────────────────
+PORT="${LLAMACPP_PORT:-8088}"
+HOST="${LLAMACPP_HOST:-127.0.0.1}"
+CTX_SIZE="${LLAMACPP_CTX_SIZE:-4096}"
+GPU_LAYERS="${LLAMACPP_GPU_LAYERS:--1}"
+THREADS="${LLAMACPP_THREADS:-}"
+MODEL_ARG=""
+SUBCMD=""
+SUBCMD_ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --port)
+            [ $# -ge 2 ] || err "--port requires a value"
+            PORT="$2"; shift 2 ;;
+        --host)
+            [ $# -ge 2 ] || err "--host requires a value"
+            HOST="$2"; shift 2 ;;
+        --model)
+            [ $# -ge 2 ] || err "--model requires a value"
+            MODEL_ARG="$2"; shift 2 ;;
+        --ctx)
+            [ $# -ge 2 ] || err "--ctx requires a value"
+            CTX_SIZE="$2"; shift 2 ;;
+        --gpu)
+            [ $# -ge 2 ] || err "--gpu requires a value"
+            GPU_LAYERS="$2"; shift 2 ;;
+        --threads)
+            [ $# -ge 2 ] || err "--threads requires a value"
+            THREADS="$2"; shift 2 ;;
+        -*)
+            err "Unknown option '$1' (see --help)" ;;
+        *)
+            if [ -z "$SUBCMD" ]; then
+                SUBCMD="$1"
+            else
+                SUBCMD_ARGS+=("$1")
+            fi
+            shift ;;
+    esac
+done
+
+# Apply flag overrides back to config defaults (flags > env > file default)
+LLAMACPP_PORT="$PORT"
+LLAMACPP_HOST="$HOST"
+LLAMACPP_CTX_SIZE="$CTX_SIZE"
+LLAMACPP_GPU_LAYERS="$GPU_LAYERS"
+if [ -z "$THREADS" ]; then
+    THREADS="$(nproc 2>/dev/null || echo 4)"
+fi
+LLAMACPP_THREADS="$THREADS"
+
+# ── Subcommands ────────────────────────────────────────────────
+
+cmd_start() {
+    # Resolve the llama-server binary
+    local llamacpp_bin
+    llamacpp_bin="$(find_llamacpp)" || err "llama-server not found — install llama.cpp (https://github.com/ggerganov/llama.cpp)"
+    local llamacpp_full
+    llamacpp_full="$(command -v "$llamacpp_bin")"
+
+    # Resolve model
+    local explicit_model="${SUBCMD_ARGS[0]:-}"
+    # Flag --model takes precedence over positional arg
+    [ -n "$MODEL_ARG" ] && explicit_model="$MODEL_ARG"
+    local model
+    model="$(resolve_model "$explicit_model")"
+
+    # Resolve GPU layers
+    local gpu_layers
+    gpu_layers="$(resolve_gpu_layers)"
+
+    # Warn if no GPU detected and auto-detect resolved to CPU
+    if [ "$gpu_layers" = "0" ] && [ "${LLAMACPP_GPU_LAYERS:--1}" = "-1" ]; then
+        warn "No NVIDIA GPU detected — running in CPU mode"
+    fi
+
+    # Check port availability (best-effort)
+    if command -v ss &>/dev/null; then
+        if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+            # Port might be our own old instance — only warn
+            warn "Port $PORT may already be in use — check with 'ss -tlnp'"
+        fi
+    fi
+
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) generate systemd unit $USER_SYSTEMD_DIR/$SERVICE"
+        log "(dry-run) ExecStart: $llamacpp_full -m $model --port $PORT --host $HOST --n-gpu-layers $gpu_layers --ctx-size $CTX_SIZE --threads $THREADS"
+        log "(dry-run) systemctl --user daemon-reload && enable --now $SERVICE"
+        return 0
+    fi
+
+    # Generate systemd unit
+    mkdir -p "$USER_SYSTEMD_DIR"
+    cat > "$USER_SYSTEMD_DIR/$SERVICE" <<EOF
+[Unit]
+Description=pos llama.cpp inference server (linux-post-install)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$llamacpp_full -m $model --port $PORT --host $HOST --n-gpu-layers $gpu_layers --ctx-size $CTX_SIZE --threads $THREADS
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+EnvironmentFile=-%h/.config/linux_post_install/ai.env
+
+[Install]
+WantedBy=default.target
+EOF
+    chmod 644 "$USER_SYSTEMD_DIR/$SERVICE"
+
+    # Enable and start
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$SERVICE"
+
+    log "Server starting — model: $(basename "$model"), port: $PORT"
+
+    # Linger warning
+    if command -v loginctl >/dev/null 2>&1; then
+        if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
+            warn "enable linger so the server survives logout: sudo loginctl enable-linger $(id -un)"
+        fi
+    fi
+
+    # Health check (wait briefly)
+    sleep 2
+    local health
+    health="$(check_health)" || true
+    if [ "$health" != "not running" ]; then
+        ok "Server healthy (status: $health)"
+    else
+        warn "Server may not be ready yet — check with 'pos ai server status'"
+    fi
+}
+
+cmd_stop() {
+    if [ ! -f "$USER_SYSTEMD_DIR/$SERVICE" ]; then
+        warn "No llama.cpp server service installed ($SERVICE)"
+        return 0
+    fi
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) systemctl --user disable --now $SERVICE; remove unit"
+    else
+        systemctl --user disable --now "$SERVICE" 2>/dev/null || true
+        rm -f "$USER_SYSTEMD_DIR/$SERVICE"
+        systemctl --user daemon-reload
+    fi
+    log "llama.cpp server stopped and removed"
+}
+
+cmd_status() {
+    # Service state
+    local svc_state="stopped"
+    if systemctl --user is-active "$SERVICE" &>/dev/null; then
+        svc_state="running"
+    fi
+    printf 'service:   %s\n' "$svc_state"
+
+    # Model (from health endpoint if running)
+    if [ "$svc_state" = "running" ]; then
+        local models_resp
+        models_resp="$(curl -sf "http://127.0.0.1:$PORT/v1/models" 2>/dev/null)" || true
+        local model_id
+        model_id="$(printf '%s' "$models_resp" | jq -r '.data[0].id // "unknown"' 2>/dev/null)" || model_id="unknown"
+        printf 'model:     %s\n' "$model_id"
+    else
+        printf 'model:     (not loaded)\n'
+    fi
+
+    # Config
+    printf 'port:      %s\n' "$PORT"
+    printf 'host:      %s\n' "$HOST"
+
+    # GPU
+    local gpu_type
+    gpu_type="$(detect_gpu)"
+    printf 'gpu:       %s (%s layers)\n' "${gpu_type^^}" "$GPU_LAYERS"
+
+    printf 'context:   %s\n' "$CTX_SIZE"
+    printf 'threads:   %s\n' "$THREADS"
+
+    # Autostart
+    if systemctl --user is-enabled "$SERVICE" &>/dev/null; then
+        printf 'autostart: enabled\n'
+    else
+        printf 'autostart: disabled\n'
+    fi
+
+    # Endpoint
+    printf 'endpoint:  http://%s:%s\n' "$HOST" "$PORT"
+
+    # Health
+    if [ "$svc_state" = "running" ]; then
+        local health
+        health="$(check_health)" || health="not responding"
+        printf 'health:    %s\n' "$health"
+    else
+        printf 'health:    not running\n'
+    fi
+}
+
+cmd_models() {
+    local dir="${HF_DOWNLOAD_DIR}"
+    [ -d "$dir" ] || { warn "No models directory — run 'pos ai hf download' first"; return 0; }
+
+    local found=0
+    echo "Available GGUF models:"
+    while IFS= read -r gguf; do
+        [ -f "$gguf" ] || continue
+        found=1
+        local name size
+        name="$(basename "$gguf")"
+        local dir_name
+        dir_name="$(basename "$(dirname "$gguf")")"
+        size="$(stat -c%s "$gguf" 2>/dev/null || echo 0)"
+        local hsize
+        hsize="$(human_size "$size")"
+        printf '  %-50s %s\n' "$dir_name/$name" "$hsize"
+    done < <(find "$dir" -name '*.gguf' -type f 2>/dev/null | sort)
+
+    [ "$found" -eq 0 ] && warn "No .gguf files found — download with 'pos ai hf download <repo> --gguf'"
+}
+
+cmd_logs() {
+    local lines="${SUBCMD_ARGS[0]:-50}"
+    [[ "$lines" =~ ^[0-9]+$ ]] || err "lines must be a number"
+    journalctl --user -u "$SERVICE" -n "$lines" --no-pager 2>/dev/null || warn "No logs found — server may not have been started"
+}
+
+# ── Dispatch ───────────────────────────────────────────────────
+case "${SUBCMD:-}" in
+    "")       usage ;;
+    start)    cmd_start ;;
+    stop)     cmd_stop ;;
+    status)   cmd_status ;;
+    models)   cmd_models ;;
+    logs)     cmd_logs ;;
+    *)        err "Unknown subcommand '$SUBCMD' (see --help)" ;;
+esac
