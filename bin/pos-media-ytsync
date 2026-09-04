@@ -175,6 +175,27 @@ classify_url() {   # names-one-video (v= or youtu.be/<id>) → video; list= → 
     fi
 }
 
+# ── Channel URL canonicalization ─────────────────────────────────────
+# yt-dlp --flat-playlist on a bare channel URL returns the channel's
+# TAB list (Videos/Live/Shorts; _type "playlist", url null, id==channel_id),
+# not videos. Appending /videos makes the probe return the real videos.
+canonical_channel_url() {   # add /videos to bare channel URLs; echo canonical
+    local u="$1"
+    case "$u" in
+        @*) u="https://www.youtube.com/$u" ;;   # bare 'handle' → full URL
+    esac
+    [ "$(classify_url "$u")" = "channel" ] || { printf '%s' "$u"; return 0; }
+    local path="${u%%\?*}"
+    path="${path%%\#*}"
+    path="${path%/}"
+    case "${path##*/}" in
+        videos | shorts | streams | live | playlists | featured | releases | podcasts | search)
+            printf '%s' "$u" ;;
+        *)
+            printf '%s/videos' "$u" ;;
+    esac
+}
+
 sanitize_component() {   # safe directory component from a resolved name
     local s="$1"
     s="${s//\//-}"
@@ -315,6 +336,7 @@ PROBE_ERR=""
 
 run_probe() {   # run_probe <url>
     local url="$1"
+    url="$(canonical_channel_url "$url")"
     PROBE_JSON="$(newtmp)"
     PROBE_ERR="$(newtmp)"
     local msg="Resolving source …" start rc pid elapsed i
@@ -378,14 +400,14 @@ collect_entries() {   # flat .entries[] or a single video object (?v= URLs)
     n="$(jq -r '((.entries // []) | length)' "$PROBE_JSON")"
     if [ "$n" -gt 0 ]; then
         local -a pairs=()
-        mapfile -t pairs < <(jq -r '.entries[] | ((.id // "") + "\u001f" + (.title // ""))' "$PROBE_JSON")
+        mapfile -t pairs < <(jq -r '.entries[] | select((.url // "") | test("watch\\?v=|youtu\\.be/|/shorts/")) | ((.id // "") + "\u001f" + (.title // ""))' "$PROBE_JSON")
         for p in "${pairs[@]}"; do
             id="${p%%$'\x1f'*}"
             t="${p#*$'\x1f'}"
             ENTRY_IDS+=("$id")
             ENTRY_TITLES+=("$t")
         done
-    else
+    elif [ "$(jq -r '._type // ""' "$PROBE_JSON")" = "video" ]; then
         ENTRY_IDS+=("$(jq -r '.id // ""' "$PROBE_JSON")")
         ENTRY_TITLES+=("$(jq -r '.title // ""' "$PROBE_JSON")")
     fi
