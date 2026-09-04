@@ -1,0 +1,495 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: ai hf — Download AI models from Hugging Face (search, download, manage)
+# POS_FLAGS: --branch --gguf --output
+# POS_DEPS: curl jq
+# POS_CONFIG: ai | ai.env | HF_TOKEN=secret:Hugging Face API token (https://huggingface.co/settings/tokens) | HF_DOWNLOAD_DIR=:Model download directory (default ~/.local/share/linux_post_install/ai/models)
+# POS_EXAMPLES: pos ai hf search llama 7b | Search Hugging Face for "llama 7b" models
+# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct | Download all files from a repo
+# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf | Download only GGUF quantized files
+# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json | Download a single file
+# POS_EXAMPLES: pos ai hf list | List downloaded models
+# POS_EXAMPLES: pos ai hf remove meta-llama-Llama-3.1-8B-Instruct | Remove a downloaded model
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+
+# ── Dependencies (before --help) ───────────────────────────────
+command -v curl &>/dev/null || err "curl not found (install curl)"
+command -v jq &>/dev/null   || err "jq not found (install jq)"
+
+# ── Config & defaults ──────────────────────────────────────────
+CONFIG_FILE="${CONFIG_FILE:-$HOME/.config/linux_post_install/ai.env}"
+HF_TOKEN="${HF_TOKEN:-}"
+HF_DOWNLOAD_DIR="${HF_DOWNLOAD_DIR:-$HOME/.local/share/linux_post_install/ai/models}"
+
+load_hf_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local k v
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in
+            \#*) continue ;;
+        esac
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        v="${v//$'\r'/}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+}
+
+load_hf_config
+
+# ── Usage ──────────────────────────────────────────────────────
+usage() {
+    cat <<'EOF'
+Usage: pos ai hf <subcommand> [args]
+
+Hugging Face model downloader — search, download, and manage AI models.
+
+Subcommands:
+  search <query>                     Search Hugging Face models
+  download <repo-id> [filename]      Download a file or entire repo
+  list                               List downloaded models
+  remove <repo-id>                   Remove a downloaded model
+
+Download options:
+  --branch <rev>                     Download from a specific branch/revision
+  --gguf                             Download only .gguf files (inference-ready)
+  --output <dir>                     Override download directory
+
+Examples:
+  pos ai hf search llama 7b
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct --branch main
+  pos ai hf list
+  pos ai hf remove meta-llama-Llama-3.1-8B-Instruct
+
+Config (~/.config/linux_post_install/ai.env):
+  HF_TOKEN           Hugging Face API token (better rate limits for public repos)
+  HF_DOWNLOAD_DIR    Model download directory (default ~/.local/share/linux_post_install/ai/models)
+
+Exit codes:
+  0  success
+  1  error (missing deps, invalid input, API failure)
+EOF
+    exit 0
+}
+
+# ── Parse global flags ─────────────────────────────────────────
+SUBCMD=""
+SUBCMD_ARGS=()
+BRANCH=""
+GGUF_ONLY=0
+OUTPUT_DIR=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --branch)
+            [ $# -ge 2 ] || err "--branch requires a value"
+            BRANCH="$2"; shift 2 ;;
+        --gguf)
+            GGUF_ONLY=1; shift ;;
+        --output)
+            [ $# -ge 2 ] || err "--output requires a value"
+            OUTPUT_DIR="$2"; shift 2 ;;
+        -*)
+            err "Unknown option '$1' (see --help)" ;;
+        *)
+            if [ -z "$SUBCMD" ]; then
+                SUBCMD="$1"
+            else
+                SUBCMD_ARGS+=("$1")
+            fi
+            shift ;;
+    esac
+done
+
+[ -n "$SUBCMD" ] || usage
+
+# Apply output dir override
+if [ -n "$OUTPUT_DIR" ]; then
+    HF_DOWNLOAD_DIR="$OUTPUT_DIR"
+fi
+HF_DOWNLOAD_DIR="${HF_DOWNLOAD_DIR:-$HOME/.local/share/linux_post_install/ai/models}"
+
+# ── Token warning ──────────────────────────────────────────────
+if [ -z "$HF_TOKEN" ]; then
+    warn "No HF_TOKEN set — using anonymous access"
+fi
+
+# ── HF API helpers ─────────────────────────────────────────────
+HF_BASE="https://huggingface.co"
+HF_API_BASE="https://huggingface.co/api"
+
+hf_auth_header() {
+    if [ -n "$HF_TOKEN" ]; then
+        printf 'Authorization: Bearer %s' "$HF_TOKEN"
+    fi
+}
+
+hf_api() {
+    local endpoint="$1"
+    local url="${HF_API_BASE}${endpoint}"
+    local auth_header
+    auth_header="$(hf_auth_header)"
+
+    local http_code body tmpfile
+    tmpfile="$(mktemp)"
+
+    local curl_args=(-sS -w '%{http_code}' -o "$tmpfile" --max-time 30)
+    if [ -n "$auth_header" ]; then
+        curl_args+=(-H "$auth_header")
+    fi
+
+    # Rate limit retry: on 429, sleep and retry once
+    local attempt=0
+    while [ $attempt -lt 2 ]; do
+        http_code="$(curl "${curl_args[@]}" "$url" 2>/dev/null)" || {
+            rm -f "$tmpfile"
+            err "Connection timed out — check network"
+        }
+
+        if [ "$http_code" = "429" ]; then
+            local retry_after
+            retry_after="$(curl -sI -H "${auth_header:-}" "$url" 2>/dev/null | grep -i 'retry-after:' | tr -d '\r' | awk '{print $2}')"
+            retry_after="${retry_after:-60}"
+            warn "Rate limited — waiting ${retry_after}s before retry"
+            sleep "$retry_after"
+            attempt=$((attempt + 1))
+            continue
+        fi
+
+        break
+    done
+
+    body="$(cat "$tmpfile")"
+    rm -f "$tmpfile"
+
+    case "$http_code" in
+        200) ;;
+        401|403) err "Authentication failed — check HF_TOKEN (pos config ai)" ;;
+        404) err "Model not found: ${endpoint#/api/models/}" ;;
+        429) err "Rate limit exceeded — try again later" ;;
+        *)   err "API request failed (HTTP $http_code)" ;;
+    esac
+
+    # Validate JSON
+    if ! printf '%s' "$body" | jq empty 2>/dev/null; then
+        err "Failed to parse API response — check network or HF status"
+    fi
+
+    printf '%s' "$body"
+}
+
+hf_repo_files() {
+    local repo_id="$1"
+    local branch="${2:-main}"
+    local ns="${repo_id%%/*}"
+    local repo="${repo_id#*/}"
+
+    if [ "$ns" = "$repo" ]; then
+        err "Invalid repo format: use namespace/model-name"
+    fi
+
+    # Try /tree/ endpoint first (has file sizes + LFS info)
+    local endpoint="/models/${ns}/${repo}/tree/${branch}"
+    local result
+    if result="$(hf_api "$endpoint" 2>/dev/null)"; then
+        printf '%s' "$result"
+        return 0
+    fi
+
+    # Fallback: /api/models/{ns}/{repo} (siblings, no sizes)
+    warn "Tree endpoint unavailable, using repo metadata"
+    local fallback
+    fallback="$(hf_api "/models/${ns}/${repo}")" || err "Failed to fetch repo info for $repo_id"
+    printf '%s' "$fallback" | jq '[.siblings[] | {rfilename: .rfilename, size: (.size // 0)}]'
+}
+
+hf_search() {
+    local query="$1"
+    local limit="${2:-10}"
+    local encoded_query
+    encoded_query="$(printf '%s' "$query" | jq -sRr @uri)"
+    local endpoint="/models?search=${encoded_query}&sort=downloads&direction=-1&limit=${limit}"
+    hf_api "$endpoint"
+}
+
+# ── Utility functions ──────────────────────────────────────────
+hf_repo_dir() {
+    local repo_id="$1"
+    printf '%s' "$HF_DOWNLOAD_DIR/${repo_id//\//-}"
+}
+
+hf_human_size() {
+    local bytes="$1"
+    if [ "$bytes" -ge 1073741824 ]; then
+        awk "BEGIN { printf \"%.1f GB\", $bytes / 1073741824 }"
+    elif [ "$bytes" -ge 1048576 ]; then
+        awk "BEGIN { printf \"%.1f MB\", $bytes / 1048576 }"
+    elif [ "$bytes" -ge 1024 ]; then
+        awk "BEGIN { printf \"%.1f KB\", $bytes / 1024 }"
+    else
+        printf '%d B' "$bytes"
+    fi
+}
+
+hf_resolve_branch() {
+    local repo_id="$1"
+    local branch="${2:-}"
+    if [ -n "$branch" ]; then
+        printf '%s' "$branch"
+        return
+    fi
+    # Try to get default branch from API
+    local ns="${repo_id%%/*}"
+    local repo="${repo_id#*/}"
+    local meta
+    if meta="$(hf_api "/models/${ns}/${repo}" 2>/dev/null)"; then
+        local default_branch
+        default_branch="$(printf '%s' "$meta" | jq -r '.defaultBranch // empty' 2>/dev/null)"
+        if [ -n "$default_branch" ]; then
+            printf '%s' "$default_branch"
+            return
+        fi
+    fi
+    printf 'main'
+}
+
+# ── Download helpers ───────────────────────────────────────────
+hf_download_file() {
+    local url="$1"
+    local target="$2"
+    local auth_header
+    auth_header="$(hf_auth_header)"
+
+    local curl_args=(-L -C - --progress-bar -o "$target")
+    if [ -n "$auth_header" ]; then
+        curl_args+=(-H "$auth_header")
+    fi
+
+    if curl "${curl_args[@]}" "$url" 2>&1; then
+        if [ -s "$target" ]; then
+            return 0
+        else
+            warn "Downloaded file is empty: $target"
+            return 1
+        fi
+    else
+        warn "Download interrupted for $(basename "$target") (resume with same command)"
+        return 1
+    fi
+}
+
+# ── Subcommands ────────────────────────────────────────────────
+
+cmd_search() {
+    local query="${SUBCMD_ARGS[*]:-}"
+    [ -n "$query" ] || err "Usage: pos ai hf search <query>"
+
+    local result
+    result="$(hf_search "$query" "10")"
+
+    local count
+    count="$(printf '%s' "$result" | jq 'length')"
+    [ "$count" -gt 0 ] || { warn "No models found for '$query'"; return 0; }
+
+    printf 'Found %d models for "%s":\n' "$count" "$query"
+    printf '%s' "$result" | jq -r '.[] | "  \(.id)\t\(.downloads // 0)\t\(.likes // 0)"' | \
+        while IFS=$'\t' read -r id downloads likes; do
+            local dl_str
+            if [ "$downloads" -ge 1000 ]; then
+                dl_str="$(awk "BEGIN { printf \"%.1fk\", $downloads / 1000 }")"
+            else
+                dl_str="$downloads"
+            fi
+            printf '  %-55s %s downloads\n' "$id" "$dl_str"
+        done
+}
+
+cmd_download() {
+    local repo_id="${SUBCMD_ARGS[0]:-}"
+    [ -n "$repo_id" ] || err "Usage: pos ai hf download <repo-id> [filename]"
+
+    # Validate repo-id contains /
+    [[ "$repo_id" == */* ]] || err "Invalid repo format: use namespace/model-name"
+
+    local filename="${SUBCMD_ARGS[1]:-}"
+    local branch
+    branch="$(hf_resolve_branch "$repo_id" "$BRANCH")"
+
+    # Get file list from API
+    local files_json
+    files_json="$(hf_repo_files "$repo_id" "$branch")"
+
+    # Filter files
+    local filtered_files
+    if [ -n "$filename" ]; then
+        # Single file mode
+        filtered_files="$(printf '%s' "$files_json" | jq -c --arg fn "$filename" '[.[] | select(.rfilename == $fn)]')"
+    elif [ "$GGUF_ONLY" -eq 1 ]; then
+        # GGUF filter
+        filtered_files="$(printf '%s' "$files_json" | jq -c '[.[] | select(.rfilename | endswith(".gguf"))]')"
+    else
+        # All files
+        filtered_files="$(printf '%s' "$files_json" | jq -c '.')"
+    fi
+
+    local file_count
+    file_count="$(printf '%s' "$filtered_files" | jq 'length')"
+    [ "$file_count" -gt 0 ] || err "No files to download"
+
+    # Prepare target directory
+    local target_dir
+    target_dir="$(hf_repo_dir "$repo_id")"
+    mkdir -p "$target_dir"
+
+    # Disk space pre-flight check
+    local total_size
+    total_size="$(printf '%s' "$filtered_files" | jq '[.[].size // 0] | add // 0')"
+    if [ "$total_size" -gt 0 ]; then
+        local avail_kb
+        avail_kb="$(df --output=avail "$target_dir" 2>/dev/null | tail -1 | tr -d ' ')"
+        local need_kb=$((total_size / 1024))
+        if [ "$avail_kb" -lt "$need_kb" ]; then
+            local need_human avail_human
+            need_human="$(hf_human_size "$total_size")"
+            avail_human="$(hf_human_size "$((avail_kb * 1024))")"
+            warn "Low disk space: need $need_human, only $avail_human available"
+        fi
+    fi
+
+    local downloaded=0
+    local ns="${repo_id%%/*}"
+    local repo="${repo_id#*/}"
+
+    while IFS= read -r file_json; do
+        local fname fsize
+        fname="$(printf '%s' "$file_json" | jq -r '.rfilename')"
+        fsize="$(printf '%s' "$file_json" | jq -r '.size // 0')"
+        total_size=$((total_size + fsize))
+
+        local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
+        local target="${target_dir}/${fname}"
+
+        if [ "$file_count" -gt 1 ]; then
+            downloaded=$((downloaded + 1))
+            printf '[%d/%d] Downloading %s...\n' "$downloaded" "$file_count" "$fname" >&2
+        fi
+
+        # Create parent directory
+        mkdir -p "$(dirname "$target")"
+
+        if ! hf_download_file "$url" "$target"; then
+            warn "Failed to download $fname"
+            continue
+        fi
+    done < <(printf '%s' "$filtered_files" | jq -c '.[]')
+
+    # Write metadata
+    local meta_file="${target_dir}/.hf-meta"
+    local timestamp
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    local file_list
+    file_list="$(printf '%s' "$filtered_files" | jq -c '[.[] | .rfilename]')"
+
+    cat > "$meta_file" <<METAEOF
+{
+  "repo_id": "$repo_id",
+  "branch": "$branch",
+  "downloaded_at": "$timestamp",
+  "files": $file_list
+}
+METAEOF
+
+    # Summary
+    if [ "$file_count" -eq 1 ]; then
+        local fname
+        fname="$(printf '%s' "$filtered_files" | jq -r '.[0].rfilename')"
+        local fsize
+        fsize="$(printf '%s' "$filtered_files" | jq -r '.[0].size // 0')"
+        local human_size
+        human_size="$(hf_human_size "$fsize")"
+        printf '📥 Downloaded: %s/%s (%s)\n' "$repo_id" "$fname" "$human_size"
+        printf '📁 %s/%s\n' "$target_dir" "$fname"
+    else
+        local total_human
+        total_human="$(hf_human_size "$total_size")"
+        printf '📥 Downloaded: %s (%d files, %s)\n' "$repo_id" "$file_count" "$total_human"
+        printf '📁 %s/\n' "$target_dir"
+    fi
+}
+
+cmd_list() {
+    [ -d "$HF_DOWNLOAD_DIR" ] || { warn "No models downloaded yet"; return 0; }
+
+    local models=()
+    while IFS= read -r dir; do
+        [ -d "$dir" ] || continue
+        local meta_file="${dir}/.hf-meta"
+        [ -f "$meta_file" ] || continue
+        models+=("$dir")
+    done < <(find "$HF_DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+
+    [ ${#models[@]} -gt 0 ] || { warn "No models downloaded yet"; return 0; }
+
+    printf 'Downloaded models (%d):\n' "${#models[@]}"
+    for dir in "${models[@]}"; do
+        local meta_file="${dir}/.hf-meta"
+        local name
+        name="$(basename "$dir")"
+        local total_size=0
+        local date_str
+        date_str="$(jq -r '.downloaded_at // "unknown"' "$meta_file" 2>/dev/null | cut -dT -f1)"
+
+        # Calculate total size
+        while IFS= read -r file; do
+            [ -f "$file" ] || continue
+            local size
+            size="$(stat -c%s "$file" 2>/dev/null || echo 0)"
+            total_size=$((total_size + size))
+        done < <(find "$dir" -type f ! -name '.hf-meta' 2>/dev/null)
+
+        local human_size
+        human_size="$(hf_human_size "$total_size")"
+        printf '  %-50s %s   %s\n' "$name" "$human_size" "$date_str"
+    done
+}
+
+cmd_remove() {
+    local repo_id="${SUBCMD_ARGS[0]:-}"
+    [ -n "$repo_id" ] || err "Usage: pos ai hf remove <repo-id>"
+
+    local target_dir
+    target_dir="$(hf_repo_dir "$repo_id")"
+
+    [ -d "$target_dir" ] || err "Model not found: $repo_id"
+
+    # Calculate size before removal
+    local total_size=0
+    while IFS= read -r file; do
+        [ -f "$file" ] || continue
+        local size
+        size="$(stat -c%s "$file" 2>/dev/null || echo 0)"
+        total_size=$((total_size + size))
+    done < <(find "$target_dir" -type f 2>/dev/null)
+
+    local human_size
+    human_size="$(hf_human_size "$total_size")"
+
+    rm -rf "$target_dir"
+    printf 'Removed: %s (freed %s)\n' "$repo_id" "$human_size"
+}
+
+# ── Dispatch ───────────────────────────────────────────────────
+case "$SUBCMD" in
+    search)   cmd_search ;;
+    download) cmd_download ;;
+    list)     cmd_list ;;
+    remove)   cmd_remove ;;
+    *)        err "Unknown subcommand '$SUBCMD' (see --help)" ;;
+esac

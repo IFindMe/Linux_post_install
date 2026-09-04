@@ -3,6 +3,7 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
+_pos_flags[ai-hf]="--branch --gguf --output"
 _pos_flags[communication-matrix-listener]="--enable --disable --status --run"
 _pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
 _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
@@ -44,7 +45,7 @@ _pos_subcmds[share-smb-client]="mount unmount list persist unpersist menu"
 _pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable menu"
 _pos_subcmds[system-backup]="menu"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
-_pos_subcmds[ai]="ask chat sessions capture models providers alias gemini openrouter"
+_pos_subcmds[ai]="ask chat sessions capture models providers alias gemini hf openrouter"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)

@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–205 |
-| ## 3. Installation Flow | 206–259 |
-| ## 4. The `pos` CLI System | 260–338 |
-| ## 5. Shared Library — `lib/common.sh` | 339–370 |
-| ## 6. Docker Compose / ScaleTail | 371–413 |
-| ## 7. Optional Apps (`apps/`) | 414–443 |
-| ## 8. Entertainment Module | 444–457 |
-| ## 9. Systemd Services | 458–469 |
-| ## 10. Configuration Files | 470–496 |
-| ## 11. Coding Conventions | 497–529 |
-| ## 12. Development Workflow | 530–582 |
-| ## 13. Key File Quick Reference | 583–655 |
-| ## 14. Common Tasks for Agents | 656–689 |
+| ## 2. Directory Structure | 44–207 |
+| ## 3. Installation Flow | 208–261 |
+| ## 4. The `pos` CLI System | 262–341 |
+| ## 5. Shared Library — `lib/common.sh` | 342–373 |
+| ## 6. Docker Compose / ScaleTail | 374–416 |
+| ## 7. Optional Apps (`apps/`) | 417–446 |
+| ## 8. Entertainment Module | 447–460 |
+| ## 9. Systemd Services | 461–472 |
+| ## 10. Configuration Files | 473–499 |
+| ## 11. Coding Conventions | 500–532 |
+| ## 12. Development Workflow | 533–585 |
+| ## 13. Key File Quick Reference | 586–659 |
+| ## 14. Common Tasks for Agents | 660–693 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -63,6 +63,8 @@ Linux_post_install/
 <!-- GEN:START tree -->
 │   ├── pos-ai-alias                        # manage AI agent aliases
 │   ├── pos-ai-gemini                       # Forward to pos ai --provider gemini (backward compat)
+│   ├── pos-ai-hf                           # Download AI models from Hugging Face (search, download, manage)
+│   │   [deps: curl jq]
 │   ├── pos-ai-openrouter                   # Forward to pos ai --provider openrouter (backward compat)
 │   ├── pos-communication-matrix-listener   # Matrix listener: map /command → bash, run them on room messages
 │   ├── pos-communication-matrix-sender     # Send messages to a Matrix room via the client-server API (send, test, login)
@@ -278,6 +280,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 |----------|---------|--------|-------------|------|----------|
 | ai | alias | `pos-ai-alias` | manage AI agent aliases |  |  |
 | ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |  |  |
+| ai | hf | `pos-ai-hf` | Download AI models from Hugging Face (search, download, manage) | curl jq | pos ai hf search llama 7b → Search Hugging Face for "llama 7b" models · pos ai hf download meta-llama/Llama-3.1-8B-Instruct → Download all files from a repo · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf → Download only GGUF quantized files · pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json → Download a single file · pos ai hf list → List downloaded models · pos ai hf remove meta-llama-Llama-3.1-8B-Instruct → Remove a downloaded model |
 | ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |  |  |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |  |  |
 | communication | matrix-sender | `pos-communication-matrix-sender` | Send messages to a Matrix room via the client-server API (send, test, login) |  |  |
@@ -607,6 +610,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
+| `bin/pos-ai-hf` | 495 | Download AI models from Hugging Face (search, download, manage) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
@@ -647,7 +651,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 692 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 309 | Dynamic bash completion |
+| `completions/pos.bash` | 310 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

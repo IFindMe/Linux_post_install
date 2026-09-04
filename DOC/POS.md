@@ -55,7 +55,7 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 ### ai
 
-**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` (backward-compat forwarders → `pos ai --provider <name>`)
+**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` (backward-compat forwarders → `pos ai --provider <name>`), `bin/pos-ai-hf` (Hugging Face model downloader)
 **Provider adapters:** `lib/ai-providers/gemini.sh`, `lib/ai-providers/openrouter.sh`
 **Purpose:** AI assistant with pluggable providers. Six subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), `models` (list available models), `providers` (list providers and config status), and `sessions` (list/clear sessions). Providers handle API-specific logic; the main tool handles sessions, rendering, machine context, and all shared logic.
 
@@ -99,6 +99,17 @@ Backward compatibility: `pos ai gemini` and `pos ai openrouter` still work as sh
 Model precedence: `--model` flag > `AI_MODEL` env > provider-specific fallback (`AI_GEMINI_MODEL`/`OPENROUTER_MODEL`) > provider default. API key precedence: `AI_API_KEY` env > provider-specific fallback (`AI_GEMINI_API_KEY`/`OPENROUTER_API_KEY`) > error. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES). Sessions are stored in OpenAI `messages` format universally; old Gemini-format sessions (`contents[]`) are auto-migrated on load.
 
 **Messaging bridges:** the Telegram and Matrix listeners forward non-command messages starting with `ai ` (case-insensitive) to `pos ai ask` and reply with the model's answer — see [communication → listener](#communication). The Telegram bridge uses one session per chat (`telegram-<chat id>`), the Matrix bridge one per room (`matrix-<room>`).
+
+`pos ai hf` — Hugging Face model downloader:
+
+| Command | Behavior |
+|---------|----------|
+| `pos ai hf search <query>` | Search Hugging Face models by query (sorted by downloads); prints model ID, download count |
+| `pos ai hf download <repo-id> [filename]` | Download a file or entire repo from Hugging Face. Creates `<namespace>-<model-name>/` under `HF_DOWNLOAD_DIR` (default `~/.local/share/linux_post_install/ai/models/`). Options: `--branch <rev>` (specific branch), `--gguf` (only `.gguf` files), `--output <dir>` (override download dir). Progress bars to stderr; summary with path and size to stdout. Writes `.hf-meta` JSON (repo-id, branch, files, timestamp) for `list` and `remove` |
+| `pos ai hf list` | List all downloaded models with size and date |
+| `pos ai hf remove <repo-id>` | Remove a downloaded model directory and show freed space |
+
+Auth: `HF_TOKEN` in `~/.config/linux_post_install/ai.env` (same scope as `pos ai`; edit via `pos config ai`). Even for public repos, a token increases rate limits from 500/5min to 1000/5min. Resume: `curl -C -` resumes interrupted downloads. Rate limit handling: on HTTP 429, sleeps `Retry-After` or 60s, retries once.
 
 ### network
 
