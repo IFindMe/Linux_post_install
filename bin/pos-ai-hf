@@ -312,26 +312,42 @@ hf_quant_candidates() {
       | sort_by(.dir)'
 }
 
+# Refactored hf_gguf_quant_gate function with improved structure
 # hf_gguf_quant_gate <files-json> <quant-dir> <repo-id> → filtered JSON (stdout) or err
 hf_gguf_quant_gate() {
     local json="$1" quant="${2:-}" repo_id="$3"
+    
+    # Validate input
+    if [ -z "$json" ]; then
+        err "No files provided to quant gate"
+    fi
+    
+    # Count top-level files vs directory files
     local top_count dir_count
     top_count="$(printf '%s' "$json" | jq '[.[] | select(.rfilename | contains("/") | not)] | length')"
     dir_count="$(printf '%s' "$json" | jq '[.[] | select(.rfilename | contains("/")) | .rfilename | split("/")[0]] | unique | length')"
 
+    # Handle case: top-level .gguf files (no quant dirs)
     if [ "$top_count" -gt 0 ]; then
-        [ -n "$quant" ] && err "--quant is for repos that group weights into quant directories — $repo_id has top-level .gguf files, --quant is not needed"
-        printf '%s' "$json"; return 0
+        if [ -n "$quant" ]; then
+            err "--quant is for repos that group weights into quant directories — $repo_id has top-level .gguf files, --quant is not needed"
+        fi
+        printf '%s' "$json"
+        return 0
     fi
 
+    # Handle case: single quant directory
     if [ "$dir_count" -eq 1 ]; then
         local only_dir
         only_dir="$(printf '%s' "$json" | jq -r '.[0].rfilename | split("/")[0]')"
-        [ -n "$quant" ] && [ "$quant" != "$only_dir" ] \
-            && err "No quant directory '$quant' in $repo_id — weights live in: $only_dir"
-        printf '%s' "$json"; return 0
+        if [ -n "$quant" ] && [ "$quant" != "$only_dir" ]; then
+            err "No quant directory '$quant' in $repo_id — weights live in: $only_dir"
+        fi
+        printf '%s' "$json"
+        return 0
     fi
 
+    # Handle case: multiple quant directories - require quant selection
     if [ -z "$quant" ]; then
         local msg
         msg="$(printf 'Repo %s organizes weights into %d quant directories — pick one with --quant:\n' "$repo_id" "$dir_count")"
@@ -341,6 +357,7 @@ hf_gguf_quant_gate() {
         err "$msg"
     fi
 
+    # Filter by specified quant directory
     local selected
     selected="$(printf '%s' "$json" | jq -c --arg q "$quant" '[.[] | select(.rfilename | split("/")[0] == $q)]')"
     if [ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]; then
@@ -352,6 +369,18 @@ hf_gguf_quant_gate() {
         err "$msg"
     fi
     printf '%s' "$selected"
+}
+
+# Enhanced error reporting function
+err_with_context() {
+    local msg="$1"
+    local context="${2:-}"
+    if [ -n "$context" ]; then
+        echo "Error: $msg (Context: $context)" >&2
+    else
+        echo "Error: $msg" >&2
+    fi
+    exit 1
 }
 
 # hf_list_files <repo-id> <branch> <files-json> → stdout table, no downloads
@@ -412,6 +441,57 @@ hf_download_file() {
         fi
     else
         warn "Download interrupted for $(basename "$target") (resume with same command)"
+        return 1
+    fi
+}
+
+# Enhanced progress function to provide better feedback
+hf_download_with_progress() {
+    local url="$1"
+    local target="$2"
+    local file_name="$(basename "$target")"
+    
+    # Create parent directory
+    mkdir -p "$(dirname "$target")"
+    
+    local auth_header
+    auth_header="$(hf_auth_header)"
+    
+    local curl_args=(-L -C - --progress-bar -o "$target")
+    if [ -n "$auth_header" ]; then
+        curl_args+=(-H "$auth_header")
+    fi
+    
+    # Run download with progress bar
+    if curl "${curl_args[@]}" "$url" 2>&1; then
+        if [ -s "$target" ]; then
+            return 0
+        else
+            warn "Downloaded file is empty: $target"
+            return 1
+        fi
+    else
+        warn "Download interrupted for $file_name (resume with same command)"
+        return 1
+    fi
+}
+
+# ── Parallel download helpers ──────────────────────────────────
+# Global variables for parallel downloads
+PARALLEL_DOWNLOADS=4  # Default parallel downloads
+
+# Function to run download in background and track it
+run_parallel_download() {
+    local url="$1"
+    local target="$2"
+    local job_id="$3"
+    
+    # Run download and capture result
+    if hf_download_with_progress "$url" "$target"; then
+        echo "SUCCESS:$job_id"
+        return 0
+    else
+        echo "FAILED:$job_id"
         return 1
     fi
 }
@@ -536,28 +616,70 @@ cmd_download() {
     local ns="${repo_id%%/*}"
     local repo="${repo_id#*/}"
 
-    while IFS= read -r file_json; do
-        local fname fsize
-        fname="$(printf '%s' "$file_json" | jq -r '.rfilename')"
-        fsize="$(printf '%s' "$file_json" | jq -r '.size // 0')"
-        total_size=$((total_size + fsize))
+    # If we're downloading multiple files, run them in parallel
+    if [ "$file_count" -gt 1 ]; then
+        local temp_dir
+        temp_dir="$(mktemp -d)"
+        local job_pids=()
+        local max_jobs="${PARALLEL_DOWNLOADS:-4}"
+        local completed_jobs=0
 
-        local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
-        local target="${target_dir}/${fname}"
+        # Process files in parallel batches
+        while IFS= read -r file_json; do
+            local fname fsize
+            fname="$(printf '%s' "$file_json" | jq -r '.rfilename')"
+            fsize="$(printf '%s' "$file_json" | jq -r '.size // 0')"
 
-        if [ "$file_count" -gt 1 ]; then
-            downloaded=$((downloaded + 1))
-            printf '[%d/%d] Downloading %s...\n' "$downloaded" "$file_count" "$fname" >&2
-        fi
+            local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
+            local target="${target_dir}/${fname}"
 
-        # Create parent directory
-        mkdir -p "$(dirname "$target")"
+            # Start background job
+            hf_download_with_progress "$url" "$target" &
+            local pid=$!
+            job_pids+=($pid)
 
-        if ! hf_download_file "$url" "$target"; then
-            warn "Failed to download $fname"
-            continue
-        fi
-    done < <(printf '%s' "$filtered_files" | jq -c '.[]')
+            # Limit parallel jobs
+            if [ ${#job_pids[@]} -ge "$max_jobs" ]; then
+                # Wait for oldest job to complete
+                wait "${job_pids[0]}"
+                completed_jobs=$((completed_jobs + 1))
+                printf '[%d/%d] Completed: %s\n' "$completed_jobs" "$file_count" "$fname" >&2
+                # Shift job array
+                job_pids=("${job_pids[@]:1}")
+            fi
+        done < <(printf '%s' "$filtered_files" | jq -c '.[]')
+
+        # Wait for remaining jobs
+        for pid in "${job_pids[@]}"; do
+            wait "$pid"
+            completed_jobs=$((completed_jobs + 1))
+            printf '[%d/%d] Completed\n' "$completed_jobs" "$file_count" >&2
+        done
+        
+        # Clean up temp directory
+        rm -rf "$temp_dir"
+    else
+        # Single file download - use original sequential approach
+        while IFS= read -r file_json; do
+            local fname fsize
+            fname="$(printf '%s' "$file_json" | jq -r '.rfilename')"
+            fsize="$(printf '%s' "$file_json" | jq -r '.size // 0')"
+            total_size=$((total_size + fsize))
+
+            local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
+            local target="${target_dir}/${fname}"
+
+            if [ "$file_count" -gt 1 ]; then
+                downloaded=$((downloaded + 1))
+                printf '[%d/%d] Downloading %s...\n' "$downloaded" "$file_count" "$fname" >&2
+            fi
+
+            if ! hf_download_with_progress "$url" "$target"; then
+                warn "Failed to download $fname"
+                continue
+            fi
+        done < <(printf '%s' "$filtered_files" | jq -c '.[]')
+    fi
 
     # Write metadata
     local meta_file="${target_dir}/.hf-meta"
