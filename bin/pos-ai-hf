@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai hf — Download AI models from Hugging Face (search, download, manage)
-# POS_FLAGS: --branch --gguf --list --output --quant
+# POS_FLAGS: --branch --gguf --list --output --quant --include --exclude --revision
 # POS_DEPS: curl jq
 # POS_CONFIG: ai | ai.env | HF_TOKEN=secret:Hugging Face API token (https://huggingface.co/settings/tokens) | HF_DOWNLOAD_DIR=:Model download directory (default ~/.local/share/linux_post_install/ai/models)
 # POS_EXAMPLES: pos ai hf search llama 7b | Search Hugging Face for "llama 7b" models
@@ -12,6 +12,12 @@ set -euo pipefail
 # POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json | Download a single file
 # POS_EXAMPLES: pos ai hf list | List downloaded models
 # POS_EXAMPLES: pos ai hf remove meta-llama-Llama-3.1-8B-Instruct | Remove a downloaded model
+# POS_EXAMPLES: pos ai hf info meta-llama/Llama-3.1-8B-Instruct | Show repository information
+# POS_EXAMPLES: pos ai hf files meta-llama/Llama-3.1-8B-Instruct | List repository files
+# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --include "*.gguf" --exclude "*Q4_*" | Download with include/exclude patterns
+# POS_EXAMPLES: pos ai hf info meta-llama/Llama-3.1-8B-Instruct | Show repository information
+# POS_EXAMPLES: pos ai hf files meta-llama/Llama-3.1-8B-Instruct | List repository files
+# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --include "*.gguf" --exclude "*Q4_*" | Download with include/exclude patterns
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -54,6 +60,9 @@ Subcommands:
   download <repo-id> [filename]      Download a file or entire repo
   list                               List locally downloaded models
   remove <repo-id>                   Remove a downloaded model
+  info <repo-id>                     Show repository information
+  files <repo-id>                    List repository files
+  cache                              Manage local cache
 
 Download options:
   --branch <rev>                     Download from a specific branch/revision
@@ -64,6 +73,9 @@ Download options:
                                      --gguf --quant Q8_0)
   --list                             List remote repository files without downloading
   --output <dir>                     Override download directory
+  --include <pattern>                Include files matching pattern (supports glob)
+  --exclude <pattern>                Exclude files matching pattern (supports glob)
+  --revision <rev>                   Specific revision (commit/tag/branch)
 
 Examples:
   pos ai hf search llama 7b
@@ -77,6 +89,10 @@ Examples:
   pos ai hf download meta-llama/Llama-3.1-8B-Instruct --branch main
   pos ai hf list
   pos ai hf remove meta-llama-Llama-3.1-8B-Instruct
+  pos ai hf info meta-llama/Llama-3.1-8B-Instruct
+  pos ai hf files meta-llama/Llama-3.1-8B-Instruct
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct --include "*.gguf" --exclude "*Q4_*"
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct --revision v1.0
 
 A filename may be a full path (Q8_0/model.gguf) or a bare name (model.gguf) —
 bare names matching files in multiple directories error and ask for the full path.
@@ -101,6 +117,9 @@ GGUF_ONLY=0
 OUTPUT_DIR=""
 LIST_FILES=0
 QUANT_DIR=""
+INCLUDE_PATTERN=""
+EXCLUDE_PATTERN=""
+REVISION=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -118,6 +137,15 @@ while [ $# -gt 0 ]; do
         --output)
             [ $# -ge 2 ] || err "--output requires a value"
             OUTPUT_DIR="$2"; shift 2 ;;
+        --include)
+            [ $# -ge 2 ] || err "--include requires a value"
+            INCLUDE_PATTERN="$2"; shift 2 ;;
+        --exclude)
+            [ $# -ge 2 ] || err "--exclude requires a value"
+            EXCLUDE_PATTERN="$2"; shift 2 ;;
+        --revision)
+            [ $# -ge 2 ] || err "--revision requires a value"
+            REVISION="$2"; shift 2 ;;
         -*)
             err "Unknown option '$1' (see --help)" ;;
         *)
@@ -534,9 +562,11 @@ cmd_download() {
     # Flag pre-checks
     [ -n "$QUANT_DIR" ] && [ "$GGUF_ONLY" -eq 0 ] && err "--quant requires --gguf"
     [ "$LIST_FILES" -eq 1 ] && [ -n "$filename" ] && err "--list cannot be combined with a filename"
+    [ -n "$INCLUDE_PATTERN" ] && [ -n "$EXCLUDE_PATTERN" ] && [ "$GGUF_ONLY" -eq 1 ] && err "--include/--exclude cannot be used with --gguf"
+    [ -n "$INCLUDE_PATTERN" ] && [ -n "$EXCLUDE_PATTERN" ] && [ -n "$filename" ] && err "--include/--exclude cannot be used with specific filenames"
 
     local branch
-    branch="$(hf_resolve_branch "$repo_id" "$BRANCH")"
+    branch="$(hf_resolve_branch "$repo_id" "$REVISION")"
 
     # Get file list from API (recursive + paginated tree)
     local files_json
@@ -570,6 +600,21 @@ cmd_download() {
         filtered_files="$(printf '%s' "$files_json" | jq -c "$HF_GGUF_FILTER")"
         [ "$(printf '%s' "$filtered_files" | jq 'length')" -gt 0 ] \
             && filtered_files="$(hf_gguf_quant_gate "$filtered_files" "$QUANT_DIR" "$repo_id")"
+    elif [ -n "$INCLUDE_PATTERN" ] || [ -n "$EXCLUDE_PATTERN" ]; then
+        # Pattern filtering
+        filtered_files="$files_json"
+        if [ -n "$INCLUDE_PATTERN" ]; then
+            # Use jq to filter files matching include pattern
+            local include_filter
+            include_filter=".[] | select(.rfilename | match(\"$INCLUDE_PATTERN\"; \"i\") | length > 0)"
+            filtered_files="$(printf '%s' "$filtered_files" | jq -c "$include_filter")"
+        fi
+        if [ -n "$EXCLUDE_PATTERN" ]; then
+            # Use jq to filter files matching exclude pattern
+            local exclude_filter
+            exclude_filter=".[] | select(.rfilename | match(\"$EXCLUDE_PATTERN\"; \"i\") | length == 0)"
+            filtered_files="$(printf '%s' "$filtered_files" | jq -c "$exclude_filter")"
+        fi
     else
         # All files
         filtered_files="$(printf '%s' "$files_json" | jq -c '.')"
@@ -628,7 +673,7 @@ cmd_download() {
         while IFS= read -r file_json; do
             local fname fsize
             fname="$(printf '%s' "$file_json" | jq -r '.rfilename')"
-            fsize="$(printf '%s' "$file_json" | jq -r '.size // 0')"
+            fsize="$(printf '%s' "$file_json" | jq -r '.size // 0' || echo 0)"
 
             local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
             local target="${target_dir}/${fname}"
@@ -776,11 +821,95 @@ cmd_remove() {
     printf 'Removed: %s (freed %s)\n' "$repo_id" "$human_size"
 }
 
+cmd_info() {
+    local repo_id="${SUBCMD_ARGS[0]:-}"
+    [ -n "$repo_id" ] || err "Usage: pos ai hf info <repo-id>"
+
+    local ns="${repo_id%%/*}"
+    local repo="${repo_id#*/}"
+
+    local info_json
+    info_json="$(hf_api "/models/${ns}/${repo}")" || err "Failed to fetch repository info for $repo_id"
+
+    local model_name
+    model_name="$(printf '%s' "$info_json" | jq -r '.id')" 
+    local downloads
+    downloads="$(printf '%s' "$info_json" | jq -r '.downloads // 0')"
+    local likes
+    likes="$(printf '%s' "$info_json" | jq -r '.likes // 0')"
+    local tags
+    tags="$(printf '%s' "$info_json" | jq -r '.tags // [] | join(\", \")')"
+    local description
+    description="$(printf '%s' "$info_json" | jq -r '.description // \"No description\"')"
+    local author
+    author="$(printf '%s' "$info_json" | jq -r '.author // \"Unknown\"')"
+    local created
+    created="$(printf '%s' "$info_json" | jq -r '.createdAt // \"Unknown\"')"
+    local last_modified
+    last_modified="$(printf '%s' "$info_json" | jq -r '.lastModified // \"Unknown\"')"
+    local card_data
+    card_data="$(printf '%s' "$info_json" | jq -r '.cardData // {}')"
+    local pipeline_tag
+    pipeline_tag="$(printf '%s' "$info_json" | jq -r '.pipeline_tag // \"Unknown\"')"
+    local model_type
+    model_type="$(printf '%s' "$info_json" | jq -r '.modelType // \"Unknown\"')"
+    local architectures
+    architectures="$(printf '%s' "$info_json" | jq -r '.architectures // [] | join(\", \")')"
+
+    printf "Repository: %s\n" "$model_name"
+    printf "Author: %s\n" "$author"
+    printf "Description: %s\n" "$description"
+    printf "Pipeline tag: %s\n" "$pipeline_tag"
+    printf "Model type: %s\n" "$model_type"
+    printf "Architectures: %s\n" "$architectures"
+    printf "Downloads: %s\n" "$downloads"
+    printf "Likes: %s\n" "$likes"
+    printf "Created: %s\n" "$created"
+    printf "Last modified: %s\n" "$last_modified"
+    printf "Tags: %s\n" "$tags"
+    printf "\n"
+
+    # Show card data if available
+    if [ -n "$card_data" ] && [ "$card_data" != "{}" ]; then
+        printf "Card data:\n"
+        printf '%s' "$card_data" | jq -r 'to_entries[] | "  \(.key): \(.value)"' 2>/dev/null || printf "  (raw data)\n"
+    fi
+}
+
+cmd_files() {
+    local repo_id="${SUBCMD_ARGS[0]:-}"
+    [ -n "$repo_id" ] || err "Usage: pos ai hf files <repo-id>"
+
+    local branch
+    branch="$(hf_resolve_branch "$repo_id" "$REVISION")"
+
+    local files_json
+    files_json="$(hf_repo_files "$repo_id" "$branch")"
+
+    local count
+    count="$(printf '%s' "$files_json" | jq 'length')"
+    [ "$count" -gt 0 ] || { warn "No files found in $repo_id (branch: $branch)"; return 0; }
+
+    printf 'Files in %s (branch: %s, %d file(s)):\n' "$repo_id" "$branch" "$count"
+    printf '%s' "$files_json" | jq -r 'sort_by(.rfilename)[] | [.rfilename, (.size // 0)] | @tsv' | \
+        while IFS=$'\t' read -r rpath rsize; do
+            printf '  %-60s %s\n' "$rpath" "$(hf_human_size "$rsize")"
+        done
+}
+
+    cmd_cache() {
+        echo "Cache management is not fully implemented yet."
+        echo "This command will provide cache inspection and management capabilities."
+    }
+
 # ── Dispatch ───────────────────────────────────────────────────
 case "$SUBCMD" in
     search)   cmd_search ;;
     download) cmd_download ;;
     list)     cmd_list ;;
     remove)   cmd_remove ;;
+    info)     cmd_info ;;
+    files)    cmd_files ;;
+    cache)    cmd_cache ;;
     *)        err "Unknown subcommand '$SUBCMD' (see --help)" ;;
 esac

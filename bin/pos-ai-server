@@ -2,7 +2,7 @@
 set -euo pipefail
 # POS: ai server — llama.cpp local inference server (start, stop, status, models, logs)
 # POS_SUBCMDS: start stop status models logs
-# POS_FLAGS: --port --host --model --ctx --gpu --threads
+# POS_FLAGS: --port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots
 # POS_DEPS: curl jq
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -44,6 +44,20 @@ find_llamacpp() {
         command -v "$bin" &>/dev/null && { echo "$bin"; return 0; }
     done
     return 1
+}
+
+# ── Version detection ──────────────────────────────────────────
+detect_llama_version() {
+    local version
+    version="$(llama-server --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    echo "$version"
+}
+
+# ── Validate version support for features ──────────────────────
+validate_server_features() {
+    local version="$1"
+    # Simple validation - in a real implementation we'd check if specific flags are supported
+    echo "Version $version detected. Feature validation would occur here."
 }
 
 # ── GPU detection ──────────────────────────────────────────────
@@ -177,7 +191,23 @@ Options:
   --ctx <size>        Context window size (default: 4096)
   --gpu <layers>      GPU layers: -1=auto, 0=CPU, N=explicit (default: -1)
   --threads <n>       CPU threads (default: nproc)
-  -h|--help           This help
+  --gpu-layers <n>    GPU layers (overrides --gpu)
+  --gpu-threads <n>   GPU threads (default: auto)
+  --tensor-split <n>  Tensor split configuration
+  --n-gpu-layers <n>  GPU layers (alternative to --gpu)
+  --batch-size <n>    Batch size for processing
+  --ubatch-size <n>   UBatch size for processing
+  --temperature <n>   Sampling temperature (default: 0.8)
+  --top-k <n>         Top-K sampling parameter
+  --top-p <n>         Top-P sampling parameter
+  --repetition-penalty <n> Repetition penalty for sampling
+  --mmap              Use memory mapping
+  --mlock             Lock memory
+  --kv-cache <size>   KV cache size
+  --ctx-size <n>      Context window size (alternative to --ctx)
+  --metrics           Enable metrics endpoint
+  --health            Enable health endpoint
+  --slots <n>         Concurrent request slots
 
 Examples:
   pos ai server start mistral-7b-v0.1.Q4_K_M.gguf
@@ -186,6 +216,8 @@ Examples:
   pos ai server logs 50
   pos ai server models
   pos ai server stop
+  pos ai server start --model model.gguf --gpu-layers 35 --ctx-size 4096 --temperature 0.7
+  pos ai server start --model model.gguf --mmap --mlock --batch-size 512
 
 Config (~/.config/linux_post_install/ai.env):
   LLAMACPP_PORT       Server port (default 8088)
@@ -210,6 +242,23 @@ MODEL_ARG=""
 SUBCMD=""
 SUBCMD_ARGS=()
 
+# New GPU and performance options
+GPU_LAYERS_FLAG=""
+GPU_THREADS=""
+TENSOR_SPLIT=""
+BATCH_SIZE=""
+UBATCH_SIZE=""
+TEMPERATURE=""
+TOP_K=""
+TOP_P=""
+REPETITION_PENALTY=""
+MAPPING=""
+LOCKING=""
+KV_CACHE_SIZE=""
+METRICS=""
+HEALTH=""
+SLOTS=""
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help) usage ;;
@@ -231,6 +280,53 @@ while [ $# -gt 0 ]; do
         --threads)
             [ $# -ge 2 ] || err "--threads requires a value"
             THREADS="$2"; shift 2 ;;
+        --gpu-layers)
+            [ $# -ge 2 ] || err "--gpu-layers requires a value"
+            GPU_LAYERS_FLAG="$2"; shift 2 ;;
+        --gpu-threads)
+            [ $# -ge 2 ] || err "--gpu-threads requires a value"
+            GPU_THREADS="$2"; shift 2 ;;
+        --tensor-split)
+            [ $# -ge 2 ] || err "--tensor-split requires a value"
+            TENSOR_SPLIT="$2"; shift 2 ;;
+        --n-gpu-layers)
+            [ $# -ge 2 ] || err "--n-gpu-layers requires a value"
+            GPU_LAYERS_FLAG="$2"; shift 2 ;;
+        --batch-size)
+            [ $# -ge 2 ] || err "--batch-size requires a value"
+            BATCH_SIZE="$2"; shift 2 ;;
+        --ubatch-size)
+            [ $# -ge 2 ] || err "--ubatch-size requires a value"
+            UBATCH_SIZE="$2"; shift 2 ;;
+        --temperature)
+            [ $# -ge 2 ] || err "--temperature requires a value"
+            TEMPERATURE="$2"; shift 2 ;;
+        --top-k)
+            [ $# -ge 2 ] || err "--top-k requires a value"
+            TOP_K="$2"; shift 2 ;;
+        --top-p)
+            [ $# -ge 2 ] || err "--top-p requires a value"
+            TOP_P="$2"; shift 2 ;;
+        --repetition-penalty)
+            [ $# -ge 2 ] || err "--repetition-penalty requires a value"
+            REPETITION_PENALTY="$2"; shift 2 ;;
+        --mmap)
+            MAPPING="true"; shift ;;
+        --mlock)
+            LOCKING="true"; shift ;;
+        --kv-cache)
+            [ $# -ge 2 ] || err "--kv-cache requires a value"
+            KV_CACHE_SIZE="$2"; shift 2 ;;
+        --ctx-size)
+            [ $# -ge 2 ] || err "--ctx-size requires a value"
+            CTX_SIZE="$2"; shift 2 ;;
+        --metrics)
+            METRICS="true"; shift ;;
+        --health)
+            HEALTH="true"; shift ;;
+        --slots)
+            [ $# -ge 2 ] || err "--slots requires a value"
+            SLOTS="$2"; shift 2 ;;
         -*)
             err "Unknown option '$1' (see --help)" ;;
         *)
@@ -262,6 +358,13 @@ cmd_start() {
     local llamacpp_full
     llamacpp_full="$(command -v "$llamacpp_bin")"
 
+    # Detect version
+    local version
+    version="$(detect_llama_version)"
+    if [ -n "$version" ]; then
+        validate_server_features "$version"
+    fi
+
     # Resolve model
     local explicit_model="${SUBCMD_ARGS[0]:-}"
     # Flag --model takes precedence over positional arg
@@ -272,6 +375,8 @@ cmd_start() {
     # Resolve GPU layers
     local gpu_layers
     gpu_layers="$(resolve_gpu_layers)"
+    # Use the flag value if provided, otherwise use resolved value
+    [ -n "$GPU_LAYERS_FLAG" ] && gpu_layers="$GPU_LAYERS_FLAG"
 
     # Warn if no GPU detected and auto-detect resolved to CPU
     if [ "$gpu_layers" = "0" ] && [ "${LLAMACPP_GPU_LAYERS:--1}" = "-1" ]; then
@@ -302,16 +407,71 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$llamacpp_full -m $model --port $PORT --host $HOST --n-gpu-layers $gpu_layers --ctx-size $CTX_SIZE --threads $THREADS
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=10
-KillMode=control-group
-EnvironmentFile=-%h/.config/linux_post_install/ai.env
-
-[Install]
-WantedBy=default.target
+ExecStart=$llamacpp_full -m $model --port $PORT --host $HOST
 EOF
+
+    # Add parameters if provided
+    if [ -n "$gpu_layers" ]; then
+        echo "  --n-gpu-layers $gpu_layers" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$CTX_SIZE" ]; then
+        echo "  --ctx-size $CTX_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$THREADS" ]; then
+        echo "  --threads $THREADS" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$GPU_THREADS" ]; then
+        echo "  --gpu-threads $GPU_THREADS" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$TENSOR_SPLIT" ]; then
+        echo "  --tensor-split $TENSOR_SPLIT" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$BATCH_SIZE" ]; then
+        echo "  --batch-size $BATCH_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$UBATCH_SIZE" ]; then
+        echo "  --ubatch-size $UBATCH_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$TEMPERATURE" ]; then
+        echo "  --temperature $TEMPERATURE" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$TOP_K" ]; then
+        echo "  --top-k $TOP_K" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$TOP_P" ]; then
+        echo "  --top-p $TOP_P" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$REPETITION_PENALTY" ]; then
+        echo "  --repetition-penalty $REPETITION_PENALTY" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$MAPPING" ]; then
+        echo "  --mmap" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$LOCKING" ]; then
+        echo "  --mlock" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$KV_CACHE_SIZE" ]; then
+        echo "  --kv-cache $KV_CACHE_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$METRICS" ]; then
+        echo "  --metrics" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$HEALTH" ]; then
+        echo "  --health" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+    if [ -n "$SLOTS" ]; then
+        echo "  --slots $SLOTS" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    fi
+
+    echo "  " >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "Restart=on-failure" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "RestartSec=5" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "TimeoutStopSec=10" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "KillMode=control-group" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "EnvironmentFile=-%h/.config/linux_post_install/ai.env" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "[Install]" >> "$USER_SYSTEMD_DIR/$SERVICE"
+    echo "WantedBy=default.target" >> "$USER_SYSTEMD_DIR/$SERVICE"
     chmod 644 "$USER_SYSTEMD_DIR/$SERVICE"
 
     # Enable and start
@@ -401,6 +561,15 @@ cmd_status() {
         printf 'health:    %s\n' "$health"
     else
         printf 'health:    not running\n'
+    fi
+
+    # Version info
+    local version
+    version="$(detect_llama_version)"
+    if [ -n "$version" ]; then
+        printf 'version:   %s\n' "$version"
+    else
+        printf 'version:   unknown\n'
     fi
 }
 
