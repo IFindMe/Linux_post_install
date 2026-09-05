@@ -3,7 +3,7 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
-_pos_flags[ai-hf]="--branch --gguf --output"
+_pos_flags[ai-hf]="--branch --gguf --list --output --quant"
 _pos_flags[ai-server]="--port --host --model --ctx --gpu --threads"
 _pos_flags[communication-matrix-listener]="--enable --disable --status --run"
 _pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"

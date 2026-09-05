@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai hf — Download AI models from Hugging Face (search, download, manage)
-# POS_FLAGS: --branch --gguf --output
+# POS_FLAGS: --branch --gguf --list --output --quant
 # POS_DEPS: curl jq
 # POS_CONFIG: ai | ai.env | HF_TOKEN=secret:Hugging Face API token (https://huggingface.co/settings/tokens) | HF_DOWNLOAD_DIR=:Model download directory (default ~/.local/share/linux_post_install/ai/models)
 # POS_EXAMPLES: pos ai hf search llama 7b | Search Hugging Face for "llama 7b" models
 # POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct | Download all files from a repo
 # POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf | Download only GGUF quantized files
+# POS_EXAMPLES: pos ai hf download org/model-GGUF --gguf --quant Q8_0 | Download one quant directory's GGUF shards
+# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --list | List remote repository files (what --gguf/download would fetch)
 # POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json | Download a single file
 # POS_EXAMPLES: pos ai hf list | List downloaded models
 # POS_EXAMPLES: pos ai hf remove meta-llama-Llama-3.1-8B-Instruct | Remove a downloaded model
@@ -50,22 +52,35 @@ Hugging Face model downloader — search, download, and manage AI models.
 Subcommands:
   search <query>                     Search Hugging Face models
   download <repo-id> [filename]      Download a file or entire repo
-  list                               List downloaded models
+  list                               List locally downloaded models
   remove <repo-id>                   Remove a downloaded model
 
 Download options:
   --branch <rev>                     Download from a specific branch/revision
-  --gguf                             Download only .gguf files (inference-ready)
+  --gguf                             Download only .gguf weight files (excludes
+                                     mmproj/imatrix/vision/MTP artifacts)
+  --quant <dir>                      With --gguf: pick one quant directory when a
+                                     repo groups weights into several (e.g.
+                                     --gguf --quant Q8_0)
+  --list                             List remote repository files without downloading
   --output <dir>                     Override download directory
 
 Examples:
   pos ai hf search llama 7b
   pos ai hf download meta-llama/Llama-3.1-8B-Instruct
   pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf
+  pos ai hf download org/model-GGUF --gguf --quant Q8_0
+  pos ai hf download meta-llama/Llama-3.1-8B-Instruct --list
   pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json
+  pos ai hf download org/model-GGUF Q8_0/model-00001-of-00006.gguf
+  pos ai hf download org/model-GGUF model-00001-of-00006.gguf
   pos ai hf download meta-llama/Llama-3.1-8B-Instruct --branch main
   pos ai hf list
   pos ai hf remove meta-llama-Llama-3.1-8B-Instruct
+
+A filename may be a full path (Q8_0/model.gguf) or a bare name (model.gguf) —
+bare names matching files in multiple directories error and ask for the full path.
+--list shows files on the remote repo; 'list' shows models already downloaded.
 
 Config (~/.config/linux_post_install/ai.env):
   HF_TOKEN           Hugging Face API token (better rate limits for public repos)
@@ -84,6 +99,8 @@ SUBCMD_ARGS=()
 BRANCH=""
 GGUF_ONLY=0
 OUTPUT_DIR=""
+LIST_FILES=0
+QUANT_DIR=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -93,6 +110,11 @@ while [ $# -gt 0 ]; do
             BRANCH="$2"; shift 2 ;;
         --gguf)
             GGUF_ONLY=1; shift ;;
+        --list)
+            LIST_FILES=1; shift ;;
+        --quant)
+            [ $# -ge 2 ] || err "--quant requires a value"
+            QUANT_DIR="$2"; shift 2 ;;
         --output)
             [ $# -ge 2 ] || err "--output requires a value"
             OUTPUT_DIR="$2"; shift 2 ;;
@@ -125,6 +147,13 @@ fi
 HF_BASE="https://huggingface.co"
 HF_API_BASE="https://huggingface.co/api"
 
+HF_MAX_PAGES=20
+HF_GGUF_FILTER='[ .[] |
+  select(.rfilename | type == "string") |
+  select(.rfilename | ascii_downcase | endswith(".gguf")) |
+  select(.rfilename | ascii_downcase | test("mmproj|imatrix|clip|vision|projector|mtp") | not)
+]'
+
 hf_auth_header() {
     if [ -n "$HF_TOKEN" ]; then
         printf 'Authorization: Bearer %s' "$HF_TOKEN"
@@ -133,7 +162,12 @@ hf_auth_header() {
 
 hf_api() {
     local endpoint="$1"
-    local url="${HF_API_BASE}${endpoint}"
+    local hdr_file="${2:-}"          # optional: dump response headers (Link: rel="next")
+    local url
+    case "$endpoint" in
+        http://*|https://*) url="$endpoint" ;;
+        *)                  url="${HF_API_BASE}${endpoint}" ;;
+    esac
     local auth_header
     auth_header="$(hf_auth_header)"
 
@@ -144,12 +178,15 @@ hf_api() {
     if [ -n "$auth_header" ]; then
         curl_args+=(-H "$auth_header")
     fi
+    if [ -n "$hdr_file" ]; then
+        curl_args+=(-D "$hdr_file")
+    fi
 
     # Rate limit retry: on 429, sleep and retry once
     local attempt=0
     while [ $attempt -lt 2 ]; do
         http_code="$(curl "${curl_args[@]}" "$url" 2>/dev/null)" || {
-            rm -f "$tmpfile"
+            rm -f "$tmpfile" "$hdr_file"
             err "Connection timed out — check network"
         }
 
@@ -185,6 +222,31 @@ hf_api() {
     printf '%s' "$body"
 }
 
+# hf_paginate <endpoint> → JSON array built from every Link: rel="next" page
+hf_paginate() {
+    local endpoint="$1"
+    local url
+    case "$endpoint" in
+        http://*|https://*) url="$endpoint" ;;
+        *)                  url="${HF_API_BASE}${endpoint}" ;;
+    esac
+    local combined="[]"
+    local page=0
+    local hdr_file body next_url
+    while [ -n "$url" ]; do
+        page=$((page + 1))
+        [ "$page" -gt "$HF_MAX_PAGES" ] \
+            && err "Repository listing exceeded ${HF_MAX_PAGES} pages — aborting"
+        hdr_file="$(mktemp)"
+        body="$(hf_api "$url" "$hdr_file")"
+        combined="$(printf '%s\n%s' "$combined" "$body" | jq -c -s 'add')"
+        next_url="$(sed -n 's/^link: <\([^>]*\)>; rel="next".*/\1/Ip' "$hdr_file" | tr -d '\r' | tail -1)"
+        rm -f "$hdr_file"
+        url="${next_url:-}"
+    done
+    printf '%s' "$combined"
+}
+
 hf_repo_files() {
     local repo_id="$1"
     local branch="${2:-main}"
@@ -196,9 +258,9 @@ hf_repo_files() {
     fi
 
     # Try /tree/ endpoint first (has file sizes + LFS info)
-    local endpoint="/models/${ns}/${repo}/tree/${branch}"
+    local endpoint="/models/${ns}/${repo}/tree/${branch}?recursive=true"
     local result
-    if result="$(hf_api "$endpoint" 2>/dev/null)"; then
+    if result="$(hf_paginate "$endpoint" 2>/dev/null)"; then
         # Tree API returns {type,path,size,oid[,lfs]} per entry — normalize to the
         # {rfilename,size} shape the rest of the pipeline expects (same as fallback).
         # Skip "directory" entries and guard non-object entries (error objects crash .[]).
@@ -239,6 +301,72 @@ hf_human_size() {
     else
         printf '%d B' "$bytes"
     fi
+}
+
+# hf_quant_candidates <files-json> → [{dir, files, size}] sorted by dir
+hf_quant_candidates() {
+    printf '%s' "$1" | jq -c '[.[] | select(.rfilename | contains("/")) |
+      {dir: (.rfilename | split("/")[0]), size: (.size // 0)}]
+      | group_by(.dir)
+      | map({dir: .[0].dir, files: length, size: (map(.size) | add)})
+      | sort_by(.dir)'
+}
+
+# hf_gguf_quant_gate <files-json> <quant-dir> <repo-id> → filtered JSON (stdout) or err
+hf_gguf_quant_gate() {
+    local json="$1" quant="${2:-}" repo_id="$3"
+    local top_count dir_count
+    top_count="$(printf '%s' "$json" | jq '[.[] | select(.rfilename | contains("/") | not)] | length')"
+    dir_count="$(printf '%s' "$json" | jq '[.[] | select(.rfilename | contains("/")) | .rfilename | split("/")[0]] | unique | length')"
+
+    if [ "$top_count" -gt 0 ]; then
+        [ -n "$quant" ] && err "--quant is for repos that group weights into quant directories — $repo_id has top-level .gguf files, --quant is not needed"
+        printf '%s' "$json"; return 0
+    fi
+
+    if [ "$dir_count" -eq 1 ]; then
+        local only_dir
+        only_dir="$(printf '%s' "$json" | jq -r '.[0].rfilename | split("/")[0]')"
+        [ -n "$quant" ] && [ "$quant" != "$only_dir" ] \
+            && err "No quant directory '$quant' in $repo_id — weights live in: $only_dir"
+        printf '%s' "$json"; return 0
+    fi
+
+    if [ -z "$quant" ]; then
+        local msg
+        msg="$(printf 'Repo %s organizes weights into %d quant directories — pick one with --quant:\n' "$repo_id" "$dir_count")"
+        while IFS=$'\t' read -r dir files size; do
+            msg+="$(printf '  %-20s %d files, %s\n' "$dir" "$files" "$(hf_human_size "$size")")"
+        done < <(hf_quant_candidates "$json" | jq -r '.[] | [.dir, (.files|tostring), (.size|tostring)] | @tsv')
+        err "$msg"
+    fi
+
+    local selected
+    selected="$(printf '%s' "$json" | jq -c --arg q "$quant" '[.[] | select(.rfilename | split("/")[0] == $q)]')"
+    if [ "$(printf '%s' "$selected" | jq 'length')" -eq 0 ]; then
+        local msg
+        msg="$(printf 'No weights in quant directory %s in %s — candidates:\n' "$quant" "$repo_id")"
+        while IFS=$'\t' read -r dir files size; do
+            msg+="$(printf '  %-20s %d files, %s\n' "$dir" "$files" "$(hf_human_size "$size")")"
+        done < <(hf_quant_candidates "$json" | jq -r '.[] | [.dir, (.files|tostring), (.size|tostring)] | @tsv')
+        err "$msg"
+    fi
+    printf '%s' "$selected"
+}
+
+# hf_list_files <repo-id> <branch> <files-json> → stdout table, no downloads
+hf_list_files() {
+    local repo_id="$1" branch="$2" json="$3"
+    local count total
+    count="$(printf '%s' "$json" | jq 'length')"
+    [ "$count" -gt 0 ] || err "No files found in $repo_id${branch:+ (branch: $branch)}"
+    total="$(printf '%s' "$json" | jq '[.[].size // 0] | add // 0')"
+    printf 'Files in %s (branch: %s, %d file(s), %s):\n' \
+        "$repo_id" "$branch" "$count" "$(hf_human_size "$total")"
+    printf '%s' "$json" | jq -r 'sort_by(.rfilename)[] | [.rfilename, (.size // 0)] | @tsv' | \
+        while IFS=$'\t' read -r rpath rsize; do
+            printf '  %-60s %s\n' "$rpath" "$(hf_human_size "$rsize")"
+        done
 }
 
 hf_resolve_branch() {
@@ -322,21 +450,46 @@ cmd_download() {
     [[ "$repo_id" == */* ]] || err "Invalid repo format: use namespace/model-name"
 
     local filename="${SUBCMD_ARGS[1]:-}"
+
+    # Flag pre-checks
+    [ -n "$QUANT_DIR" ] && [ "$GGUF_ONLY" -eq 0 ] && err "--quant requires --gguf"
+    [ "$LIST_FILES" -eq 1 ] && [ -n "$filename" ] && err "--list cannot be combined with a filename"
+
     local branch
     branch="$(hf_resolve_branch "$repo_id" "$BRANCH")"
 
-    # Get file list from API
+    # Get file list from API (recursive + paginated tree)
     local files_json
     files_json="$(hf_repo_files "$repo_id" "$branch")"
+
+    # --list mode: print what download would fetch, don't download
+    if [ "$LIST_FILES" -eq 1 ]; then
+        local list_json="$files_json"
+        if [ "$GGUF_ONLY" -eq 1 ]; then
+            list_json="$(printf '%s' "$list_json" | jq -c "$HF_GGUF_FILTER")"
+            [ "$(printf '%s' "$list_json" | jq 'length')" -gt 0 ] \
+                && list_json="$(hf_gguf_quant_gate "$list_json" "$QUANT_DIR" "$repo_id")"
+        fi
+        hf_list_files "$repo_id" "$branch" "$list_json"
+        return 0
+    fi
 
     # Filter files
     local filtered_files
     if [ -n "$filename" ]; then
-        # Single file mode
-        filtered_files="$(printf '%s' "$files_json" | jq -c --arg fn "$filename" '[.[] | select(.rfilename == $fn)]')"
+        # Single file mode — explicit filename wins over --gguf/--quant
+        if [[ "$filename" == */* ]]; then
+            # Full path → exact .rfilename match
+            filtered_files="$(printf '%s' "$files_json" | jq -c --arg fn "$filename" '[.[] | select(.rfilename == $fn)]')"
+        else
+            # Bare name → basename match across all depths
+            filtered_files="$(printf '%s' "$files_json" | jq -c --arg fn "$filename" '[.[] | select((.rfilename | type) == "string") | select(.rfilename | split("/")[-1] == $fn)]')"
+        fi
     elif [ "$GGUF_ONLY" -eq 1 ]; then
         # GGUF filter
-        filtered_files="$(printf '%s' "$files_json" | jq -c '[.[] | select((.rfilename | type) == "string" and (.rfilename | endswith(".gguf")))]')"
+        filtered_files="$(printf '%s' "$files_json" | jq -c "$HF_GGUF_FILTER")"
+        [ "$(printf '%s' "$filtered_files" | jq 'length')" -gt 0 ] \
+            && filtered_files="$(hf_gguf_quant_gate "$filtered_files" "$QUANT_DIR" "$repo_id")"
     else
         # All files
         filtered_files="$(printf '%s' "$files_json" | jq -c '.')"
@@ -352,6 +505,11 @@ cmd_download() {
         else
             err "No files to download"
         fi
+    fi
+
+    # Ambiguity guard: bare name matching multiple files (subdirs) → ask for full path
+    if [ -n "$filename" ] && [[ "$filename" != */* ]] && [ "$file_count" -gt 1 ]; then
+        err "$(printf 'Multiple files match "%s" in %s — use the full path:\n' "$filename" "$repo_id"; printf '%s' "$filtered_files" | jq -r '.[] | "  \(.rfilename)"')"
     fi
 
     # Prepare target directory

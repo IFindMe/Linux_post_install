@@ -282,7 +282,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 |----------|---------|--------|-------------|------|----------|
 | ai | alias | `pos-ai-alias` | manage AI agent aliases |  |  |
 | ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |  |  |
-| ai | hf | `pos-ai-hf` | Download AI models from Hugging Face (search, download, manage) | curl jq | pos ai hf search llama 7b → Search Hugging Face for "llama 7b" models · pos ai hf download meta-llama/Llama-3.1-8B-Instruct → Download all files from a repo · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf → Download only GGUF quantized files · pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json → Download a single file · pos ai hf list → List downloaded models · pos ai hf remove meta-llama-Llama-3.1-8B-Instruct → Remove a downloaded model |
+| ai | hf | `pos-ai-hf` | Download AI models from Hugging Face (search, download, manage) | curl jq | pos ai hf search llama 7b → Search Hugging Face for "llama 7b" models · pos ai hf download meta-llama/Llama-3.1-8B-Instruct → Download all files from a repo · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf → Download only GGUF quantized files · pos ai hf download org/model-GGUF --gguf --quant Q8_0 → Download one quant directory's GGUF shards · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --list → List remote repository files (what --gguf/download would fetch) · pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json → Download a single file · pos ai hf list → List downloaded models · pos ai hf remove meta-llama-Llama-3.1-8B-Instruct → Remove a downloaded model |
 | ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |  |  |
 | ai | server | `pos-ai-server` | llama.cpp local inference server (start, stop, status, models, logs) | curl jq |  |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |  |  |
@@ -613,7 +613,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
-| `bin/pos-ai-hf` | 506 | Download AI models from Hugging Face (search, download, manage) |
+| `bin/pos-ai-hf` | 664 | Download AI models from Hugging Face (search, download, manage) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
 | `bin/pos-ai-server` | 444 | llama.cpp local inference server (start, stop, status, models, logs) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
