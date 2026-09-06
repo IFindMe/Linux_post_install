@@ -122,7 +122,11 @@ HELP
 esac
 STUB
     printf '#!/usr/bin/env bash\nexit 1\n' > "$stubs/nvidia-smi"
-    chmod +x "$stubs/llama-server" "$stubs/nvidia-smi"
+    # systemctl: succeed — F4's ensure_user_bus pre-flight must pass so Part B's
+    # dry-run reaches the ExecStart output it asserts on (bus-missing behavior
+    # lives in t-ai-server-bus.sh, not here).
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$stubs/systemctl"
+    chmod +x "$stubs/llama-server" "$stubs/nvidia-smi" "$stubs/systemctl"
 
     local models="$sandbox/models"
     mkdir -p "$models"

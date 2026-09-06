@@ -40,7 +40,11 @@ STUB
 #!/usr/bin/env bash
 exit 1
 STUB
-    chmod +x "$stubs/llama-server" "$stubs/nvidia-smi"
+    # systemctl: succeed — F4's ensure_user_bus pre-flight must pass so the
+    # dry-run reaches the ExecStart output this test asserts on (bus-missing
+    # behavior is covered separately in t-ai-server-bus.sh).
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$stubs/systemctl"
+    chmod +x "$stubs/llama-server" "$stubs/nvidia-smi" "$stubs/systemctl"
 
     local server="$ROOT/bin/pos-ai-server"
     local base_env=(PATH="$stubs:/usr/bin:/bin" DRY_RUN=1

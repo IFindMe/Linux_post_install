@@ -371,7 +371,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`pos`, `pos-ai-gemini`, `pos-ai-llamacpp`, `pos-ai-openrouter`, `pos-communication-matrix-listener`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
+`pos`, `pos-ai-gemini`, `pos-ai-llamacpp`, `pos-ai-openrouter`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -618,8 +618,8 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai-hf` | 993 | Download AI models from Hugging Face (search, download, manage) |
 | `bin/pos-ai-llamacpp` | 7 | Forward to pos ai --provider llamacpp (backward compat) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
-| `bin/pos-ai-server` | 743 | llama.cpp local inference server (start, stop, status, models, logs) |
-| `bin/pos-communication-matrix-listener` | 567 | Matrix listener: map /command → bash, run them on room messages |
+| `bin/pos-ai-server` | 879 | llama.cpp local inference server (start, stop, status, models, logs) |
+| `bin/pos-communication-matrix-listener` | 582 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 215 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 245 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
 | `bin/pos-communication-telegram-listener` | 815 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
@@ -640,7 +640,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-media-sync` | 219 | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | `bin/pos-media-ytsync` | 1213 | Incrementally sync YouTube channels/playlists into ~/Videos |
 | `bin/pos-network-checkport` | 498 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 1110 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-download` | 1113 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |

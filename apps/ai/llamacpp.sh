@@ -12,6 +12,29 @@ source "$(dirname "$0")/../../lib/common.sh"
 # instead of hitting /releases/latest.
 RELEASES_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10"
 
+# Test seam for the post-install sanity (defaults to the real install target);
+# PATH must still contain the dir for the `command -v` check.
+LLAMACPP_BIN_DIR="${LLAMACPP_BIN_DIR:-/usr/local/bin}"
+
+# Post-install sanity (F7): fail fast on a genuinely broken install — missing
+# shared lib (binary won't execute) or a truncated archive (dangling symlink) —
+# with one clear err, instead of "version unknown / flags rejected" on the
+# first `pos ai server start`.
+llamacpp_sanity() {
+    local bin="$LLAMACPP_BIN_DIR/llama-server"
+    [ -e "$bin" ] \
+        || err "llama.cpp install sanity failed: $bin is missing or a dangling symlink (truncated archive?)"
+    command -v llama-server >/dev/null 2>&1 \
+        || err "llama.cpp install sanity failed: llama-server not on PATH — check that $LLAMACPP_BIN_DIR is in PATH"
+    # llama.cpp prints --version to STDERR (common/build-info.h), so 2>&1 is
+    # required to actually exercise the stream the tool chain reads.
+    llama-server --version >/dev/null 2>&1 \
+        || err "llama.cpp install sanity failed: 'llama-server --version' did not run — missing shared library or truncated archive"
+    llama-server --help >/dev/null 2>&1 \
+        || err "llama.cpp install sanity failed: 'llama-server --help' did not run — missing shared library or truncated archive"
+    log "llama.cpp sanity OK — llama-server runs (version/help readable, symlink target present)"
+}
+
 install_llamacpp() {
     command -v llama-server &>/dev/null && { log "llama.cpp already installed"; return 0; }
 
@@ -55,6 +78,8 @@ sys.exit(1)
         done
         rm -f /tmp/llamacpp.tar.gz /tmp/llamacpp-releases.json
     "
+
+    llamacpp_sanity
 
     log "llama.cpp $tag installed — run the server with 'pos ai server start <model.gguf>'"
 }

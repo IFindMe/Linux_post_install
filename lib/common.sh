@@ -139,6 +139,20 @@ confirm() {
     esac
 }
 
+# ── User systemd bus pre-flight ────────────────────────────────
+# ensure_user_bus — verify the per-user systemd bus is reachable BEFORE a tool
+# writes a unit file or calls `systemctl --user`. SSH/headless shells often
+# have neither XDG_RUNTIME_DIR nor DBUS_SESSION_BUS_ADDRESS set; systemctl
+# then fails AFTER an orphaned unit was already written. On failure errs with
+# remediation and never returns, so callers abort before writing anything.
+ensure_user_bus() {
+    systemctl --user show-environment &>/dev/null && return 0
+    err "cannot reach the user systemd bus (common in SSH/headless sessions) — systemctl --user failed
+    fix: export XDG_RUNTIME_DIR=/run/user/$(id -u)     (if the directory exists)
+    fix: sudo loginctl enable-linger $(id -un)        (persist the user session so the bus survives logouts)
+    no unit was written — fix the bus and retry"
+}
+
 # ── system.env loader ──────────────────────────────────────────
 # Shared "system" tool config (~/.config/linux_post_install/system.env).
 # Fills only variables that are not already exported — an explicitly-set

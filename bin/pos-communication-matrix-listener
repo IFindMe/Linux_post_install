@@ -20,6 +20,18 @@ err()  { echo "ERROR: $*" >&2; exit 1; }
 log()  { echo "[+] $*"; }
 warn() { echo "[!] $*" >&2; }
 
+# User-bus pre-flight — identical remediation to lib/common.sh's
+# ensure_user_bus; this tool uses inline fallbacks instead of sourcing
+# common.sh, so the helper is duplicated (guarded in case common.sh is ever
+# sourced too).
+declare -F ensure_user_bus >/dev/null || ensure_user_bus() {
+    systemctl --user show-environment &>/dev/null && return 0
+    err "cannot reach the user systemd bus (common in SSH/headless sessions) — systemctl --user failed
+    fix: export XDG_RUNTIME_DIR=/run/user/$(id -u)     (if the directory exists)
+    fix: sudo loginctl enable-linger $(id -un)        (persist the user session so the bus survives logouts)
+    no unit was written — fix the bus and retry"
+}
+
 usage() {
     cat <<EOF
 Usage: pos communication matrix listener [command]
@@ -306,6 +318,9 @@ ui() {
 # ── systemd user service ────────────────────────────────────────
 enable_service() {
     command -v systemctl &>/dev/null || err "systemctl not found — cannot create the listener service"
+    # Abort BEFORE writing the unit if the user systemd bus is unreachable
+    # (SSH/headless) — no orphaned unit, remediation printed.
+    ensure_user_bus
     mkdir -p "$USER_SYSTEMD_DIR"
 
     local runner

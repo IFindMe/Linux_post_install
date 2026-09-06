@@ -43,6 +43,11 @@ HELP
 esac
 STUB
     chmod +x "$stubs/llama-server"
+    # systemctl: succeed — F4's ensure_user_bus pre-flight must pass so these
+    # flag-validation checks reach their intended outcome (unsupported-flag /
+    # default-flag behavior). Bus-missing behavior lives in t-ai-server-bus.sh.
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$stubs/systemctl"
+    chmod +x "$stubs/systemctl"
 
     # 1. CLI-explicit unsupported flag → rc 1, names flag + model version
     test_run_env "${base_env[@]}" -- "$server" start "$models/my-model.gguf" --tensor-split 1:2:3

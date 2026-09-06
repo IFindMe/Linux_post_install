@@ -4,7 +4,7 @@
 # GEN:START posflags
 declare -A _pos_flags
 _pos_flags[ai-hf]="--branch --gguf --list --output --quant --include --exclude --revision"
-_pos_flags[ai-server]="--port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots"
+_pos_flags[ai-server]="--port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots --no-unit"
 _pos_flags[communication-matrix-listener]="--enable --disable --status --run"
 _pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
 _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"

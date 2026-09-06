@@ -2,7 +2,7 @@
 set -euo pipefail
 # POS: ai server — llama.cpp local inference server (start, stop, status, models, logs)
 # POS_SUBCMDS: start stop status models logs
-# POS_FLAGS: --port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots
+# POS_FLAGS: --port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots --no-unit
 # POS_DEPS: curl jq
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -19,6 +19,12 @@ CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/ai.env}"
 USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 SERVICE="pos-ai-server.service"
 HF_DOWNLOAD_DIR="${HF_DOWNLOAD_DIR:-$HOME/.local/share/linux_post_install/ai/models}"
+
+# Direct-run (--no-unit) escape hatch for headless/SSH boxes without a user
+# systemd bus: pidfile + log live under $XDG_RUNTIME_DIR when set, else /tmp.
+NO_UNIT=0
+NO_UNIT_LOG="${NO_UNIT_LOG:-${XDG_RUNTIME_DIR:-/tmp}/pos-ai-server.log}"
+NO_UNIT_PIDFILE="${NO_UNIT_PIDFILE:-${XDG_RUNTIME_DIR:-/tmp}/pos-ai-server.pid}"
 
 # ── Config loader (canonical env-var precedence, same pattern as pos-ai-hf) ──
 # Loaded keys are also recorded in LOADED_ENV_KEYS (see below); the D-F
@@ -53,7 +59,11 @@ requested_from_env_config LLAMACPP_THREADS    --threads
 
 # ── Binary detection ───────────────────────────────────────────
 find_llamacpp() {
-    local candidates=("llama-server" "llama.cpp/server" "server" "llama-server-cuda")
+    # Deliberately narrow (F5): the bare `server` candidate previously picked
+    # an UNRELATED on-PATH binary named `server`, after which every default
+    # flag was rejected as "unsupported". Anonymous `llama.cpp/server` is not
+    # a real on-PATH name either. Only real llama.cpp server names remain.
+    local candidates=("llama-server" "llama-server-cuda")
     local bin
     for bin in "${candidates[@]}"; do
         command -v "$bin" &>/dev/null && { echo "$bin"; return 0; }
@@ -62,13 +72,19 @@ find_llamacpp() {
 }
 
 # ── Version detection ──────────────────────────────────────────
-# detect_llama_version <binary> → X.Y.Z or "unknown". Guarded: a missing
-# binary or unreadable --version output yields "unknown", never an errexit.
+# detect_llama_version <binary> → X.Y.Z, a build token, or "unknown". Guarded:
+# a missing binary or unreadable --version output yields "unknown", never an
+# errexit. Real llama.cpp prints `version: 0.4.0-dev (build 10822, commit …)`
+# to STDERR (common/build-info.h), so both streams are captured; the regex
+# accepts semver OR a build token (`build 10822` / `b10822`) so very old
+# builds that print no semver still resolve. The build number is displayed
+# without the "build " phrase.
 detect_llama_version() {
     local bin="${1:-llama-server}"
     command -v "$bin" &>/dev/null || { echo "unknown"; return 0; }
     local version
-    version="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    version="$("$bin" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+|build [0-9]+(\.[0-9]+)*|b[0-9]+' | head -1 || true)"
+    version="${version#build }"
     [ -n "$version" ] || version="unknown"
     echo "$version"
 }
@@ -97,8 +113,12 @@ validate_requested_flags() {
         seen+=("$flag")
         # Word-boundary match: the flag token must appear as a whole word in
         # --help, not as a substring of a longer flag (D4 — e.g. --mmap must
-        # not match a --no-mmap entry).
-        if ! printf '%s' "$help_text" | grep -qE -- "(^|[[:space:]])${flag}([[:space:]]|=|$)"; then
+        # not match a --no-mmap entry). NON-quiet grep: with `grep -q` under
+        # set -o pipefail, grep exits at the first match and printf dies of
+        # SIGPIPE → rc=141 → valid flags randomly judged unsupported (F2).
+        # Here ``<<<`` needs no pipe and non-q grep consumes the whole input,
+        # so no early-exit race exists.
+        if ! grep -E -- "(^|[[:space:]])${flag}([[:space:]]|=|$)" <<<"$help_text" >/dev/null; then
             err "installed llama.cpp ${version} does not expose ${flag} — remove it or upgrade llama.cpp"
         fi
     done
@@ -142,7 +162,9 @@ validate_default_flags() {
         case "$requested_str" in
             *" $flag "*) continue ;;   # requested → already hard-validated, keep
         esac
-        if printf '%s' "$help_text" | grep -qE -- "(^|[[:space:]])${flag}([[:space:]]|=|$)"; then
+        # NON-quiet grep (see validate_requested_flags — F2): no pipe, no
+        # early-grep-exit, no printf SIGPIPE/rc=141 race under pipefail.
+        if grep -E -- "(^|[[:space:]])${flag}([[:space:]]|=|$)" <<<"$help_text" >/dev/null; then
             eval "$ok_var=1"
         else
             warn "installed llama.cpp ${version} does not support default flag ${flag} — omitting it from the unit"
@@ -227,21 +249,66 @@ pick_model() {
 }
 
 # ── Model resolution ───────────────────────────────────────────
+# resolve_gguf_in_dir <dir> — resolve a model DIRECTORY to its single top-level
+# *.gguf (case-insensitive, no recursion, matching the HF downloader's
+# $HF_DOWNLOAD_DIR/<repo-slug>/<file>.gguf layout). Exactly one → print it and
+# return 0. Multiple → list every candidate as <dirname>/<file> on stderr and
+# err "pick one" — NEVER silently pick. Zero → return 1 (caller falls through
+# to the standard "Model not found" error).
+resolve_gguf_in_dir() {
+    local dir="$1" matches=() f
+    while IFS= read -r f; do
+        [ -f "$f" ] && matches+=("$f")
+    done < <(find "$dir" -maxdepth 1 -type f -iname '*.gguf' 2>/dev/null | sort)
+    if [ "${#matches[@]}" -eq 1 ]; then
+        printf '%s' "${matches[0]}"
+        return 0
+    fi
+    if [ "${#matches[@]}" -gt 1 ]; then
+        local dirname="${dir##*/}"
+        for f in "${matches[@]}"; do
+            echo "  $dirname/$(basename "$f")" >&2
+        done
+        err "model dir $dirname contains multiple .gguf files — pick one (e.g. 'pos ai server start $dirname/<file>.gguf')"
+    fi
+    return 1
+}
+
 resolve_model() {
     local explicit="${1:-}"
     # 1. Explicit argument
     if [ -n "$explicit" ]; then
         # Absolute path
         if [[ "$explicit" == /* ]]; then
-            [ -f "$explicit" ] || err "Model not found: $explicit"
-            printf '%s' "$explicit"
-            return
+            [ -e "$explicit" ] || err "Model not found: $explicit"
+            if [ -f "$explicit" ]; then
+                printf '%s' "$explicit"
+                return
+            fi
+            # Absolute DIRECTORY — same single-.gguf expansion as below.
+            local abs_resolved
+            if abs_resolved="$(resolve_gguf_in_dir "$explicit")"; then
+                printf '%s' "$abs_resolved"
+                return
+            fi
+            err "Model not found: $explicit"
         fi
         # Relative to HF_DOWNLOAD_DIR
         local candidate="$HF_DOWNLOAD_DIR/$explicit"
         if [ -f "$candidate" ]; then
             printf '%s' "$candidate"
             return
+        fi
+        # Directory under HF_DOWNLOAD_DIR (repo slug form) — the HF downloader
+        # writes $HF_DOWNLOAD_DIR/<repo-slug>/<file>.gguf; a single top-level
+        # .gguf resolves to it, multiple err with the pick-one list, zero
+        # falls through to the not-found error below (F3).
+        if [ -d "$candidate" ]; then
+            local slug_resolved
+            if slug_resolved="$(resolve_gguf_in_dir "$candidate")"; then
+                printf '%s' "$slug_resolved"
+                return
+            fi
         fi
         # Also try with the name as-is (could be a relative path)
         [ -f "$explicit" ] && { printf '%s' "$explicit"; return; }
@@ -301,6 +368,9 @@ Options:
   --metrics           Enable metrics endpoint
   --health            Enable health endpoint
   --slots <n>         Concurrent request slots
+  --no-unit           Run the server directly (nohup + pidfile) instead of
+                      installing a systemd unit — for headless/SSH boxes whose
+                      user systemd bus is unreachable; stop/status still work
 
 Examples:
   pos ai server start mistral-7b-v0.1.Q4_K_M.gguf
@@ -424,6 +494,8 @@ while [ $# -gt 0 ]; do
         --slots)
             [ $# -ge 2 ] || err "--slots requires a value"
             SLOTS="$2"; REQUESTED_FLAGS+=("--slots"); shift 2 ;;
+        --no-unit)
+            NO_UNIT=1; shift ;;
         -*)
             err "Unknown option '$1' (see --help)" ;;
         *)
@@ -573,10 +645,47 @@ cmd_start() {
         exec_cmd+=" --slots $SLOTS"
     fi
 
+    # ── User-bus pre-flight + stale-unit warning (unit path only) ──
+    # ensure_user_bus aborts with remediation BEFORE the unit is written, so a
+    # broken user bus leaves NO orphaned unit. --no-unit skips the bus check —
+    # that is its whole purpose (headless/SSH boxes without a user bus). An
+    # existing unit is warned about but never deleted here (removal stays in
+    # cmd_stop); it may be stale from a previous failed start.
+    if [ "$NO_UNIT" -ne 1 ]; then
+        ensure_user_bus
+        if [ -f "$USER_SYSTEMD_DIR/$SERVICE" ]; then
+            warn "existing unit $USER_SYSTEMD_DIR/$SERVICE will be overwritten — it may be stale from a previous failed start"
+        fi
+    fi
+
     if [ "${DRY_RUN:-0}" -eq 1 ]; then
-        log "(dry-run) generate systemd unit $USER_SYSTEMD_DIR/$SERVICE"
-        log "(dry-run) ExecStart: $exec_cmd"
-        log "(dry-run) systemctl --user daemon-reload && enable --now $SERVICE"
+        if [ "$NO_UNIT" -eq 1 ]; then
+            log "(dry-run) nohup $exec_cmd >$NO_UNIT_LOG 2>&1 &"
+            log "(dry-run) pidfile: $NO_UNIT_PIDFILE"
+        else
+            log "(dry-run) generate systemd unit $USER_SYSTEMD_DIR/$SERVICE"
+            log "(dry-run) ExecStart: $exec_cmd"
+            log "(dry-run) systemctl --user daemon-reload && enable --now $SERVICE"
+        fi
+        return 0
+    fi
+
+    # ── Direct run (--no-unit) ──
+    # Run the exact ExecStart command directly under nohup with a pidfile
+    # (under $XDG_RUNTIME_DIR, else /tmp) so stop/status keep working without
+    # a systemd unit. The string is the same one the unit would carry; only
+    # the binary and model tokens are quoted, and both are validated paths
+    # (command -v / existing file) resolved above, so eval is the faithful
+    # way to honor its systemd-style quoting.
+    if [ "$NO_UNIT" -eq 1 ]; then
+        mkdir -p "$(dirname "$NO_UNIT_PIDFILE")"
+        : >"$NO_UNIT_LOG"
+        eval "nohup $exec_cmd >'$NO_UNIT_LOG' 2>&1 &"
+        local direct_pid=$!
+        printf '%s\n' "$direct_pid" >"$NO_UNIT_PIDFILE"
+        log "Server starting (direct run, no systemd) — pid $direct_pid, model: $(basename "$model"), port: $PORT"
+        log "log: $NO_UNIT_LOG"
+        log "stop: kill \$(cat $NO_UNIT_PIDFILE)  (or 'pos ai server stop')"
         return 0
     fi
 
@@ -626,8 +735,28 @@ EOF
 }
 
 cmd_stop() {
+    # Direct-run (--no-unit) pidfile first: kill the recorded pid, remove the
+    # pidfile. Then fall through to the normal unit path (both can exist if a
+    # unit was installed after a direct run).
+    local stopped_direct=0
+    if [ -f "$NO_UNIT_PIDFILE" ]; then
+        stopped_direct=1
+        local direct_pid
+        direct_pid="$(cat "$NO_UNIT_PIDFILE" 2>/dev/null || true)"
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) kill $direct_pid; rm -f $NO_UNIT_PIDFILE"
+        else
+            if [[ "$direct_pid" =~ ^[0-9]+$ ]]; then
+                kill "$direct_pid" 2>/dev/null || true
+            fi
+            rm -f "$NO_UNIT_PIDFILE"
+            log "llama.cpp server stopped (direct run)"
+        fi
+    fi
     if [ ! -f "$USER_SYSTEMD_DIR/$SERVICE" ]; then
-        warn "No llama.cpp server service installed ($SERVICE)"
+        if [ "$stopped_direct" -eq 0 ]; then
+            warn "No llama.cpp server service installed ($SERVICE)"
+        fi
         return 0
     fi
     if [ "${DRY_RUN:-0}" -eq 1 ]; then
@@ -647,8 +776,15 @@ cmd_status() {
         err "llama-server not found — install llama.cpp with the app installer: 'apps/ai/llamacpp.sh' (run 'bash apps/install.sh llamacpp', or pass '--apps'/'--full' to install.sh), see 'pos help ai server' (https://github.com/ggerganov/llama.cpp)"
     fi
 
-    # Service state
+    # Service state — systemd unit, or the direct-run (--no-unit) pidfile
     local svc_state="stopped"
+    if [ -f "$NO_UNIT_PIDFILE" ]; then
+        local direct_pid
+        direct_pid="$(cat "$NO_UNIT_PIDFILE" 2>/dev/null || true)"
+        if [[ "$direct_pid" =~ ^[0-9]+$ ]] && kill -0 "$direct_pid" 2>/dev/null; then
+            svc_state="running"
+        fi
+    fi
     if systemctl --user is-active "$SERVICE" &>/dev/null; then
         svc_state="running"
     fi

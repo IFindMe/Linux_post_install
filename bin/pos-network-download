@@ -171,6 +171,9 @@ cmd_start() {
         log "(dry-run) install unit $USER_SYSTEMD_DIR/$SERVICE"
         log "(dry-run) systemctl --user daemon-reload && enable --now $SERVICE"
     else
+        # User-bus pre-flight BEFORE writing the unit — abort with remediation
+        # (no orphaned unit) when the user systemd bus is unreachable.
+        ensure_user_bus
         mkdir -p "$USER_SYSTEMD_DIR"
         cat > "$USER_SYSTEMD_DIR/$SERVICE" <<EOF
 [Unit]
