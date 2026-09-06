@@ -47,17 +47,43 @@ find_llamacpp() {
 }
 
 # ── Version detection ──────────────────────────────────────────
+# detect_llama_version <binary> → X.Y.Z or "unknown". Guarded: a missing
+# binary or unreadable --version output yields "unknown", never an errexit.
 detect_llama_version() {
+    local bin="${1:-llama-server}"
+    command -v "$bin" &>/dev/null || { echo "unknown"; return 0; }
     local version
-    version="$(llama-server --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    version="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    [ -n "$version" ] || version="unknown"
     echo "$version"
 }
 
-# ── Validate version support for features ──────────────────────
-validate_server_features() {
-    local version="$1"
-    # Simple validation - in a real implementation we'd check if specific flags are supported
-    echo "Version $version detected. Feature validation would occur here."
+# ── Validate explicitly requested flags ────────────────────────
+# validate_requested_flags <binary> <version> <flag...> — for every flag the
+# user explicitly requested, check its token appears in the binary's --help
+# output and err (version-aware) on the first unsupported one. If --help
+# cannot be read, warn once and proceed instead of hard-failing.
+validate_requested_flags() {
+    local bin="$1" version="$2"
+    shift 2
+    [ $# -gt 0 ] || return 0
+
+    local help_text
+    help_text="$("$bin" --help 2>/dev/null)" || {
+        warn "Cannot obtain llama-server --help output — skipping flag validation"
+        return 0
+    }
+
+    local seen=() flag
+    for flag in "$@"; do
+        case " ${seen[*]:-} " in
+            *" $flag "*) continue ;;   # dedupe alias-mapped flags (e.g. --gpu → --n-gpu-layers)
+        esac
+        seen+=("$flag")
+        if ! printf '%s' "$help_text" | grep -qF -- "$flag"; then
+            err "installed llama.cpp ${version} does not expose ${flag} — remove it or upgrade llama.cpp"
+        fi
+    done
 }
 
 # ── GPU detection ──────────────────────────────────────────────
@@ -259,74 +285,78 @@ METRICS=""
 HEALTH=""
 SLOTS=""
 
+# Canonical flag tokens the user explicitly requested (defaults excluded) —
+# validated against the installed binary's --help in cmd_start.
+REQUESTED_FLAGS=()
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help) usage ;;
         --port)
             [ $# -ge 2 ] || err "--port requires a value"
-            PORT="$2"; shift 2 ;;
+            PORT="$2"; REQUESTED_FLAGS+=("--port"); shift 2 ;;
         --host)
             [ $# -ge 2 ] || err "--host requires a value"
-            HOST="$2"; shift 2 ;;
+            HOST="$2"; REQUESTED_FLAGS+=("--host"); shift 2 ;;
         --model)
             [ $# -ge 2 ] || err "--model requires a value"
-            MODEL_ARG="$2"; shift 2 ;;
+            MODEL_ARG="$2"; REQUESTED_FLAGS+=("--model"); shift 2 ;;
         --ctx)
             [ $# -ge 2 ] || err "--ctx requires a value"
-            CTX_SIZE="$2"; shift 2 ;;
+            CTX_SIZE="$2"; REQUESTED_FLAGS+=("--ctx-size"); shift 2 ;;
         --gpu)
             [ $# -ge 2 ] || err "--gpu requires a value"
-            GPU_LAYERS="$2"; shift 2 ;;
+            GPU_LAYERS="$2"; REQUESTED_FLAGS+=("--n-gpu-layers"); shift 2 ;;
         --threads)
             [ $# -ge 2 ] || err "--threads requires a value"
-            THREADS="$2"; shift 2 ;;
+            THREADS="$2"; REQUESTED_FLAGS+=("--threads"); shift 2 ;;
         --gpu-layers)
             [ $# -ge 2 ] || err "--gpu-layers requires a value"
-            GPU_LAYERS_FLAG="$2"; shift 2 ;;
+            GPU_LAYERS_FLAG="$2"; REQUESTED_FLAGS+=("--n-gpu-layers"); shift 2 ;;
         --gpu-threads)
             [ $# -ge 2 ] || err "--gpu-threads requires a value"
-            GPU_THREADS="$2"; shift 2 ;;
+            GPU_THREADS="$2"; REQUESTED_FLAGS+=("--gpu-threads"); shift 2 ;;
         --tensor-split)
             [ $# -ge 2 ] || err "--tensor-split requires a value"
-            TENSOR_SPLIT="$2"; shift 2 ;;
+            TENSOR_SPLIT="$2"; REQUESTED_FLAGS+=("--tensor-split"); shift 2 ;;
         --n-gpu-layers)
             [ $# -ge 2 ] || err "--n-gpu-layers requires a value"
-            GPU_LAYERS_FLAG="$2"; shift 2 ;;
+            GPU_LAYERS_FLAG="$2"; REQUESTED_FLAGS+=("--n-gpu-layers"); shift 2 ;;
         --batch-size)
             [ $# -ge 2 ] || err "--batch-size requires a value"
-            BATCH_SIZE="$2"; shift 2 ;;
+            BATCH_SIZE="$2"; REQUESTED_FLAGS+=("--batch-size"); shift 2 ;;
         --ubatch-size)
             [ $# -ge 2 ] || err "--ubatch-size requires a value"
-            UBATCH_SIZE="$2"; shift 2 ;;
+            UBATCH_SIZE="$2"; REQUESTED_FLAGS+=("--ubatch-size"); shift 2 ;;
         --temperature)
             [ $# -ge 2 ] || err "--temperature requires a value"
-            TEMPERATURE="$2"; shift 2 ;;
+            TEMPERATURE="$2"; REQUESTED_FLAGS+=("--temperature"); shift 2 ;;
         --top-k)
             [ $# -ge 2 ] || err "--top-k requires a value"
-            TOP_K="$2"; shift 2 ;;
+            TOP_K="$2"; REQUESTED_FLAGS+=("--top-k"); shift 2 ;;
         --top-p)
             [ $# -ge 2 ] || err "--top-p requires a value"
-            TOP_P="$2"; shift 2 ;;
+            TOP_P="$2"; REQUESTED_FLAGS+=("--top-p"); shift 2 ;;
         --repetition-penalty)
             [ $# -ge 2 ] || err "--repetition-penalty requires a value"
-            REPETITION_PENALTY="$2"; shift 2 ;;
+            REPETITION_PENALTY="$2"; REQUESTED_FLAGS+=("--repetition-penalty"); shift 2 ;;
         --mmap)
-            MAPPING="true"; shift ;;
+            MAPPING="true"; REQUESTED_FLAGS+=("--mmap"); shift ;;
         --mlock)
-            LOCKING="true"; shift ;;
+            LOCKING="true"; REQUESTED_FLAGS+=("--mlock"); shift ;;
         --kv-cache)
             [ $# -ge 2 ] || err "--kv-cache requires a value"
-            KV_CACHE_SIZE="$2"; shift 2 ;;
+            KV_CACHE_SIZE="$2"; REQUESTED_FLAGS+=("--kv-cache"); shift 2 ;;
         --ctx-size)
             [ $# -ge 2 ] || err "--ctx-size requires a value"
-            CTX_SIZE="$2"; shift 2 ;;
+            CTX_SIZE="$2"; REQUESTED_FLAGS+=("--ctx-size"); shift 2 ;;
         --metrics)
-            METRICS="true"; shift ;;
+            METRICS="true"; REQUESTED_FLAGS+=("--metrics"); shift ;;
         --health)
-            HEALTH="true"; shift ;;
+            HEALTH="true"; REQUESTED_FLAGS+=("--health"); shift ;;
         --slots)
             [ $# -ge 2 ] || err "--slots requires a value"
-            SLOTS="$2"; shift 2 ;;
+            SLOTS="$2"; REQUESTED_FLAGS+=("--slots"); shift 2 ;;
         -*)
             err "Unknown option '$1' (see --help)" ;;
         *)
@@ -351,6 +381,16 @@ LLAMACPP_THREADS="$THREADS"
 
 # ── Subcommands ────────────────────────────────────────────────
 
+# systemd_quote <value> — wrap a path in double quotes for systemd's
+# ExecStart word-splitting (systemd.service(5)), escaping embedded `"` as
+# `\"`. Only tokens that may legally contain spaces need this (binary and
+# model path); plain numeric/flag tokens like `--port 8088` stay unquoted.
+systemd_quote() {
+    local value="$1"
+    value="${value//\"/\\\"}"
+    printf '"%s"' "$value"
+}
+
 cmd_start() {
     # Resolve the llama-server binary
     local llamacpp_bin
@@ -358,11 +398,14 @@ cmd_start() {
     local llamacpp_full
     llamacpp_full="$(command -v "$llamacpp_bin")"
 
-    # Detect version
+    # Detect version (guarded — never crashes; returns "unknown" when
+    # unreadable, then basic defaults are used)
     local version
-    version="$(detect_llama_version)"
-    if [ -n "$version" ]; then
-        validate_server_features "$version"
+    version="$(detect_llama_version "$llamacpp_bin")"
+
+    # Validate explicitly requested flags against this binary's --help
+    if [ "${#REQUESTED_FLAGS[@]}" -gt 0 ]; then
+        validate_requested_flags "$llamacpp_bin" "$version" "${REQUESTED_FLAGS[@]}"
     fi
 
     # Resolve model
@@ -391,14 +434,69 @@ cmd_start() {
         fi
     fi
 
+    # Build ONE command line: binary + model + ALL resolved flags. A single
+    # string keeps the systemd unit's ExecStart on one line (systemd requires
+    # trailing `\` for multi-line continuations) and makes dry-run show
+    # exactly what the unit will contain. systemd splits ExecStart on
+    # unquoted whitespace, so the binary and the model path — the only tokens
+    # that may contain spaces — are systemd_quote()d; plain flag/number
+    # tokens stay unquoted.
+    local exec_cmd
+    exec_cmd="$(systemd_quote "$llamacpp_full") -m $(systemd_quote "$model") --port $PORT --host $HOST"
+    exec_cmd+=" --n-gpu-layers $gpu_layers"
+    exec_cmd+=" --ctx-size $CTX_SIZE"
+    exec_cmd+=" --threads $THREADS"
+    if [ -n "$GPU_THREADS" ]; then
+        exec_cmd+=" --gpu-threads $GPU_THREADS"
+    fi
+    if [ -n "$TENSOR_SPLIT" ]; then
+        exec_cmd+=" --tensor-split $TENSOR_SPLIT"
+    fi
+    if [ -n "$BATCH_SIZE" ]; then
+        exec_cmd+=" --batch-size $BATCH_SIZE"
+    fi
+    if [ -n "$UBATCH_SIZE" ]; then
+        exec_cmd+=" --ubatch-size $UBATCH_SIZE"
+    fi
+    if [ -n "$TEMPERATURE" ]; then
+        exec_cmd+=" --temperature $TEMPERATURE"
+    fi
+    if [ -n "$TOP_K" ]; then
+        exec_cmd+=" --top-k $TOP_K"
+    fi
+    if [ -n "$TOP_P" ]; then
+        exec_cmd+=" --top-p $TOP_P"
+    fi
+    if [ -n "$REPETITION_PENALTY" ]; then
+        exec_cmd+=" --repetition-penalty $REPETITION_PENALTY"
+    fi
+    if [ -n "$MAPPING" ]; then
+        exec_cmd+=" --mmap"
+    fi
+    if [ -n "$LOCKING" ]; then
+        exec_cmd+=" --mlock"
+    fi
+    if [ -n "$KV_CACHE_SIZE" ]; then
+        exec_cmd+=" --kv-cache $KV_CACHE_SIZE"
+    fi
+    if [ -n "$METRICS" ]; then
+        exec_cmd+=" --metrics"
+    fi
+    if [ -n "$HEALTH" ]; then
+        exec_cmd+=" --health"
+    fi
+    if [ -n "$SLOTS" ]; then
+        exec_cmd+=" --slots $SLOTS"
+    fi
+
     if [ "${DRY_RUN:-0}" -eq 1 ]; then
         log "(dry-run) generate systemd unit $USER_SYSTEMD_DIR/$SERVICE"
-        log "(dry-run) ExecStart: $llamacpp_full -m $model --port $PORT --host $HOST --n-gpu-layers $gpu_layers --ctx-size $CTX_SIZE --threads $THREADS"
+        log "(dry-run) ExecStart: $exec_cmd"
         log "(dry-run) systemctl --user daemon-reload && enable --now $SERVICE"
         return 0
     fi
 
-    # Generate systemd unit
+    # Generate systemd unit — ExecStart is a single line with the full command
     mkdir -p "$USER_SYSTEMD_DIR"
     cat > "$USER_SYSTEMD_DIR/$SERVICE" <<EOF
 [Unit]
@@ -407,71 +505,16 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$llamacpp_full -m $model --port $PORT --host $HOST
+ExecStart=$exec_cmd
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+EnvironmentFile=-%h/.config/linux_post_install/ai.env
+
+[Install]
+WantedBy=default.target
 EOF
-
-    # Add parameters if provided
-    if [ -n "$gpu_layers" ]; then
-        echo "  --n-gpu-layers $gpu_layers" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$CTX_SIZE" ]; then
-        echo "  --ctx-size $CTX_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$THREADS" ]; then
-        echo "  --threads $THREADS" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$GPU_THREADS" ]; then
-        echo "  --gpu-threads $GPU_THREADS" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$TENSOR_SPLIT" ]; then
-        echo "  --tensor-split $TENSOR_SPLIT" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$BATCH_SIZE" ]; then
-        echo "  --batch-size $BATCH_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$UBATCH_SIZE" ]; then
-        echo "  --ubatch-size $UBATCH_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$TEMPERATURE" ]; then
-        echo "  --temperature $TEMPERATURE" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$TOP_K" ]; then
-        echo "  --top-k $TOP_K" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$TOP_P" ]; then
-        echo "  --top-p $TOP_P" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$REPETITION_PENALTY" ]; then
-        echo "  --repetition-penalty $REPETITION_PENALTY" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$MAPPING" ]; then
-        echo "  --mmap" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$LOCKING" ]; then
-        echo "  --mlock" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$KV_CACHE_SIZE" ]; then
-        echo "  --kv-cache $KV_CACHE_SIZE" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$METRICS" ]; then
-        echo "  --metrics" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$HEALTH" ]; then
-        echo "  --health" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-    if [ -n "$SLOTS" ]; then
-        echo "  --slots $SLOTS" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    fi
-
-    echo "  " >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "Restart=on-failure" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "RestartSec=5" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "TimeoutStopSec=10" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "KillMode=control-group" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "EnvironmentFile=-%h/.config/linux_post_install/ai.env" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "[Install]" >> "$USER_SYSTEMD_DIR/$SERVICE"
-    echo "WantedBy=default.target" >> "$USER_SYSTEMD_DIR/$SERVICE"
     chmod 644 "$USER_SYSTEMD_DIR/$SERVICE"
 
     # Enable and start
@@ -514,6 +557,12 @@ cmd_stop() {
 }
 
 cmd_status() {
+    # llama-server must be present for the version probe below — same
+    # actionable deps message as `start`
+    if ! find_llamacpp >/dev/null 2>&1; then
+        err "llama-server not found — install llama.cpp (https://github.com/ggerganov/llama.cpp)"
+    fi
+
     # Service state
     local svc_state="stopped"
     if systemctl --user is-active "$SERVICE" &>/dev/null; then
@@ -563,14 +612,11 @@ cmd_status() {
         printf 'health:    not running\n'
     fi
 
-    # Version info
-    local version
-    version="$(detect_llama_version)"
-    if [ -n "$version" ]; then
-        printf 'version:   %s\n' "$version"
-    else
-        printf 'version:   unknown\n'
-    fi
+    # Version info (probe the resolved binary; "unknown" if unreadable)
+    local llamacpp_bin version
+    llamacpp_bin="$(find_llamacpp)"
+    version="$(detect_llama_version "$llamacpp_bin")"
+    printf 'version:   %s\n' "$version"
 }
 
 cmd_models() {

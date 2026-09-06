@@ -2,7 +2,7 @@
 
 Chat with AI models — Gemini, OpenRouter, and more — from the terminal and
 through the Telegram bot.
-Tool: `pos ai` with pluggable provider adapters (`gemini`, `openrouter`).
+Tool: `pos ai` with pluggable provider adapters (`gemini`, `openrouter`, `llamacpp`).
 
 | Command | What it does |
 |---------|--------------|
@@ -16,8 +16,8 @@ Tool: `pos ai` with pluggable provider adapters (`gemini`, `openrouter`).
 | `pos ai providers` | List all available providers and their config status |
 | `pos ai sessions` | List persistent sessions / clear one (`reset <name>`, e.g. `reset default`) |
 
-Shared flags: `--provider <name>` selects the backend (gemini|openrouter;
-default: gemini; also settable via `AI_PROVIDER` env/config); `--model <id>`
+Shared flags: `--provider <name>` selects the backend (gemini|openrouter|llamacpp;
+ default: gemini; also settable via `AI_PROVIDER` env/config); `--model <id>`
 overrides the model; `--system "<text>"` sets the system instruction for every
 turn (kept out of the session file) — it replaces the built-in terse ask prompt
 wholesale; `--full` skips that built-in prompt for long-form answers; `--last`
@@ -26,8 +26,9 @@ to the question and notes on stderr which source was attached, its age, and a
 staleness warning once it is older than an hour (`ask` only; stdout stays pure
 answer). Use `capture` to save output from any command for `--last`.
 
-Backward compatibility: `pos ai gemini` and `pos ai openrouter` still work as
-shorthand for `pos ai --provider gemini` and `pos ai --provider openrouter`.
+Backward compatibility: `pos ai gemini`, `pos ai openrouter`, and
+`pos ai llamacpp` still work as shorthand for `pos ai --provider gemini`,
+`pos ai --provider openrouter`, and `pos ai --provider llamacpp`.
 
 Every `ask`/`chat` lands in a persistent session file under
 `~/.local/share/linux_post_install/ai/<name>.json` (capped at 40 turns).
@@ -135,6 +136,7 @@ Available providers:
 |----------|-----|---------------|------------|
 | `gemini` | Google Gemini REST API | `gemini-2.5-flash` | `AI_GEMINI_API_KEY` |
 | `openrouter` | OpenRouter (OpenAI-compatible) | `openrouter/auto` | `OPENROUTER_API_KEY` |
+| `llamacpp` | Local llama.cpp (OpenAI-compatible) | loaded on the running server | `LLAMACPP_MODEL` |
 
 Adding a new provider: create `lib/ai-providers/<name>.sh` implementing
 `provider_name()`, `provider_default_model()`, `provider_generate()`, and

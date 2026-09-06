@@ -39,7 +39,7 @@ usage() {
     cat <<EOF
 Usage: pos ai [subcommand] [--provider <name>] [--model <id>] [--session <name>] [--system <text>] [--full] [--last] [--trust]
 
-AI assistant with pluggable providers (gemini, openrouter).
+AI assistant with pluggable providers (gemini, openrouter, llamacpp).
 
 Subcommands:
   ask "<prompt>"    Answer; prints the answer text to stdout. The prompt may
@@ -56,7 +56,7 @@ Subcommands:
                     'sessions' and 'sessions reset <name>'.
 
 Options:
-  --provider <name> Provider to use (gemini|openrouter; default: gemini).
+  --provider <name> Provider to use (gemini|openrouter|llamacpp; default: gemini).
                     Can also be set via AI_PROVIDER env/config.
   --model <id>      Override the model for this invocation.
   --session <name>  Use a named persistent session instead of 'default':
@@ -698,5 +698,9 @@ case "${cmd:-}" in
     models)    cmd_models "${args[@]}" ;;
     providers) cmd_providers "${args[@]}" ;;
     sessions)  cmd_sessions "${args[@]}" ;;
+    llamacpp)
+        # Provider shorthand (backward compat, same as the gemini/openrouter
+        # forwarders): pos ai llamacpp <subcmd> ... == pos ai --provider llamacpp <subcmd> ...
+        exec "$0" --provider llamacpp "${args[@]}" ;;
     *)         err "Unknown ai subcommand '$cmd' (see --help)" ;;
 esac

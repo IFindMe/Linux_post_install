@@ -15,9 +15,6 @@ set -euo pipefail
 # POS_EXAMPLES: pos ai hf info meta-llama/Llama-3.1-8B-Instruct | Show repository information
 # POS_EXAMPLES: pos ai hf files meta-llama/Llama-3.1-8B-Instruct | List repository files
 # POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --include "*.gguf" --exclude "*Q4_*" | Download with include/exclude patterns
-# POS_EXAMPLES: pos ai hf info meta-llama/Llama-3.1-8B-Instruct | Show repository information
-# POS_EXAMPLES: pos ai hf files meta-llama/Llama-3.1-8B-Instruct | List repository files
-# POS_EXAMPLES: pos ai hf download meta-llama/Llama-3.1-8B-Instruct --include "*.gguf" --exclude "*Q4_*" | Download with include/exclude patterns
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -62,7 +59,9 @@ Subcommands:
   remove <repo-id>                   Remove a downloaded model
   info <repo-id>                     Show repository information
   files <repo-id>                    List repository files
-  cache                              Manage local cache
+  cache [status|clear]               Inspect cache (status) or remove all
+                                     downloaded models (clear — asks for
+                                     confirmation)
 
 Download options:
   --branch <rev>                     Download from a specific branch/revision
@@ -75,7 +74,9 @@ Download options:
   --output <dir>                     Override download directory
   --include <pattern>                Include files matching pattern (supports glob)
   --exclude <pattern>                Exclude files matching pattern (supports glob)
-  --revision <rev>                   Specific revision (commit/tag/branch)
+  --revision <rev>                   Specific revision (commit/tag/branch);
+                                     alias for --branch — when both are given,
+                                     the later one wins
 
 Examples:
   pos ai hf search llama 7b
@@ -112,7 +113,6 @@ EOF
 # ── Parse global flags ─────────────────────────────────────────
 SUBCMD=""
 SUBCMD_ARGS=()
-BRANCH=""
 GGUF_ONLY=0
 OUTPUT_DIR=""
 LIST_FILES=0
@@ -126,7 +126,7 @@ while [ $# -gt 0 ]; do
         -h|--help) usage ;;
         --branch)
             [ $# -ge 2 ] || err "--branch requires a value"
-            BRANCH="$2"; shift 2 ;;
+            REVISION="$2"; shift 2 ;;
         --gguf)
             GGUF_ONLY=1; shift ;;
         --list)
@@ -399,18 +399,6 @@ hf_gguf_quant_gate() {
     printf '%s' "$selected"
 }
 
-# Enhanced error reporting function
-err_with_context() {
-    local msg="$1"
-    local context="${2:-}"
-    if [ -n "$context" ]; then
-        echo "Error: $msg (Context: $context)" >&2
-    else
-        echo "Error: $msg" >&2
-    fi
-    exit 1
-}
-
 # hf_list_files <repo-id> <branch> <files-json> → stdout table, no downloads
 hf_list_files() {
     local repo_id="$1" branch="$2" json="$3"
@@ -424,6 +412,38 @@ hf_list_files() {
         while IFS=$'\t' read -r rpath rsize; do
             printf '  %-60s %s\n' "$rpath" "$(hf_human_size "$rsize")"
         done
+}
+
+# hf_apply_patterns <files-json> <include-pattern> <exclude-pattern> → filtered
+# JSON array. Glob semantics via bash `case` (the documented "supports glob"):
+# keep entries whose rfilename matches $include (when set) AND does not match
+# $exclude (when set). Composes after the gguf/filename filters and preserves
+# the {"rfilename","size"} array shape downstream consumers expect.
+hf_apply_patterns() {
+    local json="$1" include="${2:-}" exclude="${3:-}"
+    local entries=() entry fname
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        fname="$(printf '%s' "$entry" | jq -r '.rfilename // empty')"
+        [ -n "$fname" ] || continue
+        if [ -n "$include" ]; then
+            case "$fname" in
+                $include) ;;
+                *) continue ;;
+            esac
+        fi
+        if [ -n "$exclude" ]; then
+            case "$fname" in
+                $exclude) continue ;;
+            esac
+        fi
+        entries+=("$entry")
+    done < <(printf '%s' "$json" | jq -c '.[]')
+    if [ "${#entries[@]}" -eq 0 ]; then
+        printf '[]'
+    else
+        printf '%s\n' "${entries[@]}" | jq -c -s '.'
+    fi
 }
 
 hf_resolve_branch() {
@@ -448,31 +468,7 @@ hf_resolve_branch() {
     printf 'main'
 }
 
-# ── Download helpers ───────────────────────────────────────────
-hf_download_file() {
-    local url="$1"
-    local target="$2"
-    local auth_header
-    auth_header="$(hf_auth_header)"
-
-    local curl_args=(-L -C - --progress-bar -o "$target")
-    if [ -n "$auth_header" ]; then
-        curl_args+=(-H "$auth_header")
-    fi
-
-    if curl "${curl_args[@]}" "$url" 2>&1; then
-        if [ -s "$target" ]; then
-            return 0
-        else
-            warn "Downloaded file is empty: $target"
-            return 1
-        fi
-    else
-        warn "Download interrupted for $(basename "$target") (resume with same command)"
-        return 1
-    fi
-}
-
+# ── Download helper ────────────────────────────────────────────
 # Enhanced progress function to provide better feedback
 hf_download_with_progress() {
     local url="$1"
@@ -504,25 +500,8 @@ hf_download_with_progress() {
     fi
 }
 
-# ── Parallel download helpers ──────────────────────────────────
-# Global variables for parallel downloads
+# ── Parallel download limit (used by cmd_download) ─────────────
 PARALLEL_DOWNLOADS=4  # Default parallel downloads
-
-# Function to run download in background and track it
-run_parallel_download() {
-    local url="$1"
-    local target="$2"
-    local job_id="$3"
-    
-    # Run download and capture result
-    if hf_download_with_progress "$url" "$target"; then
-        echo "SUCCESS:$job_id"
-        return 0
-    else
-        echo "FAILED:$job_id"
-        return 1
-    fi
-}
 
 # ── Subcommands ────────────────────────────────────────────────
 
@@ -562,7 +541,6 @@ cmd_download() {
     # Flag pre-checks
     [ -n "$QUANT_DIR" ] && [ "$GGUF_ONLY" -eq 0 ] && err "--quant requires --gguf"
     [ "$LIST_FILES" -eq 1 ] && [ -n "$filename" ] && err "--list cannot be combined with a filename"
-    [ -n "$INCLUDE_PATTERN" ] && [ -n "$EXCLUDE_PATTERN" ] && [ "$GGUF_ONLY" -eq 1 ] && err "--include/--exclude cannot be used with --gguf"
     [ -n "$INCLUDE_PATTERN" ] && [ -n "$EXCLUDE_PATTERN" ] && [ -n "$filename" ] && err "--include/--exclude cannot be used with specific filenames"
 
     local branch
@@ -600,24 +578,15 @@ cmd_download() {
         filtered_files="$(printf '%s' "$files_json" | jq -c "$HF_GGUF_FILTER")"
         [ "$(printf '%s' "$filtered_files" | jq 'length')" -gt 0 ] \
             && filtered_files="$(hf_gguf_quant_gate "$filtered_files" "$QUANT_DIR" "$repo_id")"
-    elif [ -n "$INCLUDE_PATTERN" ] || [ -n "$EXCLUDE_PATTERN" ]; then
-        # Pattern filtering
-        filtered_files="$files_json"
-        if [ -n "$INCLUDE_PATTERN" ]; then
-            # Use jq to filter files matching include pattern
-            local include_filter
-            include_filter=".[] | select(.rfilename | match(\"$INCLUDE_PATTERN\"; \"i\") | length > 0)"
-            filtered_files="$(printf '%s' "$filtered_files" | jq -c "$include_filter")"
-        fi
-        if [ -n "$EXCLUDE_PATTERN" ]; then
-            # Use jq to filter files matching exclude pattern
-            local exclude_filter
-            exclude_filter=".[] | select(.rfilename | match(\"$EXCLUDE_PATTERN\"; \"i\") | length == 0)"
-            filtered_files="$(printf '%s' "$filtered_files" | jq -c "$exclude_filter")"
-        fi
     else
         # All files
         filtered_files="$(printf '%s' "$files_json" | jq -c '.')"
+    fi
+
+    # Pattern filtering (bash `case` glob) — composes with the filters above in
+    # the order gguf/filename → include → exclude, and always yields an array
+    if [ -n "$INCLUDE_PATTERN" ] || [ -n "$EXCLUDE_PATTERN" ]; then
+        filtered_files="$(hf_apply_patterns "$filtered_files" "$INCLUDE_PATTERN" "$EXCLUDE_PATTERN")"
     fi
 
     local file_count
@@ -627,6 +596,8 @@ cmd_download() {
             err "File not found: $filename in $repo_id (branch: ${branch})"
         elif [ "$GGUF_ONLY" -eq 1 ]; then
             err "No .gguf files found in $repo_id${branch:+ (branch: $branch)} — try without --gguf"
+        elif [ -n "$INCLUDE_PATTERN" ] || [ -n "$EXCLUDE_PATTERN" ]; then
+            err "No files match include/exclude patterns in $repo_id${branch:+ (branch: $branch)}"
         else
             err "No files to download"
         fi
@@ -658,16 +629,22 @@ cmd_download() {
     fi
 
     local downloaded=0
+    local failed_files=()
     local ns="${repo_id%%/*}"
     local repo="${repo_id#*/}"
 
-    # If we're downloading multiple files, run them in parallel
+    # Multiple files → parallel downloads. Each job is reaped individually so
+    # one failure does not abort the batch; failures are collected in
+    # failed_files (function-scoped so the summary/meta/exit below can see
+    # them), reported per-file at the end, and the temp dir is removed on
+    # every exit path (EXIT trap).
     if [ "$file_count" -gt 1 ]; then
         local temp_dir
         temp_dir="$(mktemp -d)"
-        local job_pids=()
+        trap 'rm -rf "$temp_dir"' EXIT
+        local job_pids=() job_names=()
         local max_jobs="${PARALLEL_DOWNLOADS:-4}"
-        local completed_jobs=0
+        local completed_jobs=0 n=0 i
 
         # Process files in parallel batches
         while IFS= read -r file_json; do
@@ -678,31 +655,48 @@ cmd_download() {
             local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
             local target="${target_dir}/${fname}"
 
-            # Start background job
-            hf_download_with_progress "$url" "$target" &
+            # Start background job; each job logs to its own file so output
+            # does not interleave
+            ( hf_download_with_progress "$url" "$target" >"$temp_dir/job-$n.log" 2>&1 ) &
             local pid=$!
-            job_pids+=($pid)
+            job_pids+=("$pid")
+            job_names+=("$fname")
+            n=$((n + 1))
 
-            # Limit parallel jobs
-            if [ ${#job_pids[@]} -ge "$max_jobs" ]; then
-                # Wait for oldest job to complete
-                wait "${job_pids[0]}"
+            # Limit parallel jobs — reap the oldest job; a failed download is
+            # recorded and labelled honestly, never fatal to the batch
+            if [ "${#job_pids[@]}" -ge "$max_jobs" ]; then
                 completed_jobs=$((completed_jobs + 1))
-                printf '[%d/%d] Completed: %s\n' "$completed_jobs" "$file_count" "$fname" >&2
-                # Shift job array
+                if ! wait "${job_pids[0]}"; then
+                    failed_files+=("${job_names[0]}")
+                    printf '[%d/%d] Failed: %s\n' "$completed_jobs" "$file_count" "${job_names[0]}" >&2
+                else
+                    printf '[%d/%d] Completed: %s\n' "$completed_jobs" "$file_count" "${job_names[0]}" >&2
+                fi
                 job_pids=("${job_pids[@]:1}")
+                job_names=("${job_names[@]:1}")
             fi
         done < <(printf '%s' "$filtered_files" | jq -c '.[]')
 
-        # Wait for remaining jobs
-        for pid in "${job_pids[@]}"; do
-            wait "$pid"
+        # Drain remaining jobs — every job finishes before we report
+        for i in "${!job_pids[@]}"; do
             completed_jobs=$((completed_jobs + 1))
-            printf '[%d/%d] Completed\n' "$completed_jobs" "$file_count" >&2
+            if ! wait "${job_pids[$i]}"; then
+                failed_files+=("${job_names[$i]}")
+                printf '[%d/%d] Failed: %s\n' "$completed_jobs" "$file_count" "${job_names[$i]}" >&2
+            else
+                printf '[%d/%d] Completed: %s\n' "$completed_jobs" "$file_count" "${job_names[$i]}" >&2
+            fi
         done
-        
-        # Clean up temp directory
+
+        # Report per-file failures after the batch (same style as the
+        # sequential path's "Failed to download" warning)
+        for i in "${!failed_files[@]}"; do
+            warn "Failed to download ${failed_files[$i]}"
+        done
+
         rm -rf "$temp_dir"
+        trap - EXIT
     else
         # Single file download - use original sequential approach
         while IFS= read -r file_json; do
@@ -726,14 +720,18 @@ cmd_download() {
         done < <(printf '%s' "$filtered_files" | jq -c '.[]')
     fi
 
-    # Write metadata
-    local meta_file="${target_dir}/.hf-meta"
-    local timestamp
-    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    local file_list
-    file_list="$(printf '%s' "$filtered_files" | jq -c '[.[] | .rfilename]')"
+    # Write metadata — only when every file in the batch succeeded. A partial
+    # failure means the model is incomplete; writing .hf-meta would advertise
+    # it as complete to `list`/`cache` and hand incomplete weights to
+    # `pos ai server start`.
+    if [ "${#failed_files[@]}" -eq 0 ]; then
+        local meta_file="${target_dir}/.hf-meta"
+        local timestamp
+        timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        local file_list
+        file_list="$(printf '%s' "$filtered_files" | jq -c '[.[] | .rfilename]')"
 
-    cat > "$meta_file" <<METAEOF
+        cat > "$meta_file" <<METAEOF
 {
   "repo_id": "$repo_id",
   "branch": "$branch",
@@ -741,6 +739,9 @@ cmd_download() {
   "files": $file_list
 }
 METAEOF
+    else
+        warn "Not writing .hf-meta — ${repo_id} is incomplete (${#failed_files[@]} file(s) failed)"
+    fi
 
     # Summary
     if [ "$file_count" -eq 1 ]; then
@@ -753,10 +754,24 @@ METAEOF
         printf '📥 Downloaded: %s/%s (%s)\n' "$repo_id" "$fname" "$human_size"
         printf '📁 %s/%s\n' "$target_dir" "$fname"
     else
-        local total_human
-        total_human="$(hf_human_size "$total_size")"
-        printf '📥 Downloaded: %s (%d files, %s)\n' "$repo_id" "$file_count" "$total_human"
+        if [ "${#failed_files[@]}" -gt 0 ]; then
+            # Honest count: attempted = total files, success = total − failures
+            local success_count=$((file_count - ${#failed_files[@]}))
+            printf '📥 Downloaded: %s (%d of %d files, %d failed: %s)\n' \
+                "$repo_id" "$success_count" "$file_count" "${#failed_files[@]}" "${failed_files[*]}"
+        else
+            local total_human
+            total_human="$(hf_human_size "$total_size")"
+            printf '📥 Downloaded: %s (%d files, %s)\n' "$repo_id" "$file_count" "$total_human"
+        fi
         printf '📁 %s/\n' "$target_dir"
+    fi
+
+    # A partially-failed parallel batch must be detectable by scripts —
+    # exit non-zero. The sequential single-file path is unchanged: it never
+    # populates failed_files, so this clause only fires for the parallel path.
+    if [ "${#failed_files[@]}" -gt 0 ]; then
+        return 1
     fi
 }
 
@@ -897,10 +912,84 @@ cmd_files() {
         done
 }
 
-    cmd_cache() {
-        echo "Cache management is not fully implemented yet."
-        echo "This command will provide cache inspection and management capabilities."
-    }
+cmd_cache() {
+    local action="${SUBCMD_ARGS[0]:-status}"
+    case "$action" in
+        status|"") cmd_cache_status ;;
+        clear)     cmd_cache_clear ;;
+        *)         err "Usage: pos ai hf cache [status|clear]" ;;
+    esac
+}
+
+# hf_cache_models → one downloaded model dir per line (same discovery as `list`)
+hf_cache_models() {
+    [ -d "$HF_DOWNLOAD_DIR" ] || return 0
+    local dir
+    while IFS= read -r dir; do
+        [ -d "$dir" ] || continue
+        [ -f "$dir/.hf-meta" ] || continue
+        printf '%s\n' "$dir"
+    done < <(find "$HF_DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+}
+
+cmd_cache_status() {
+    printf 'Cache dir: %s\n' "$HF_DOWNLOAD_DIR"
+    local dir model_dirs=() size_total=0 f fsize
+    while IFS= read -r dir; do
+        [ -n "$dir" ] || continue
+        model_dirs+=("$dir")
+    done < <(hf_cache_models)
+    if [ "${#model_dirs[@]}" -eq 0 ]; then
+        printf 'Models:     0 (nothing downloaded yet)\n'
+        return 0
+    fi
+    for dir in "${model_dirs[@]}"; do
+        while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            fsize="$(stat -c%s "$f" 2>/dev/null || echo 0)"
+            size_total=$((size_total + fsize))
+        done < <(find "$dir" -type f ! -name '.hf-meta' 2>/dev/null)
+    done
+    printf 'Models:     %d\n' "${#model_dirs[@]}"
+    printf 'Size:       %s\n' "$(hf_human_size "$size_total")"
+}
+
+cmd_cache_clear() {
+    local dir model_dirs=() size_total=0 f fsize yn
+    while IFS= read -r dir; do
+        [ -n "$dir" ] || continue
+        model_dirs+=("$dir")
+    done < <(hf_cache_models)
+    if [ "${#model_dirs[@]}" -eq 0 ]; then
+        printf 'Cache dir: %s\nNo models downloaded yet — nothing to clear\n' "$HF_DOWNLOAD_DIR"
+        return 0
+    fi
+
+    printf 'The following downloaded models will be removed:\n'
+    for dir in "${model_dirs[@]}"; do
+        printf '  %s\n' "$(basename "$dir")"
+    done
+
+    # Destructive default n, EOF/invalid input denies — same contract as
+    # lib/common.sh confirm(). Reads from /dev/tty (like pos-ai-server's model
+    # picker) so the tool stays out of the dispatcher's stdin-wrapper tee.
+    printf 'Remove all downloaded models? [y/N]: ' >&2
+    IFS= read -r yn 2>/dev/null </dev/tty || yn=""
+    case "$yn" in
+        [Yy]) ;;
+        *) echo 'Aborted — nothing removed' >&2; return 0 ;;
+    esac
+
+    for dir in "${model_dirs[@]}"; do
+        while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            fsize="$(stat -c%s "$f" 2>/dev/null || echo 0)"
+            size_total=$((size_total + fsize))
+        done < <(find "$dir" -type f 2>/dev/null)
+        rm -rf "$dir"
+    done
+    printf 'Cache cleared (freed %s)\n' "$(hf_human_size "$size_total")"
+}
 
 # ── Dispatch ───────────────────────────────────────────────────
 case "$SUBCMD" in

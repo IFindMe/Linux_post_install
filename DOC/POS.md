@@ -55,7 +55,7 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 ### ai
 
-**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` (backward-compat forwarders → `pos ai --provider <name>`), `bin/pos-ai-hf` (Hugging Face model downloader), `bin/pos-ai-server` (llama.cpp inference server manager)
+**File:** `bin/pos-ai` (provider-agnostic main tool), `bin/pos-ai-gemini` / `bin/pos-ai-openrouter` / `bin/pos-ai-llamacpp` (backward-compat forwarders → `pos ai --provider <name>`), `bin/pos-ai-hf` (Hugging Face model downloader), `bin/pos-ai-server` (llama.cpp inference server manager)
 **Provider adapters:** `lib/ai-providers/gemini.sh`, `lib/ai-providers/openrouter.sh`, `lib/ai-providers/llamacpp.sh`
 **Purpose:** AI assistant with pluggable providers. Six subcommands: `ask` (scriptable, persistent session), `capture` (run a command and save its output for `--last`), `chat` (interactive multi-turn REPL), `models` (list available models), `providers` (list providers and config status), and `sessions` (list/clear sessions). Providers handle API-specific logic; the main tool handles sessions, rendering, machine context, and all shared logic.
 
@@ -69,7 +69,7 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 | `pos ai models` | Lists available models for the active provider and flags the configured default |
 | `pos ai providers` | Lists available providers, their config status, and the active provider |
 | `pos ai --model <id> …` | Overrides the model for one invocation |
-| `pos ai --provider <name> …` | Selects the provider for one invocation (gemini\|openrouter) |
+| `pos ai --provider <name> …` | Selects the provider for one invocation (gemini\|openrouter\|llamacpp) |
 | `pos ai alias` | Interactive alias manager (`bin/pos-ai-alias`): menu loop (create / edit / remove / list) that shows the alias table (Name/Provider/Session/Prompt, prompts truncated) between picks |
 | `pos ai alias create [name]` | Interactive 4-step wizard: alias name (leading letter, then letters/digits/-/_; unique across aliases), provider pick (from installed `lib/ai-providers/*.sh` adapters), session name (defaults to the alias name), optional system prompt (must not contain `\|`; warns above 500 chars); confirm defaults to yes, then the alias is saved |
 | `pos ai alias edit [name]` | Edits an existing alias (pick from list or pass the name): provider/session/prompt are re-prompted pre-filled with the current values — Enter keeps the current value; a per-field changed/unchanged summary is confirmed (default yes) before saving; nothing is written if nothing changed |
@@ -79,7 +79,7 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 Alias storage & activation: records live in `~/.config/linux_post_install/ai-aliases.env` — one `name\|provider\|session\|system_prompt` line per alias, chmod 600, managed by the tool (do not hand-edit); an empty session falls back to the alias name. **Activation needs no shell sourcing**: every `pos ai alias` invocation syncs the ENV file (the single source of truth) against executable wrapper scripts at `~/.local/bin/<name>` (chmod 755) — missing or changed wrappers are atomically rewritten, wrappers pos owns but ENV no longer lists are deleted, and hand-edited wrappers are healed. A wrapper re-reads its bytes on every run, so an edit is **live on the next invocation** (no reload), and the scripts work identically in interactive shells, scripts, cron, and non-login ssh sessions (`~/.local/bin` must stay on `PATH` — a loud warning with a copy-paste fix appears when it isn't). Create refuses name collisions: a foreign file at `~/.local/bin/<name>` and names resolving to another binary on `PATH` are never overwritten. The legacy generated `~/.config/linux_post_install/ai-aliases.sh` is no longer written; on the next invocation pos removes it automatically (marker-guarded — a foreign-content file is left untouched with a warning) and prints an `unalias <names>` remediation hint for already-running shells (or simply start a new shell).
 
-Backward compatibility: `pos ai gemini` and `pos ai openrouter` still work as shorthands for `pos ai --provider gemini` and `pos ai --provider openrouter`.
+Backward compatibility: `pos ai gemini`, `pos ai openrouter`, and `pos ai llamacpp` still work as shorthands for `pos ai --provider gemini`, `pos ai --provider openrouter`, and `pos ai --provider llamacpp`.
 
 `pos ai` with no subcommand prints usage (never blocks on stdin). `ask`/`chat` time out after 60s per request; on a non-2xx response the API's `error.message` is shown and the tool exits non-zero.
 
@@ -87,7 +87,7 @@ Backward compatibility: `pos ai gemini` and `pos ai openrouter` still work as sh
 
 | Key | Required | Default | Purpose |
 |-----|----------|---------|---------|
-| `AI_PROVIDER` | no | `gemini` | Active provider (gemini\|openrouter) |
+| `AI_PROVIDER` | no | `gemini` | Active provider (gemini\|openrouter\|llamacpp) |
 | `AI_API_KEY` | yes | — | API key for the active provider (secret — masked in `pos config ai`) |
 | `AI_MODEL` | no | per provider | Model id used by `ask`/`chat`/`models` |
 | `AI_SYSTEM_PROMPT` | no | built-in terse prompt | Custom system prompt (overrides built-in; empty to reset) |
@@ -105,9 +105,10 @@ Model precedence: `--model` flag > `AI_MODEL` env > provider-specific fallback (
 | Command | Behavior |
 |---------|----------|
 | `pos ai hf search <query>` | Search Hugging Face models by query (sorted by downloads); prints model ID, download count |
-| `pos ai hf download <repo-id> [filename]` | Download a file or entire repo from Hugging Face. Creates `<namespace>-<model-name>/` under `HF_DOWNLOAD_DIR` (default `~/.local/share/linux_post_install/ai/models/`). Options: `--branch <rev>` (specific branch), `--gguf` (only `.gguf` weight files; lists recursively and excludes mmproj/imatrix/vision/MTP artifacts), `--quant <dir>` (with `--gguf`: pick one quant directory when a repo groups weights into several, e.g. `--gguf --quant Q8_0`), `--list` (list remote repository files without downloading — shows exactly what download would fetch), `--output <dir>` (override download dir). A filename may be a full path (`Q8_0/model.gguf`) or a bare name (`model.gguf`) — bare names matching files in multiple directories error and ask for the full path. Progress bars to stderr; summary with path and size to stdout. Writes `.hf-meta` JSON (repo-id, branch, files, timestamp) for `list` and `remove` |
+| `pos ai hf download <repo-id> [filename]` | Download a file or entire repo from Hugging Face. Creates `<namespace>-<model-name>/` under `HF_DOWNLOAD_DIR` (default `~/.local/share/linux_post_install/ai/models/`). Options: `--branch <rev>` (specific branch/revision; alias `--revision`, when both are given the later one wins), `--gguf` (only `.gguf` weight files; lists recursively and excludes mmproj/imatrix/vision/MTP artifacts), `--quant <dir>` (with `--gguf`: pick one quant directory when a repo groups weights into several, e.g. `--gguf --quant Q8_0`), `--include <pattern>` / `--exclude <pattern>` (glob filters applied after the gguf/filename filter, in the order gguf → include → exclude, e.g. `--include "*.gguf" --exclude "*Q4_*"`), `--list` (list remote repository files without downloading — shows exactly what download would fetch), `--output <dir>` (override download dir). A filename may be a full path (`Q8_0/model.gguf`) or a bare name (`model.gguf`) — bare names matching files in multiple directories error and ask for the full path. Progress bars to stderr; summary with path and size to stdout. Writes `.hf-meta` JSON (repo-id, branch, files, timestamp) for `list` and `remove` |
 | `pos ai hf list` | List all downloaded models with size and date |
 | `pos ai hf remove <repo-id>` | Remove a downloaded model directory and show freed space |
+| `pos ai hf cache [status\|clear]` | `status` shows the cache directory, model count and total on-disk size of all downloaded models; `clear` lists the downloaded models, asks for confirmation (destructive default **n**) and removes them, printing the freed space |
 
 Auth: `HF_TOKEN` in `~/.config/linux_post_install/ai.env` (same scope as `pos ai`; edit via `pos config ai`). Even for public repos, a token increases rate limits from 500/5min to 1000/5min. Resume: `curl -C -` resumes interrupted downloads. Rate limit handling: on HTTP 429, sleeps `Retry-After` or 60s, retries once.
 
@@ -121,7 +122,7 @@ Auth: `HF_TOKEN` in `~/.config/linux_post_install/ai.env` (same scope as `pos ai
 | `pos ai server models` | List `.gguf` files found in `HF_DOWNLOAD_DIR` with sizes |
 | `pos ai server logs [lines]` | Show recent server logs via `journalctl --user -u pos-ai-server` (default 50 lines) |
 
-Flags: `--port <port>` (default 8088), `--host <addr>` (default 127.0.0.1), `--model <path>` (overrides arg/config), `--ctx <size>` (context window, default 4096), `--gpu <layers>` (-1=auto, 0=CPU, N=explicit, default -1), `--threads <n>` (default nproc). Config keys in `ai.env`: `LLAMACPP_PORT`, `LLAMACPP_HOST`, `LLAMACPP_MODEL`, `LLAMACPP_CTX_SIZE`, `LLAMACPP_GPU_LAYERS`, `LLAMACPP_THREADS`. Requires `curl` + `jq` and a `llama-server` binary on PATH.
+Flags: `--port <port>` (default 8088), `--host <addr>` (default 127.0.0.1), `--model <path>` (overrides arg/config), `--ctx <size>` (context window, default 4096), `--gpu <layers>` (-1=auto, 0=CPU, N=explicit, default -1), `--threads <n>` (default nproc), `--gpu-layers`/`--n-gpu-layers <n>` (GPU layers override), `--gpu-threads <n>`, `--tensor-split <n>`, `--batch-size <n>`, `--ubatch-size <n>`, `--temperature <n>`, `--top-k <n>`, `--top-p <n>`, `--repetition-penalty <n>`, `--mmap`, `--mlock`, `--kv-cache <size>`, `--ctx-size <n>`, `--metrics`, `--health`, `--slots <n>`. Explicitly requested flags are validated against the installed llama.cpp's `--help` (version-aware: an unsupported flag errors with the detected version); if `--help` cannot be read the tool warns and proceeds. Config keys in `ai.env`: `LLAMACPP_PORT`, `LLAMACPP_HOST`, `LLAMACPP_MODEL`, `LLAMACPP_CTX_SIZE`, `LLAMACPP_GPU_LAYERS`, `LLAMACPP_THREADS`. Requires `curl` + `jq` and a `llama-server` binary on PATH.
 
 ### network
 

@@ -3,8 +3,8 @@
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
 # GEN:START posflags
 declare -A _pos_flags
-_pos_flags[ai-hf]="--branch --gguf --list --output --quant"
-_pos_flags[ai-server]="--port --host --model --ctx --gpu --threads"
+_pos_flags[ai-hf]="--branch --gguf --list --output --quant --include --exclude --revision"
+_pos_flags[ai-server]="--port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots"
 _pos_flags[communication-matrix-listener]="--enable --disable --status --run"
 _pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
 _pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
@@ -30,6 +30,7 @@ _pos_flags[tree]="--depth"
 declare -A _pos_subcmds
 _pos_subcmds[ai-alias]="create edit remove list show"
 _pos_subcmds[ai-gemini]="ask chat models sessions capture"
+_pos_subcmds[ai-llamacpp]="ask chat models sessions capture"
 _pos_subcmds[ai-openrouter]="ask chat sessions capture"
 _pos_subcmds[ai-server]="start stop status models logs"
 _pos_subcmds[communication-matrix-sender]="send test login"
@@ -47,7 +48,7 @@ _pos_subcmds[share-smb-client]="mount unmount list persist unpersist menu"
 _pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable menu"
 _pos_subcmds[system-backup]="menu"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
-_pos_subcmds[ai]="ask chat sessions capture models providers alias gemini hf openrouter server"
+_pos_subcmds[ai]="ask chat sessions capture models providers alias gemini hf llamacpp openrouter server"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)

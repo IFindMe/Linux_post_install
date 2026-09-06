@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–209 |
-| ## 3. Installation Flow | 210–263 |
-| ## 4. The `pos` CLI System | 264–344 |
-| ## 5. Shared Library — `lib/common.sh` | 345–376 |
-| ## 6. Docker Compose / ScaleTail | 377–419 |
-| ## 7. Optional Apps (`apps/`) | 420–449 |
-| ## 8. Entertainment Module | 450–463 |
-| ## 9. Systemd Services | 464–475 |
-| ## 10. Configuration Files | 476–502 |
-| ## 11. Coding Conventions | 503–535 |
-| ## 12. Development Workflow | 536–588 |
-| ## 13. Key File Quick Reference | 589–663 |
-| ## 14. Common Tasks for Agents | 664–697 |
+| ## 2. Directory Structure | 44–210 |
+| ## 3. Installation Flow | 211–264 |
+| ## 4. The `pos` CLI System | 265–346 |
+| ## 5. Shared Library — `lib/common.sh` | 347–378 |
+| ## 6. Docker Compose / ScaleTail | 379–421 |
+| ## 7. Optional Apps (`apps/`) | 422–451 |
+| ## 8. Entertainment Module | 452–465 |
+| ## 9. Systemd Services | 466–477 |
+| ## 10. Configuration Files | 478–504 |
+| ## 11. Coding Conventions | 505–537 |
+| ## 12. Development Workflow | 538–590 |
+| ## 13. Key File Quick Reference | 591–666 |
+| ## 14. Common Tasks for Agents | 667–700 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -65,6 +65,7 @@ Linux_post_install/
 │   ├── pos-ai-gemini                       # Forward to pos ai --provider gemini (backward compat)
 │   ├── pos-ai-hf                           # Download AI models from Hugging Face (search, download, manage)
 │   │   [deps: curl jq]
+│   ├── pos-ai-llamacpp                     # Forward to pos ai --provider llamacpp (backward compat)
 │   ├── pos-ai-openrouter                   # Forward to pos ai --provider openrouter (backward compat)
 │   ├── pos-ai-server                       # llama.cpp local inference server (start, stop, status, models, logs)
 │   │   [deps: curl jq]
@@ -282,7 +283,8 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 |----------|---------|--------|-------------|------|----------|
 | ai | alias | `pos-ai-alias` | manage AI agent aliases |  |  |
 | ai | gemini | `pos-ai-gemini` | Forward to pos ai --provider gemini (backward compat) |  |  |
-| ai | hf | `pos-ai-hf` | Download AI models from Hugging Face (search, download, manage) | curl jq | pos ai hf search llama 7b → Search Hugging Face for "llama 7b" models · pos ai hf download meta-llama/Llama-3.1-8B-Instruct → Download all files from a repo · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf → Download only GGUF quantized files · pos ai hf download org/model-GGUF --gguf --quant Q8_0 → Download one quant directory's GGUF shards · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --list → List remote repository files (what --gguf/download would fetch) · pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json → Download a single file · pos ai hf list → List downloaded models · pos ai hf remove meta-llama-Llama-3.1-8B-Instruct → Remove a downloaded model |
+| ai | hf | `pos-ai-hf` | Download AI models from Hugging Face (search, download, manage) | curl jq | pos ai hf search llama 7b → Search Hugging Face for "llama 7b" models · pos ai hf download meta-llama/Llama-3.1-8B-Instruct → Download all files from a repo · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --gguf → Download only GGUF quantized files · pos ai hf download org/model-GGUF --gguf --quant Q8_0 → Download one quant directory's GGUF shards · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --list → List remote repository files (what --gguf/download would fetch) · pos ai hf download meta-llama/Llama-3.1-8B-Instruct config.json → Download a single file · pos ai hf list → List downloaded models · pos ai hf remove meta-llama-Llama-3.1-8B-Instruct → Remove a downloaded model · pos ai hf info meta-llama/Llama-3.1-8B-Instruct → Show repository information · pos ai hf files meta-llama/Llama-3.1-8B-Instruct → List repository files · pos ai hf download meta-llama/Llama-3.1-8B-Instruct --include "*.gguf" --exclude "*Q4_*" → Download with include/exclude patterns |
+| ai | llamacpp | `pos-ai-llamacpp` | Forward to pos ai --provider llamacpp (backward compat) |  |  |
 | ai | openrouter | `pos-ai-openrouter` | Forward to pos ai --provider openrouter (backward compat) |  |  |
 | ai | server | `pos-ai-server` | llama.cpp local inference server (start, stop, status, models, logs) | curl jq |  |
 | communication | matrix-listener | `pos-communication-matrix-listener` | Matrix listener: map /command → bash, run them on room messages |  |  |
@@ -369,7 +371,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`pos`, `pos-ai-gemini`, `pos-ai-openrouter`, `pos-communication-matrix-listener`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
+`pos`, `pos-ai-gemini`, `pos-ai-llamacpp`, `pos-ai-openrouter`, `pos-communication-matrix-listener`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -613,9 +615,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
-| `bin/pos-ai-hf` | 664 | Download AI models from Hugging Face (search, download, manage) |
+| `bin/pos-ai-hf` | 1004 | Download AI models from Hugging Face (search, download, manage) |
+| `bin/pos-ai-llamacpp` | 7 | Forward to pos ai --provider llamacpp (backward compat) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
-| `bin/pos-ai-server` | 444 | llama.cpp local inference server (start, stop, status, models, logs) |
+| `bin/pos-ai-server` | 659 | llama.cpp local inference server (start, stop, status, models, logs) |
 | `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
@@ -652,10 +655,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 435 | Remove pos toolkit binaries, services, shell integration, config, and data |
-| `bin/pos-ai` | 702 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-ai` | 706 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 312 | Dynamic bash completion |
+| `completions/pos.bash` | 313 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
