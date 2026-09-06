@@ -3,11 +3,14 @@ set -euo pipefail
 # POS: communication telegram-sender — Send Telegram messages/files/links/stickers via Bot API (send, test)
 # POS_FLAGS: --type --caption --parse-mode --no-preview --token --chat-id --markdown
 # POS_SUBCMDS: send test
-# POS_CONFIG: telegram | telegram.env | TELEGRAM_BOT_TOKEN=secret:Bot token from @BotFather | TELEGRAM_CHAT_ID=digits:Numeric chat id from @userinfobot | TELEGRAM_AI_PREFIX=:AI-bridge trigger word in the telegram listener (default ai)::ai
+# POS_CONFIG: telegram | telegram.env | TELEGRAM_BOT_TOKEN=secret:Bot token from @BotFather | TELEGRAM_CHAT_ID=digits:Numeric chat id from @userinfobot | TELEGRAM_OWNER_ID=digits:Numeric Telegram user id (your account) allowed to run chat commands | TELEGRAM_AI_PREFIX=:AI-bridge trigger word in the telegram listener (default ai)::ai
 
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
 API="https://api.telegram.org"
+
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
 
 usage() {
     cat <<EOF
@@ -39,8 +42,8 @@ Options:
   --token <t>         Override token for one send
   --chat-id <id>      Override chat id for one send
 
-Config:    $CONFIG_FILE (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-           edit it with 'pos config telegram'
+Config:    $CONFIG_FILE (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+           TELEGRAM_OWNER_ID — edit it with 'pos config telegram')
 
 Precedence: CLI flags > environment > config file.
 
@@ -59,19 +62,7 @@ EOF
 err() { echo "ERROR: $*" >&2; exit 1; }
 
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        v="${v//$'\r'/}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 send_request() {

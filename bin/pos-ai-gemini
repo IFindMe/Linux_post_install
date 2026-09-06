@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai gemini — Forward to pos ai --provider gemini (backward compat)
-# POS_SUBCMDS: ask chat models sessions capture
+# POS_SUBCMDS: ask chat models sessions capture providers
 # Thin forwarder — all logic lives in bin/pos-ai + lib/ai-providers/gemini.sh
 case "${1:-}" in -h|--help) exec pos ai --provider gemini --help ;; esac
 exec pos ai --provider gemini "$@"

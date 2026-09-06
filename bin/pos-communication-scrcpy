@@ -6,25 +6,16 @@ set -euo pipefail
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
-CONFIG_FILE="$HOME/.config/linux_post_install/scrcpy.env"
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
+CONFIG_FILE="$CONFIG_DIR/scrcpy.env"
 
 command -v scrcpy &>/dev/null || err "scrcpy not found — install the latest release with the app installer: 'apps/media/scrcpy.sh' (or 'sudo apt install scrcpy' if your distro ships it; it bundles adb), see 'pos help communication scrcpy'"
 command -v adb &>/dev/null || err "adb not found — install it: 'sudo apt install adb'"
 
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        v="${v//$'\r'/}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 load_config

@@ -24,14 +24,23 @@ health digests, backup alerts, firewall changes — and can be used directly.
 
 ```bash
 pos config telegram
-# edit TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (masked input), then test:
+# edit TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID and TELEGRAM_OWNER_ID (masked input), then test:
 pos communication telegram sender test
 # config lives in ~/.config/linux_post_install/telegram.env (chmod 600)
 ```
 
-The bot token comes from @BotFather, the chat ID from @userinfobot (or by
-starting a chat and reading it). `pos config telegram` shows the current values
-(token masked).
+The bot token comes from @BotFather; the chat ID **and your numeric user ID
+(`TELEGRAM_OWNER_ID`)** from @userinfobot (or by starting a chat and reading
+it). `pos config telegram` shows the current values (token masked). The
+listener only executes commands when both the chat id and your owner id match
+— with `TELEGRAM_OWNER_ID` unset it runs but ignores every command
+(fail-closed, see below).
+
+> **Token in the process list:** the Telegram Bot API embeds the bot token in
+> every API URL (`https://api.telegram.org/bot<TOKEN>/…`), so while a send or
+> poll runs the token is visible in `ps` output. This is inherent to the Bot
+> API — keep the token scoped to a single-purpose bot and revoke it in
+> BotFather if it ever leaks.
 
 ### Send
 
@@ -92,8 +101,13 @@ pos communication telegram listener --disable   # remove it
   falls back to the bash command. Telegram only registers lowercase `[a-z0-9_]`
   names (1–32 chars); `/Status` or `/my-cmd` are skipped from the menu but still
   work when typed. An empty map clears the menu.
-- **Owner-only:** the bot only reacts to `TELEGRAM_CHAT_ID` (your own chat);
-  others are ignored. `/help` lists mapped commands; unknown → "Unknown command".
+- **Owner-only (chat + account):** the bot executes only messages sent to
+  `TELEGRAM_CHAT_ID` (your chat) **BY** `TELEGRAM_OWNER_ID` (your account) —
+  both must match, so a forwarded message or an impersonator can't trigger
+  commands. With `TELEGRAM_OWNER_ID` unset the daemon runs but ignores every
+  command (fail-closed; `systemctl --user status pos-telegram-listener.service`
+  shows the message-time log lines). `/help` lists mapped commands; unknown →
+  "Unknown command".
 - **Runs as you:** mapped commands execute as your user with a 60s timeout,
   stdout + stderr are replied to the chat (truncated ~3800 chars; empty → `OK`).
   `sudo` inside a command needs a NOPASSWD rule.
@@ -220,8 +234,10 @@ pos communication matrix listener --disable   # remove it
   ```
 - **Self-messaging:** the listener reacts to messages **from your own user id**
   (`MATRIX_USER_ID`) — in practice that means a second device (or another
-  account) sending the commands. If `MATRIX_ROOM_ID` is set it only watches
-  that room, otherwise every room you've joined. `/` and `!` both work
+  account) sending the commands. It only watches the room set by
+  `MATRIX_ROOM_ID`; with `MATRIX_ROOM_ID` unset the daemon runs but refuses to
+  execute any command (fail-closed), so a bot account that has joined many
+  rooms can't be tricked into running commands. `/` and `!` both work
   (`!status` = `/status`). `/help` lists mapped commands; unknown → "Unknown
   command".
 - **Runs as you:** mapped commands execute as your user with a 60s timeout,

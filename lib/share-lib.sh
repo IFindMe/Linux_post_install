@@ -56,7 +56,9 @@ share_require_bin() {
 # rc 0 reachable within 3s · rc 1 unreachable/no-route. Message policy (targeted
 # hints, firewall wording) belongs to the caller.
 share_port_probe() {
-    timeout 3 bash -c "exec 3<>/dev/tcp/${1}/${2}" 2>/dev/null
+    # host/port are positional args ($1/$2), never interpolated into the
+    # command source — a hostile host string stays a literal argument.
+    timeout 3 bash -c 'exec 3<>/dev/tcp/$1/$2' _ "${1}" "${2}" 2>/dev/null
 }
 
 # ── systemd unit state probe ───────────────────────────────────

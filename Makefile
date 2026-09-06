@@ -1,4 +1,4 @@
-.PHONY: check gen hook lint
+.PHONY: check gen hook lint test
 
 ## check   — verify repo self-consistency (syntax, exec bits, doc/code sync, smoke)
 check:
@@ -11,6 +11,10 @@ gen:
 ## lint    — convention gate (shebang/pipefail, headers, deps-guard ordering, stdin, secrets, docs)
 lint:
 	./scripts/lint-conventions.sh
+
+## test    — regression suite (zero-dependency runner; no network, no system changes)
+test:
+	./tests/run-tests.sh
 
 ## hook    — install the opt-in pre-commit hook (runs `make check`)
 hook:

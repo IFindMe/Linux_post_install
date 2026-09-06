@@ -25,6 +25,14 @@ Examples:
   pos system uninstall                   # interactive, tier 1 only
   pos system uninstall --yes             # non-interactive, tier 1 only
   pos system uninstall --yes --config --data   # nuclear option
+
+Intentionally NOT removed (user-managed):
+  - apt packages (system packages installed by preinstall.sh)
+  - /usr/local/bin/yt-dlp (manually installed)
+  - ~/.config/rclone/ (rclone manages its own config)
+  - ~/.ssh/authorized_keys additions (user SSH access)
+  - pos-owned config files (removed by --config tier)
+  - pos-owned data files (removed by --data tier)
 EOF
     exit 0
 }
@@ -44,6 +52,27 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# ── pos-owned installed files (single source of truth, mirrors install.sh) ──
+# lib/*.sh list shipped by install.sh phase 2 to /usr/local/bin.
+POS_LIBS=(common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh \
+    user-timers-lib.sh entertainment-plugin-lib.sh usb-lib.sh share-lib.sh menu-lib.sh registry.sh)
+# Exact lines postinstall.sh appends to ~/.bashrc.
+PATH_LINE='export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin:$PATH"'
+COMPLETION_LINE='source /usr/local/share/bash-completion/completions/pos.bash 2>/dev/null || true'
+# Pos-ai-hook source lines are not written by the installer (user/legacy-added),
+# so they are matched by an anchored source-pattern, never a bare substring.
+HOOK_PATTERN='^[[:space:]]*source[[:space:]].*pos-ai-hook\.sh'
+
+# Entertainment plugins installed by install.sh — discovered by POS_PLUGIN marker
+# so future plugins are removed without touching this file.
+installed_plugins() {
+    local ep
+    for ep in /usr/local/bin/*.sh; do
+        [ -f "$ep" ] || continue
+        grep -q '^# POS_PLUGIN:' "$ep" 2>/dev/null && echo "$ep"
+    done | sort
+}
+
 # ── Scan functions ──────────────────────────────────────────────
 scan_tier1() {
     local found=()
@@ -58,20 +87,18 @@ scan_tier1() {
         found+=("$f")
     done < <(compgen -G /usr/local/bin/pos-* 2>/dev/null | sort || true)
 
-    # Lib files shipped by install.sh
-    for f in common.sh menu-lib.sh share-lib.sh; do
+    # Lib files shipped by install.sh (single source: POS_LIBS)
+    for f in "${POS_LIBS[@]}"; do
         [ -f "/usr/local/bin/$f" ] && found+=("/usr/local/bin/$f")
     done
 
     # AI providers subdirectory
     [ -d /usr/local/bin/ai-providers ] && found+=("/usr/local/bin/ai-providers/")
 
-    # Entertainment plugins installed by install.sh
+    # Entertainment plugins installed by install.sh (discovered by POS_PLUGIN marker)
     while IFS= read -r f; do
-        found+=("$f")
-    done < <(for ep in weather.sh gold.sh joke.sh; do
-        [ -f "/usr/local/bin/$ep" ] && echo "/usr/local/bin/$ep"
-    done | sort)
+        [ -n "$f" ] && found+=("$f")
+    done < <(installed_plugins)
 
     # Legacy forwarders
     for f in wr-* mp3 mp4 vbox ssh-load-all; do
@@ -107,11 +134,11 @@ scan_tier1() {
     # Completion file
     [ -f /usr/local/share/bash-completion/completions/pos.bash ] && found+=("/usr/local/share/bash-completion/completions/pos.bash")
 
-    # ~/.bash_completion entries
+    # ~/.bash_completion entries (anchored source lines only, never /pos/ substring)
     if [ -f "$HOME/.bash_completion" ]; then
         while IFS= read -r line; do
             found+=("~/.bash_completion: $(echo "$line" | sed 's/^[[:space:]]*//' | cut -c1-70)")
-        done < <(grep -n 'pos' "$HOME/.bash_completion" 2>/dev/null || true)
+        done < <(grep -nE '^[[:space:]]*source[[:space:]].*pos\.bash' "$HOME/.bash_completion" 2>/dev/null || true)
     fi
 
     # ── Systemd services ──
@@ -134,11 +161,24 @@ scan_tier1() {
         [ "$already" -eq 0 ] && found+=("service: $svc_name")
     done < <(systemctl list-unit-files --type=service 2>/dev/null | grep -i 'linux_post_install\|pos-' || true)
 
-    # ── Shell integration (~/.bashrc) ──
+    # ── ScaleTail templates + feature-flag store (install.sh phase 2/4) ──
+    [ -d /usr/local/share/linux_post_install/scale-tail ] && found+=("/usr/local/share/linux_post_install/scale-tail/")
+    [ -d /usr/local/share/linux_post_install/flags ] && found+=("/usr/local/share/linux_post_install/flags/")
+
+    # ── Runtime-created user units (pos-* in ~/.config/systemd/user) ──
+    local user_unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    if [ -d "$user_unit_dir" ]; then
+        local ufile
+        while IFS= read -r ufile; do
+            [ -n "$ufile" ] && found+=("user-unit: $(basename "$ufile")")
+        done < <(find "$user_unit_dir" -maxdepth 1 -name 'pos-*' -type f 2>/dev/null || true)
+    fi
+
+    # ── Shell integration (~/.bashrc) — exact installer lines + anchored hook ──
     if [ -f "$HOME/.bashrc" ]; then
         while IFS= read -r line; do
             found+=("~/.bashrc: $(echo "$line" | sed 's/^[[:space:]]*//' | cut -c1-70)")
-        done < <(grep -n 'source.*pos-ai-hook\|linux_post_install.*PATH\|source.*pos\.bash\|pos completion' "$HOME/.bashrc" 2>/dev/null || true)
+        done < <({ grep -nF "$PATH_LINE" "$HOME/.bashrc"; grep -nF "$COMPLETION_LINE" "$HOME/.bashrc"; grep -nE "$HOOK_PATTERN" "$HOME/.bashrc"; } 2>/dev/null | sort -u || true)
     fi
 
     printf '%s\n' "${found[@]}"
@@ -234,9 +274,9 @@ remove_tier1() {
         [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
     done < <(compgen -G /usr/local/bin/pos-* 2>/dev/null | sort || true)
 
-    # Lib files
-    for f in /usr/local/bin/common.sh /usr/local/bin/menu-lib.sh /usr/local/bin/share-lib.sh; do
-        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    # Lib files (single source: POS_LIBS)
+    for f in "${POS_LIBS[@]}"; do
+        [ -f "/usr/local/bin/$f" ] && { rm -f "/usr/local/bin/$f" && count=$((count+1)); }
     done
 
     # AI providers directory
@@ -244,10 +284,10 @@ remove_tier1() {
         rm -rf /usr/local/bin/ai-providers && count=$((count+1))
     fi
 
-    # Entertainment plugins
-    for f in /usr/local/bin/weather.sh /usr/local/bin/gold.sh /usr/local/bin/joke.sh; do
-        [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
-    done
+    # Entertainment plugins (discovered by POS_PLUGIN marker)
+    while IFS= read -r f; do
+        [ -n "$f" ] && [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
+    done < <(installed_plugins)
 
     # Legacy forwarders
     for pat in 'wr-*' mp3 mp4 vbox ssh-load-all; do
@@ -313,28 +353,70 @@ remove_tier1() {
     # Reload daemon after service changes
     systemctl daemon-reload 2>/dev/null || true
 
-    # ── Shell integration (~/.bashrc) ──
-    if [ -f "$HOME/.bashrc" ]; then
-        local before
-        before=$(wc -l < "$HOME/.bashrc")
-        sed -i '/source.*pos-ai-hook/d' "$HOME/.bashrc"
-        sed -i '/linux_post_install.*PATH/d' "$HOME/.bashrc"
-        sed -i '/source.*pos\.bash/d' "$HOME/.bashrc"
-        local after
-        after=$(wc -l < "$HOME/.bashrc")
-        local removed=$((before - after))
-        count=$((count + removed))
+    # ── Runtime-created USER systemd units (pos-* in ~/.config/systemd/user) ──
+    # Wrapped `|| true`: no user session (e.g. running as a scheduled task) is fine.
+    local user_unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    if [ -d "$user_unit_dir" ]; then
+        local ufile uniname
+        while IFS= read -r ufile; do
+            [ -n "$ufile" ] || continue
+            uniname="$(basename "$ufile")"
+            systemctl --user disable --now "$uniname" 2>/dev/null || true
+            rm -f "$ufile" && count=$((count+1))
+        done < <(find "$user_unit_dir" -maxdepth 1 -name 'pos-*' -type f 2>/dev/null || true)
+        systemctl --user daemon-reload 2>/dev/null || true
     fi
 
-    # ── Shell completion (~/.bash_completion) ──
+    # ── ScaleTail templates (submodule clone — guard existence) ──
+    if [ -d /usr/local/share/linux_post_install/scale-tail ]; then
+        rm -rf /usr/local/share/linux_post_install/scale-tail && count=$((count+1))
+    fi
+
+    # ── Feature-flag store ──
+    if [ -d /usr/local/share/linux_post_install/flags ]; then
+        rm -rf /usr/local/share/linux_post_install/flags && count=$((count+1))
+    fi
+
+    # Clean up parent dir if empty
+    rmdir /usr/local/share/linux_post_install 2>/dev/null || true
+
+    # ── Shell integration (~/.bashrc) — exact installer lines + anchored hook ──
+    # Only lines postinstall.sh itself added are removed by exact literal match;
+    # pos-ai-hook lines are matched anchored (never a bare substring).
+    if [ -f "$HOME/.bashrc" ]; then
+        local before after removed tmp
+        before=$(wc -l < "$HOME/.bashrc")
+        tmp="$(mktemp)"
+        awk -v p="$PATH_LINE" -v c="$COMPLETION_LINE" -v h="$HOOK_PATTERN" '
+            $0 == p || $0 == c || $0 ~ h { next }
+            { print }
+        ' "$HOME/.bashrc" > "$tmp"
+        after=$(wc -l < "$tmp")
+        removed=$((before - after))
+        if [ "$removed" -gt 0 ]; then
+            chmod --reference="$HOME/.bashrc" "$tmp"
+            mv "$tmp" "$HOME/.bashrc"
+            count=$((count + removed))
+        else
+            rm -f "$tmp"
+        fi
+    fi
+
+    # ── Shell completion (~/.bash_completion) — anchored source lines only ──
     if [ -f "$HOME/.bash_completion" ]; then
-        local before
+        local before after removed tmp
         before=$(wc -l < "$HOME/.bash_completion")
-        sed -i '/pos/d' "$HOME/.bash_completion"
-        local after
-        after=$(wc -l < "$HOME/.bash_completion")
-        local removed=$((before - after))
-        count=$((count + removed))
+        tmp="$(mktemp)"
+        awk '/^[[:space:]]*source[[:space:]].*pos\.bash/ { next } { print }' "$HOME/.bash_completion" > "$tmp"
+        after=$(wc -l < "$tmp")
+        removed=$((before - after))
+        if [ "$removed" -gt 0 ]; then
+            chmod --reference="$HOME/.bash_completion" "$tmp"
+            mv "$tmp" "$HOME/.bash_completion"
+            count=$((count + removed))
+        else
+            rm -f "$tmp"
+        fi
     fi
 
     ok "Removed $count items (tier 1)"

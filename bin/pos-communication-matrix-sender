@@ -7,6 +7,9 @@ set -euo pipefail
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/matrix.env"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 usage() {
     cat <<EOF
 Usage: pos communication matrix sender [command] [args]
@@ -42,19 +45,7 @@ err() { echo "ERROR: $*" >&2; exit 1; }
 log() { echo "[+] $*"; }
 
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        v="${v//$'\r'/}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 save_config() {

@@ -12,6 +12,9 @@ API="https://api.telegram.org"
 SERVICE="pos-telegram-listener.service"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 # System prompt for the "<prefix> " AI bridge (default prefix: "ai"): replies
 # are posted straight into the chat, so ask for concise, emoji-friendly
 # Telegram-style answers. The trigger word is configurable via
@@ -47,7 +50,8 @@ Commands:
                is set via 'pos config telegram' (TELEGRAM_AI_PREFIX).
 
 Config:  $CONFIG_FILE  (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-         TELEGRAM_AI_PREFIX — edit with 'pos config telegram')
+         TELEGRAM_OWNER_ID, TELEGRAM_AI_PREFIX — edit with 'pos
+         config telegram')
 Map:     $MAP_FILE — '/cmd=bash command' per line (optional
          '/cmd::short description=bash command' shown in the bot menu)
 Prefix map: $PREFIX_FILE — '<word>=command' per line: a non-command
@@ -65,7 +69,11 @@ To reply with a command's stdout (e.g. the health dashboard), just map it
 without '@quiet' and the listener forwards the output:
   '/status=pos system health'
 
-The listener only reacts to the owner chat (TELEGRAM_CHAT_ID). Commands run
+The listener only reacts to messages sent to the owner chat
+(TELEGRAM_CHAT_ID) BY your account (TELEGRAM_OWNER_ID) — both must match,
+so an impersonator or a forwarded message can't trigger commands. If
+TELEGRAM_OWNER_ID is unset the daemon starts but refuses to run any chat
+command (fail-closed); set it with 'pos config telegram'. Commands run
 as your user, so 'sudo' inside them needs a NOPASSWD rule. The interactive
 editor runs 'bash -n' to syntax-check commands before saving.
 
@@ -84,18 +92,7 @@ EOF
 
 # ── telegram.env (same pattern as pos-communication-telegram) ────
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 # ── command map (MAP_FILE) ──────────────────────────────────────
@@ -731,7 +728,7 @@ handle_message() {
         if [ -n "$reply_text" ]; then
             prompt="[Reply context — the message you are replying to]\n${reply_text}\n\n${prompt}"
         fi
-        if answer="$(timeout 120 pos ai gemini ask --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
+        if answer="$(timeout 120 pos ai gemini ask --no-command-execution --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
             reply "$(strip_markdown "$answer")" "$msg_id"
         else
             [ -n "$answer" ] || answer="timed out after 120s"
@@ -758,10 +755,15 @@ run_daemon() {
     load_config
     [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "No bot token — run 'pos config telegram'"
     [ -n "${TELEGRAM_CHAT_ID:-}" ] || err "No chat id — run 'pos config telegram'"
+    if [ -n "${TELEGRAM_OWNER_ID:-}" ]; then
+        log "owner id ${TELEGRAM_OWNER_ID} — commands authorized"
+    else
+        warn "TELEGRAM_OWNER_ID unset — chat commands WILL BE IGNORED (fail-closed); set it with 'pos config telegram'"
+    fi
     sync_bot_commands || true
 
     local offset=0
-    log "listener running (owner chat ${TELEGRAM_CHAT_ID}) — Ctrl+C to stop"
+    log "listener running (chat ${TELEGRAM_CHAT_ID}, owner ${TELEGRAM_OWNER_ID:-unset}) — Ctrl+C to stop"
     trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM INT
     while true; do
         local resp n i
@@ -784,7 +786,15 @@ run_daemon() {
             reply_text="$(printf '%s' "$resp" | jq -r ".result[$i].message.reply_to_message.text // .result[$i].message.reply_to_message.caption // empty")"
             offset=$((u + 1))
             [ -n "$text" ] || continue
-            if [ -n "$chat" ] && [ "$chat" != "$TELEGRAM_CHAT_ID" ] && [ "$from_id" != "$TELEGRAM_CHAT_ID" ]; then
+            if [ -z "${TELEGRAM_OWNER_ID:-}" ]; then
+                warn "TELEGRAM_OWNER_ID unset — ignoring command (set it with 'pos config telegram')"
+                continue
+            fi
+            # Fail-closed owner check: the message must be in the owner chat
+            # AND sent by the owner account. Previously a chat-id OR sender-id
+            # match was enough — anyone who knew the chat id could run commands.
+            if [ "$chat" != "$TELEGRAM_CHAT_ID" ] || [ "$from_id" != "$TELEGRAM_OWNER_ID" ]; then
+                warn "ignoring message in chat ${chat:-?} from ${from_id:-?} (not the owner chat/account)"
                 continue
             fi
             handle_message "$text" "$msg_id" "$reply_text"

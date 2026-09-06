@@ -23,15 +23,16 @@ _pos_flags[share-usb-server]="--ls --ls-shared --share --unshare --auto-share --
 _pos_flags[system-backup]="--service --no-encrypt"
 _pos_flags[system-schedule]="--dry-run"
 _pos_flags[system-uninstall]="--yes --config --data"
-_pos_flags[ai]="--provider --model --session --system --full --last --trust"
+_pos_flags[ai]="--provider --model --session --system --full --last --trust --no-command-execution"
 _pos_flags[tree]="--depth"
 # GEN:END posflags
 # GEN:START possubcmds
 declare -A _pos_subcmds
 _pos_subcmds[ai-alias]="create edit remove list show"
-_pos_subcmds[ai-gemini]="ask chat models sessions capture"
-_pos_subcmds[ai-llamacpp]="ask chat models sessions capture"
-_pos_subcmds[ai-openrouter]="ask chat sessions capture"
+_pos_subcmds[ai-gemini]="ask chat models sessions capture providers"
+_pos_subcmds[ai-hf]="search download list remove info files cache"
+_pos_subcmds[ai-llamacpp]="ask chat models sessions capture providers"
+_pos_subcmds[ai-openrouter]="ask chat sessions capture models providers"
 _pos_subcmds[ai-server]="start stop status models logs"
 _pos_subcmds[communication-matrix-sender]="send test login"
 _pos_subcmds[communication-scrcpy]="devices record tcpip connect push pull screenshot info"
@@ -48,7 +49,7 @@ _pos_subcmds[share-smb-client]="mount unmount list persist unpersist menu"
 _pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable menu"
 _pos_subcmds[system-backup]="menu"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
-_pos_subcmds[ai]="ask chat sessions capture models providers alias gemini hf llamacpp openrouter server"
+_pos_subcmds[ai]="ask chat sessions capture models providers llamacpp alias gemini hf openrouter server"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)

@@ -11,6 +11,9 @@ set -euo pipefail
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 command -v aria2c &>/dev/null || err "aria2c not found (install aria2)"
 command -v jq &>/dev/null || err "jq not found (install jq)"
 command -v curl &>/dev/null || err "curl not found (install curl)"
@@ -25,14 +28,13 @@ SERVICE="pos-aria2.service"
 HEALER_SERVICE="pos-aria2-retry.service"
 HEALER_TIMER="pos-aria2-retry.timer"
 RETRY_STATE="$CONFIG_DIR/download.retry"
-NET_PROBE="${NET_PROBE:-timeout 3 bash -c '</dev/tcp/8.8.8.8/53>'}"
+NET_PROBE="${NET_PROBE:-timeout 3 bash -c 'exec 3<>/dev/tcp/\$1/\$2' _ 8.8.8.8 53}"
 RETRY_INTERVAL="${RETRY_INTERVAL:-30}"
 RETRY_VERIFY_SLEEP="${RETRY_VERIFY_SLEEP:-3}"
 
 load_secret() {
-    if [ -z "${RPC_SECRET:-}" ] && [ -f "$CONFIG_FILE" ]; then
-        RPC_SECRET=$(grep -E '^RPC_SECRET=' "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
-    fi
+    # Canonical loader: env-wins, so an exported RPC_SECRET always beats the file.
+    load_env_file "$CONFIG_FILE"
     RPC_SECRET="${RPC_SECRET:-}"
 }
 load_secret
@@ -150,8 +152,8 @@ rpc() {  # rpc <method> [json-args...]
 daemon_active() { systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; }
 
 cmd_start() {
-    if [ -z "$RPC_SECRET" ] && [ -f "$CONFIG_FILE" ]; then
-        RPC_SECRET=$(grep -E '^RPC_SECRET=' "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+    if [ -z "$RPC_SECRET" ]; then
+        load_secret
     fi
     if [ -z "$RPC_SECRET" ]; then
         RPC_SECRET=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')

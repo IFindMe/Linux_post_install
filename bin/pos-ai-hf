@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai hf — Download AI models from Hugging Face (search, download, manage)
+# POS_SUBCMDS: search download list remove info files cache
 # POS_FLAGS: --branch --gguf --list --output --quant --include --exclude --revision
 # POS_DEPS: curl jq
 # POS_CONFIG: ai | ai.env | HF_TOKEN=secret:Hugging Face API token (https://huggingface.co/settings/tokens) | HF_DOWNLOAD_DIR=:Model download directory (default ~/.local/share/linux_post_install/ai/models)
@@ -18,29 +19,20 @@ set -euo pipefail
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 # ── Dependencies (before --help) ───────────────────────────────
 command -v curl &>/dev/null || err "curl not found (install curl)"
 command -v jq &>/dev/null   || err "jq not found (install jq)"
 
 # ── Config & defaults ──────────────────────────────────────────
-CONFIG_FILE="${CONFIG_FILE:-$HOME/.config/linux_post_install/ai.env}"
+CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/ai.env}"
 HF_TOKEN="${HF_TOKEN:-}"
 HF_DOWNLOAD_DIR="${HF_DOWNLOAD_DIR:-$HOME/.local/share/linux_post_install/ai/models}"
 
 load_hf_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        v="${v//$'\r'/}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 load_hf_config
@@ -698,7 +690,9 @@ cmd_download() {
         rm -rf "$temp_dir"
         trap - EXIT
     else
-        # Single file download - use original sequential approach
+        # Single-file download — the same honesty rules as the parallel path:
+        # a failure is recorded in failed_files so the model is never marked
+        # complete (.hf-meta suppressed) and the tool exits rc 1.
         while IFS= read -r file_json; do
             local fname fsize
             fname="$(printf '%s' "$file_json" | jq -r '.rfilename')"
@@ -708,12 +702,8 @@ cmd_download() {
             local url="${HF_BASE}/${ns}/${repo}/resolve/${branch}/${fname}"
             local target="${target_dir}/${fname}"
 
-            if [ "$file_count" -gt 1 ]; then
-                downloaded=$((downloaded + 1))
-                printf '[%d/%d] Downloading %s...\n' "$downloaded" "$file_count" "$fname" >&2
-            fi
-
             if ! hf_download_with_progress "$url" "$target"; then
+                failed_files+=("$fname")
                 warn "Failed to download $fname"
                 continue
             fi
@@ -743,8 +733,15 @@ METAEOF
         warn "Not writing .hf-meta — ${repo_id} is incomplete (${#failed_files[@]} file(s) failed)"
     fi
 
-    # Summary
-    if [ "$file_count" -eq 1 ]; then
+    # Summary — honest in both single-file and parallel paths: any failure
+    # yields a success/failure count, never a false "downloaded" claim.
+    if [ "${#failed_files[@]}" -gt 0 ]; then
+        # Honest count: attempted = total files, success = total − failures
+        local success_count=$((file_count - ${#failed_files[@]}))
+        printf '📥 Downloaded: %s (%d of %d files, %d failed: %s)\n' \
+            "$repo_id" "$success_count" "$file_count" "${#failed_files[@]}" "${failed_files[*]}"
+        printf '📁 %s/\n' "$target_dir"
+    elif [ "$file_count" -eq 1 ]; then
         local fname
         fname="$(printf '%s' "$filtered_files" | jq -r '.[0].rfilename')"
         local fsize
@@ -754,22 +751,14 @@ METAEOF
         printf '📥 Downloaded: %s/%s (%s)\n' "$repo_id" "$fname" "$human_size"
         printf '📁 %s/%s\n' "$target_dir" "$fname"
     else
-        if [ "${#failed_files[@]}" -gt 0 ]; then
-            # Honest count: attempted = total files, success = total − failures
-            local success_count=$((file_count - ${#failed_files[@]}))
-            printf '📥 Downloaded: %s (%d of %d files, %d failed: %s)\n' \
-                "$repo_id" "$success_count" "$file_count" "${#failed_files[@]}" "${failed_files[*]}"
-        else
-            local total_human
-            total_human="$(hf_human_size "$total_size")"
-            printf '📥 Downloaded: %s (%d files, %s)\n' "$repo_id" "$file_count" "$total_human"
-        fi
+        local total_human
+        total_human="$(hf_human_size "$total_size")"
+        printf '📥 Downloaded: %s (%d files, %s)\n' "$repo_id" "$file_count" "$total_human"
         printf '📁 %s/\n' "$target_dir"
     fi
 
-    # A partially-failed parallel batch must be detectable by scripts —
-    # exit non-zero. The sequential single-file path is unchanged: it never
-    # populates failed_files, so this clause only fires for the parallel path.
+    # Any failure — single-file or parallel batch — must be detectable by
+    # scripts: exit non-zero.
     if [ "${#failed_files[@]}" -gt 0 ]; then
         return 1
     fi

@@ -130,7 +130,9 @@ port_meta() {
 # --- fallback engine (no nmap): bash /dev/tcp + nc ---------------------------
 check_tcp() {
     local ip="$1" port="$2" tmo="$3" rc=""
-    timeout "$tmo" bash -c "exec 3<>/dev/tcp/$ip/$port" 2>/dev/null
+    # host/port are positional args ($1/$2), never interpolated into the
+    # command source — a hostile host string stays a literal argument.
+    timeout "$tmo" bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$ip" "$port" 2>/dev/null
     rc=$?
     if [ "$rc" -eq 0 ]; then printf 'open'
     elif [ "$rc" -eq 124 ]; then printf 'timeout'
@@ -154,7 +156,7 @@ check_udp() {
         elif printf '%s' "$out" | grep -qiE 'refus|unreachable'; then printf 'closed'
         else printf 'no-reply'; fi
     else
-        timeout "$tmo" bash -c "exec 3<>/dev/udp/$ip/$port; printf 'x' >&3" 2>/dev/null
+        timeout "$tmo" bash -c 'exec 3<>/dev/udp/$1/$2; printf "x" >&3' _ "$ip" "$port" 2>/dev/null
         printf 'no-reply'
     fi
 }
@@ -163,9 +165,9 @@ probe() {
     local ip="$1" port="$2" tmo="$3"
     case "$port" in
         80|8000|8080|8081|8888|3000|5000|9090|3128|10000)
-            timeout "$tmo" bash -c "exec 3<>/dev/tcp/$ip/$port; printf 'HEAD / HTTP/1.0\r\n\r\n' >&3; head -c 300 <&3" 2>/dev/null ;;
+            timeout "$tmo" bash -c 'exec 3<>/dev/tcp/$1/$2; printf "HEAD / HTTP/1.0\r\n\r\n" >&3; head -c 300 <&3' _ "$ip" "$port" 2>/dev/null ;;
         *)
-            timeout "$tmo" bash -c "exec 3<>/dev/tcp/$ip/$port; head -c 200 <&3" 2>/dev/null ;;
+            timeout "$tmo" bash -c 'exec 3<>/dev/tcp/$1/$2; head -c 200 <&3' _ "$ip" "$port" 2>/dev/null ;;
     esac
 }
 

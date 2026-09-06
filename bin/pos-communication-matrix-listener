@@ -9,6 +9,9 @@ MAP_FILE="$CONFIG_DIR/matrix_commands.env"
 SERVICE="pos-matrix-listener.service"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 # System prompt for the "ai " bridge: replies are posted straight into the
 # room, so ask for concise, emoji-friendly Matrix-style answers.
 AI_SYSTEM="You are a friendly assistant chatting in a Matrix room. Keep replies concise, use emojis and light formatting to make them lively, and never claim to send messages yourself."
@@ -31,7 +34,8 @@ Commands:
   --run        Run the polling loop in the foreground (used by the service)
 
 Config:  $CONFIG_FILE  (MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN,
-                        MATRIX_USER_ID — edit with 'pos config matrix')
+                        MATRIX_USER_ID, MATRIX_ROOM_ID — edit with
+                        'pos config matrix')
 Map:     $MAP_FILE — '/cmd=bash command' per line (optional
          '/cmd::short description=bash command')
 
@@ -44,10 +48,11 @@ without '@quiet' and the listener forwards the output:
   '/status=pos system health'
 
 The listener only reacts to messages from your own Matrix user
-(MATRIX_USER_ID). If MATRIX_ROOM_ID is set it only watches that room,
-otherwise it watches every room you've joined. Commands run as your user,
-so 'sudo' inside them needs a NOPASSWD rule. The interactive editor runs
-'bash -n' to syntax-check commands before saving.
+(MATRIX_USER_ID), and only in the room set by MATRIX_ROOM_ID — without it
+the listener refuses to run any command (fail-closed), so a bot account
+that has joined many rooms can't be tricked into executing commands.
+Commands run as your user, so 'sudo' inside them needs a NOPASSWD rule.
+The interactive editor runs 'bash -n' to syntax-check commands before saving.
 
 Commands are matched with a leading '/' or '!' — '/status' and '!status'
 both resolve. There is no equivalent of Telegram's bot "/" menu on Matrix,
@@ -63,18 +68,7 @@ EOF
 
 # ── matrix.env (same pattern as pos-communication-matrix-sender) ──
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 api_base() {
@@ -469,7 +463,7 @@ handle_message() {
             return
         fi
         log "ai: $prompt"
-        if answer="$(timeout 120 pos ai gemini ask --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
+        if answer="$(timeout 120 pos ai gemini ask --no-command-execution --session "$session" --system "$AI_SYSTEM" "$prompt" 2>&1)"; then
             reply_room "$room" "$(strip_markdown "$answer")" "$event_id"
         else
             [ -n "$answer" ] || answer="timed out after 120s"
@@ -513,6 +507,9 @@ run_daemon() {
     [ -n "${MATRIX_ACCESS_TOKEN:-}" ] || err "No access token — run 'pos communication matrix sender login'"
     local owner="${MATRIX_USER_ID:-}"
     local room_only="${MATRIX_ROOM_ID:-}"
+    if [ -z "$room_only" ]; then
+        warn "MATRIX_ROOM_ID unset — refusing to run commands (fail-closed); set it with 'pos config matrix'"
+    fi
     if [ -z "$owner" ]; then
         local who
         who="$(curl -fsS -m 30 -H "Authorization: Bearer ${MATRIX_ACCESS_TOKEN}" \
@@ -524,7 +521,7 @@ run_daemon() {
 
     local since="" filter_enc resp nb
     filter_enc="$(printf '%s' "$SYNC_FILTER" | jq -sRr @uri)"
-    log "listener running (owner ${owner}${room_only:+ — room ${room_only}}) — Ctrl+C to stop"
+    log "listener running (owner ${owner}, room ${room_only:-none — fail-closed}) — Ctrl+C to stop"
     trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM INT
     while true; do
         local args=("$(api_base)/_matrix/client/v3/sync?timeout=30000&filter=${filter_enc}")
@@ -536,7 +533,9 @@ run_daemon() {
 
         local room ecount i roomid ev sender text eid
         for room in $(printf '%s' "$resp" | jq -r '.rooms.join // {} | to_entries[] | .key' 2>/dev/null); do
-            if [ -n "$room_only" ] && [ "$room" != "$room_only" ]; then
+            # Fail-closed: with MATRIX_ROOM_ID unset no room is watched, so no
+            # command can ever run (previously every joined room was watched).
+            if [ -z "$room_only" ] || [ "$room" != "$room_only" ]; then
                 continue
             fi
             ecount="$(printf '%s' "$resp" | jq -r --arg r "$room" ".rooms.join[\"$room\"].timeline.events // [] | length")"

@@ -89,7 +89,9 @@ split_share() {
 # TCP connect probe against the server before touching passwords or mounts.
 probe_server() {
     local host="$1"
-    if timeout 3 bash -c "exec 3<>/dev/tcp/${host}/${SMB_PORT}" 2>/dev/null; then
+    # host/port are positional args, never interpolated into the command
+    # source — a hostile share/address string stays a literal argument.
+    if timeout 3 bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$host" "$SMB_PORT" 2>/dev/null; then
         return 0
     fi
     err "Server ${host} not reachable on port ${SMB_PORT} (SMB) — nothing was mounted.

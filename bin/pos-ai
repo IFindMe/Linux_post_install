@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
-# POS_SUBCMDS: ask chat sessions capture models providers
-# POS_FLAGS: --provider --model --session --system --full --last --trust
+# POS_SUBCMDS: ask chat sessions capture models providers llamacpp
+# POS_FLAGS: --provider --model --session --system --full --last --trust --no-command-execution
 # POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini, openrouter or llamacpp, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @[AI_PROVIDER=llamacpp] llamacpp | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE=num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS=num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS=num:CPU threads (default: nproc) | *providers=llamacpp | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 # ── Paths & constants ──────────────────────────────────────────
-CONFIG_FILE="$HOME/.config/linux_post_install/ai.env"
+CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/ai.env}"
 SESSION_DIR="$HOME/.local/share/linux_post_install/ai"
 DISPATCH_LOG_DIR="$HOME/.local/share/linux_post_install/logs"  # bin/pos per-run logs
 LAST_CMD_OUTPUT_FILE="$HOME/.local/share/linux_post_install/last_cmd_output"  # --last fallback for any command
@@ -32,12 +35,12 @@ DEFAULT_SYSTEM_PROMPT_HARD="You are a Linux CLI assistant. Rules:
 5. Match the user's OS/package manager (apt/dnf/pacman)"
 
 # Legacy: kept for session migration and backward compat config
-LEGACY_GEMINI_CONFIG="$HOME/.config/linux_post_install/ai.env"
-LEGACY_OPENROUTER_CONFIG="$HOME/.config/linux_post_install/ai-openrouter.env"
+LEGACY_GEMINI_CONFIG="${LEGACY_GEMINI_CONFIG:-$CONFIG_DIR/ai.env}"
+LEGACY_OPENROUTER_CONFIG="${LEGACY_OPENROUTER_CONFIG:-$CONFIG_DIR/ai-openrouter.env}"
 
 usage() {
     cat <<EOF
-Usage: pos ai [subcommand] [--provider <name>] [--model <id>] [--session <name>] [--system <text>] [--full] [--last] [--trust]
+Usage: pos ai [subcommand] [--provider <name>] [--model <id>] [--session <name>] [--system <text>] [--full] [--last] [--trust] [--no-command-execution]
 
 AI assistant with pluggable providers (gemini, openrouter, llamacpp).
 
@@ -73,8 +76,16 @@ Options:
                     'capture'. Notes on stderr which source was attached and
                     its age; warns when stale (>60 min).
   --trust           Auto-execute agent-detected commands without confirmation.
-                    Used by trusted alias wrappers — do NOT pass manually
-                    unless you fully trust the agent's output.
+                    Interactive terminals only — it has no effect when stdout/
+                    stdin is not a tty (e.g. chat bridges, cron), which never
+                    execute commands. Used by trusted alias wrappers — do NOT
+                    pass manually unless you fully trust the agent's output.
+--no-command-execution  Never run agent-detected command blocks. The proposed
+                        command is neither printed nor executed; no
+                        confirmation prompt is shown (structural guard — used by
+                        chat bridges so a future refactor cannot auto-execute).
+                    Each of these two modes contradict the other: the last one
+                    given on the command line wins.
   -h|--help         This help.
 
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
@@ -126,36 +137,16 @@ load_provider() {
     source "$f"
 }
 
-# ── ai.env loader (same pattern as telegram.env) ────────────────
+# ── ai.env loader (canonical loader + legacy files) ─────────────
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        v="${v//$'\r'/}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
     # Legacy provider-specific config files (fallback for old configs)
     # Both files are loaded — env-var precedence means unified AI_API_KEY wins.
     local legacy_files="$LEGACY_GEMINI_CONFIG $LEGACY_OPENROUTER_CONFIG"
     local legacy_env
     for legacy_env in $legacy_files; do
         [ -f "$legacy_env" ] && [ "$legacy_env" != "$CONFIG_FILE" ] || continue
-        while IFS='=' read -r k v; do
-            [ -n "$k" ] || continue
-            case "$k" in \#*) continue ;; esac
-            v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-            v="${v//$'\r'/}"
-            if [ -z "${!k:-}" ]; then
-                export "$k"="$v"
-            fi
-        done < <(grep -E '^[A-Z_]+=' "$legacy_env" || true)
+        load_env_file "$legacy_env"
     done
 }
 
@@ -378,8 +369,14 @@ _extract_commands() {
 # ── Interactive prompt to run extracted commands ─────────────────
 _prompt_run_command() {
     local cmd="$1" trusted="${2:-0}"
-    # Only prompt on interactive terminals with a controlling tty
+    # Structural guards: commands never execute without a controlling tty, and
+    # never when --no-command-execution was passed. Both apply BEFORE any
+    # auto-execute path (including --trust), so a future refactor cannot
+    # introduce a non-interactive or bridge-forced execution.
     [ -w /dev/tty ] || return 0
+    if [ "${NO_EXEC:-0}" -eq 1 ]; then
+        return 0
+    fi
     printf '\n%s\n' "Command detected:" >&2
     printf '  %s\n\n' "$cmd" >&2
     if [ "$trusted" -eq 1 ]; then
@@ -388,19 +385,18 @@ _prompt_run_command() {
         run eval "$cmd"
         return
     fi
-    printf 'Run this command? [Y/n] ' >&2
+    printf 'Run this command? [y/N] ' >&2
     local choice
     IFS= read -r choice </dev/tty || choice=""
-    case "${choice,,}" in
-        n|N)
+    case "$choice" in
+        [yY])
+            printf '%s\n' "$cmd"
+            run eval "$cmd"
+            ;;
+        *)
             # Add to shell history so user can press ↑ to recall, edit, run
             history -s "$cmd" 2>/dev/null || true
             printf '%s\n' "Command added to history — press ↑ to recall, edit, and run." >&2
-            ;;
-        *)
-            # Y or Enter: execute
-            printf '%s\n' "$cmd"
-            run eval "$cmd"
             ;;
     esac
 }
@@ -642,6 +638,7 @@ MODEL_OVERRIDE=""
 FULL_MODE=0
 LAST_MODE=0
 TRUST_MODE=0
+NO_EXEC=0
 PROVIDER=""
 cmd=""
 args=()
@@ -665,7 +662,9 @@ while [ $# -gt 0 ]; do
         --last)
             LAST_MODE=1; shift ;;
         --trust)
-            TRUST_MODE=1; shift ;;
+            TRUST_MODE=1; NO_EXEC=0; shift ;;
+        --no-command-execution)
+            NO_EXEC=1; TRUST_MODE=0; shift ;;
         -*) err "Unknown option '$1' (see --help)" ;;
         *)
             if [ -z "$cmd" ]; then

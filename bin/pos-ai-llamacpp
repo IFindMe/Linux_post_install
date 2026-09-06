@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai llamacpp — Forward to pos ai --provider llamacpp (backward compat)
-# POS_SUBCMDS: ask chat models sessions capture
+# POS_SUBCMDS: ask chat models sessions capture providers
 # Thin forwarder — all logic lives in bin/pos-ai + lib/ai-providers/llamacpp.sh
 case "${1:-}" in -h|--help) exec pos ai --provider llamacpp --help ;; esac
 exec pos ai --provider llamacpp "$@"

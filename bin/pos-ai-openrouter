@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: ai openrouter — Forward to pos ai --provider openrouter (backward compat)
-# POS_SUBCMDS: ask chat sessions capture
+# POS_SUBCMDS: ask chat sessions capture models providers
 # Thin forwarder — all logic lives in bin/pos-ai + lib/ai-providers/openrouter.sh
 case "${1:-}" in -h|--help) exec pos ai --provider openrouter --help ;; esac
 exec pos ai --provider openrouter "$@"

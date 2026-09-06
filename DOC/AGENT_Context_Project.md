@@ -598,7 +598,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/common.sh` | 151 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`, CONFIG_DIR) |
 | `lib/flags.sh` | 60 | Feature flag store (set/clear/is_set/value/list/status) |
 | `lib/notify.sh` | 87 | Multi-platform alerting (`notify_send`) — opt-in source, silent-fails |
-| `lib/entertainment-lib.sh` | 311 | Entertainment module lib (ENABLED parsing, last-run state, scheduler sync via user-timers-lib) |
+| `lib/entertainment-lib.sh` | 300 | Entertainment module lib (ENABLED parsing, last-run state, scheduler sync via user-timers-lib; config helpers wrap lib/config-ui.sh) |
 | `lib/entertainment-plugin-lib.sh` | 67 | Message-safe helpers for plugins (config load, require, fetch+retry) — plugins MAY source it |
 | `lib/scheduler-lib.sh` | 760 | Scheduler lib (job parsing, notify policies, per-job user timers via user-timers-lib, legacy migrate) |
 | `lib/user-timers-lib.sh` | 112 | Shared systemd **user** timer machinery (interval→OnCalendar, unit pair writer, linger) |
@@ -615,15 +615,15 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
-| `bin/pos-ai-hf` | 1004 | Download AI models from Hugging Face (search, download, manage) |
+| `bin/pos-ai-hf` | 993 | Download AI models from Hugging Face (search, download, manage) |
 | `bin/pos-ai-llamacpp` | 7 | Forward to pos ai --provider llamacpp (backward compat) |
 | `bin/pos-ai-openrouter` | 7 | Forward to pos ai --provider openrouter (backward compat) |
-| `bin/pos-ai-server` | 659 | llama.cpp local inference server (start, stop, status, models, logs) |
-| `bin/pos-communication-matrix-listener` | 568 | Matrix listener: map /command → bash, run them on room messages |
-| `bin/pos-communication-matrix-sender` | 224 | Send messages to a Matrix room via the client-server API (send, test, login) |
-| `bin/pos-communication-scrcpy` | 254 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| `bin/pos-communication-telegram-listener` | 805 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
-| `bin/pos-communication-telegram-sender` | 221 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
+| `bin/pos-ai-server` | 743 | llama.cpp local inference server (start, stop, status, models, logs) |
+| `bin/pos-communication-matrix-listener` | 567 | Matrix listener: map /command → bash, run them on room messages |
+| `bin/pos-communication-matrix-sender` | 215 | Send messages to a Matrix room via the client-server API (send, test, login) |
+| `bin/pos-communication-scrcpy` | 245 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
+| `bin/pos-communication-telegram-listener` | 815 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
+| `bin/pos-communication-telegram-sender` | 212 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
 | `bin/pos-docker-ps` | 126 | Enhanced container overview (health, IPs, ports, uptime) |
@@ -634,31 +634,31 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 95 | Run a public-API plugin and send its output via the configured notify platforms |
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
-| `bin/pos-media-grab` | 227 | Auto-download URL as audio or video (classify + route) |
+| `bin/pos-media-grab` | 219 | Auto-download URL as audio or video (classify + route) |
 | `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
 | `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-media-sync` | 219 | Incremental Music → USB sync (mp3/mp4, add/update only) |
 | `bin/pos-media-ytsync` | 1213 | Incrementally sync YouTube channels/playlists into ~/Videos |
-| `bin/pos-network-checkport` | 496 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
-| `bin/pos-network-download` | 1108 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
+| `bin/pos-network-checkport` | 498 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
+| `bin/pos-network-download` | 1110 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
 | `bin/pos-network-ip` | 69 | Show interfaces, routes, public IP + location |
 | `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
 | `bin/pos-share-nfs-client` | 504 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 245 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
-| `bin/pos-share-smb-client` | 764 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
+| `bin/pos-share-smb-client` | 766 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-backup` | 293 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-backup` | 301 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
-| `bin/pos-system-uninstall` | 435 | Remove pos toolkit binaries, services, shell integration, config, and data |
-| `bin/pos-ai` | 706 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-system-uninstall` | 517 | Remove pos toolkit binaries, services, shell integration, config, and data |
+| `bin/pos-ai` | 705 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 313 | Dynamic bash completion |
+| `completions/pos.bash` | 314 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

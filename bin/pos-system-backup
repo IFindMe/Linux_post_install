@@ -192,14 +192,22 @@ run_backup() {
         unset CONFIRM
 
         log "Encrypting backup..."
-        gpg --batch --yes --passphrase "$PASS" --symmetric --cipher-algo AES256 "$ARCHIVE"
+        # The passphrase is fed on fd 3 (here-string), never via argv, so it
+        # cannot leak through 'ps' / /proc/<pid>/cmdline while gpg runs.
+        if ! gpg --batch --yes --passphrase-fd 3 --symmetric --cipher-algo AES256 "$ARCHIVE" 3<<<"$PASS"; then
+            rm -f "$ARCHIVE"
+            err "encryption failed — plaintext archive removed, nothing left behind"
+        fi
 
         rm -f "$ARCHIVE"
         ARCHIVE="${ARCHIVE}.gpg"
         chmod 600 "$ARCHIVE"
 
         log "Verifying encrypted backup..."
-        gpg --batch --quiet --passphrase "$PASS" --decrypt "$ARCHIVE" | tar -tzf - > /dev/null
+        if ! gpg --batch --quiet --passphrase-fd 3 --decrypt "$ARCHIVE" 3<<<"$PASS" | tar -tzf - > /dev/null; then
+            rm -f "$ARCHIVE"
+            err "decryption verification failed — corrupt artifact removed"
+        fi
 
         unset PASS
     else

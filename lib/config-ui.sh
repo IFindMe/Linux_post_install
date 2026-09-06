@@ -307,6 +307,55 @@ cfg_scope_keys() {
     return 0
 }
 
+# ── Canonical env-file loader ────────────────────────────────────
+# load_env_file <file> [scope]
+# The one shared KEY=VALUE config loader for every pos tool (D-D).
+#   <file>   env file path; a bare basename (no '/') is resolved under
+#            ${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}/,
+#            so callers may pass "ai.env", "$CONFIG_DIR/ai.env", or any path.
+#   [scope]  optional label (informational only; reserved, not used).
+# Reads KEY=VALUE lines, skipping blank and '#' comment lines; strips a
+# trailing CR from every value (CRLF files parse cleanly); trims one pair
+# of surrounding quotes. Exports each key, but ONLY when the variable is
+# not already set in the environment, so an exported env var always wins
+# over the file. Full precedence contract, matching the historic behavior
+# of every migrated tool:
+#      CLI flags > environment > config file > defaults
+#   (CLI flags are applied by each tool's own arg parser, defaults via
+#   ${VAR:-default} at declaration — the loader implements the middle step.)
+# Loaded keys are APPENDED to the global LOADED_ENV_KEYS array so callers
+# can tell which values came from the file (a caller that needs only one
+# file's set resets LOADED_ENV_KEYS=() before the call). The loader never
+# creates files and never chmods — chmod-600 semantics stay with cfg_write
+# and the tools' own writers. A missing/unreadable file is a quiet no-op.
+#
+# NOTE: load_env_file supersedes lib/common.sh's load_system_env(), which is
+# functionally identical (env-wins export loop). common.sh deliberately does
+# NOT source this file — new tools should use load_env_file; the three legacy
+# load_system_env callers keep working unchanged.
+load_env_file() {
+    local f="$1" _scope="${2:-}" k v
+    if ! declare -p LOADED_ENV_KEYS &>/dev/null 2>&1; then
+        LOADED_ENV_KEYS=()
+    fi
+    case "$f" in
+        */*) : ;;   # full path as given
+        *) f="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}/$f" ;;
+    esac
+    [ -f "$f" ] || return 0
+    while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        case "$k" in \#*) continue ;; esac
+        v="${v//$'\r'/}"
+        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+        if [ -z "${!k:-}" ]; then
+            export "$k"="$v"
+            LOADED_ENV_KEYS+=("$k")
+        fi
+    done < <(grep -E '^[A-Z_]+=' "$f" || true)
+    return 0
+}
+
 # Current value of a key in an env file (file is the source of truth, never sourced).
 cfg_value() {
     local file="$1" key="$2" v

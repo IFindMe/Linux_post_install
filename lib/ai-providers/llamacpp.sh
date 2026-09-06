@@ -9,15 +9,18 @@
 provider_name() { printf 'Local llama.cpp'; }
 
 provider_default_model() {
-    local port="${LLAMACPP_PORT:-8088}"
+    # Honor LLAMACPP_HOST — must match the address the server binds (default
+    # 127.0.0.1); otherwise the adapter talks to a different host than the one
+    # the server actually listens on.
+    local host="${LLAMACPP_HOST:-127.0.0.1}" port="${LLAMACPP_PORT:-8088}"
     local model
-    model="$(curl -sf "http://127.0.0.1:$port/v1/models" 2>/dev/null | jq -r '.data[0].id // empty')"
+    model="$(curl -sf "http://$host:$port/v1/models" 2>/dev/null | jq -r '.data[0].id // empty')"
     [ -n "$model" ] && printf '%s' "$model" || printf '(no model loaded)'
 }
 
 # $1=model  $2=messages JSON ({"messages":[{role,content}]})  $3=optional system prompt
 provider_generate() {
-    local model="$1" messages="$2" system="${3:-}" port="${LLAMACPP_PORT:-8088}"
+    local model="$1" messages="$2" system="${3:-}" host="${LLAMACPP_HOST:-127.0.0.1}" port="${LLAMACPP_PORT:-8088}"
     local body resp code body_out
     # Build messages array with optional system prompt
     if [ -n "$system" ]; then
@@ -28,7 +31,7 @@ provider_generate() {
     fi
     body="$(printf '%s' "$body" | jq -nc --arg m "$model" --argjson msgs "$body" \
         '{model:$m, messages:$msgs, stream:false}')"
-    resp="$(curl -sS -m 120 -X POST "http://127.0.0.1:$port/v1/chat/completions" \
+    resp="$(curl -sS -m 120 -X POST "http://$host:$port/v1/chat/completions" \
         -H "Content-Type: application/json" \
         --write-out $'\n%{http_code}' \
         --data "$body")" || { echo "request failed (curl exit $?)" >&2; return 1; }
@@ -43,8 +46,8 @@ provider_generate() {
 
 # $1=current default model  → stdout=formatted model list
 provider_models_list() {
-    local model="$1" port="${LLAMACPP_PORT:-8088}" resp code body
-    resp="$(curl -sf "http://127.0.0.1:$port/v1/models" \
+    local model="$1" host="${LLAMACPP_HOST:-127.0.0.1}" port="${LLAMACPP_PORT:-8088}" resp code body
+    resp="$(curl -sf "http://$host:$port/v1/models" \
         --write-out $'\n%{http_code}')" || { echo "server not running" >&2; return 1; }
     code="${resp##*$'\n'}"
     body="${resp%$'\n'*}"

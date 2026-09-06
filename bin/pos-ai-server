@@ -7,34 +7,49 @@ set -euo pipefail
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
+# Shared config loader (canonical KEY=VALUE parser, env-wins precedence)
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
 # ── Dependencies (before --help) ───────────────────────────────
 command -v curl &>/dev/null || err "curl not found (install curl)"
 command -v jq &>/dev/null || err "jq not found (install jq)"
 
 # ── Config / seams ─────────────────────────────────────────────
-CONFIG_FILE="${CONFIG_FILE:-$HOME/.config/linux_post_install/ai.env}"
+CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/ai.env}"
 USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 SERVICE="pos-ai-server.service"
 HF_DOWNLOAD_DIR="${HF_DOWNLOAD_DIR:-$HOME/.local/share/linux_post_install/ai/models}"
 
-# ── Config loader (env-var precedence, same pattern as pos-ai-hf) ──
+# ── Config loader (canonical env-var precedence, same pattern as pos-ai-hf) ──
+# Loaded keys are also recorded in LOADED_ENV_KEYS (see below); the D-F
+# requested-from-config tracking uses the exported values, so it is
+# unaffected by the loader implementation.
 load_config() {
-    [ -f "$CONFIG_FILE" ] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
-        v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        v="${v//$'\r'/}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
-    done < <(grep -E '^[A-Z_]+=' "$CONFIG_FILE" || true)
+    load_env_file "$CONFIG_FILE"
 }
 
 load_config
+
+# ── Config/env-requested flags (D-F) ───────────────────────────
+# Flags the user explicitly configured (via ai.env or exported env) are
+# validated as "requested" (hard error if unsupported), distinct from the
+# always-emitted tool defaults (warn + omit). This is captured here, BEFORE
+# the CLI parse overwrites the LLAMACPP_* variables, so it reflects genuine
+# user intent rather than the final defaulted values.
+CONFIG_REQUESTED_FLAGS=()
+requested_from_env_config() {
+    local var="$1" flag="$2"
+    [ -n "${!var:-}" ] || return 0
+    case " ${CONFIG_REQUESTED_FLAGS[*]:-} " in
+        *" $flag "*) ;;                # dedupe
+        *) CONFIG_REQUESTED_FLAGS+=("$flag") ;;
+    esac
+}
+requested_from_env_config LLAMACPP_PORT       --port
+requested_from_env_config LLAMACPP_HOST       --host
+requested_from_env_config LLAMACPP_CTX_SIZE   --ctx-size
+requested_from_env_config LLAMACPP_GPU_LAYERS --n-gpu-layers
+requested_from_env_config LLAMACPP_THREADS    --threads
 
 # ── Binary detection ───────────────────────────────────────────
 find_llamacpp() {
@@ -80,8 +95,58 @@ validate_requested_flags() {
             *" $flag "*) continue ;;   # dedupe alias-mapped flags (e.g. --gpu → --n-gpu-layers)
         esac
         seen+=("$flag")
-        if ! printf '%s' "$help_text" | grep -qF -- "$flag"; then
+        # Word-boundary match: the flag token must appear as a whole word in
+        # --help, not as a substring of a longer flag (D4 — e.g. --mmap must
+        # not match a --no-mmap entry).
+        if ! printf '%s' "$help_text" | grep -qE -- "(^|[[:space:]])${flag}([[:space:]]|=|$)"; then
             err "installed llama.cpp ${version} does not expose ${flag} — remove it or upgrade llama.cpp"
+        fi
+    done
+}
+
+# ── Validate always-emitted default flags (D-F) ────────────────
+# validate_default_flags <binary> <version> <requested-flag...> — for every
+# flag the tool emits BY DEFAULT (with no explicit user intent), check it is
+# supported in --help. Requested flags (CLI or config/env) are excluded — they
+# were hard-validated upstream and must be kept. An unsupported DEFAULT is
+# omitted from ExecStart with a single warn (never a hard error — the tool
+# chose the default, not the user). Readable --help sets globals:
+#   DEFAULT_PORT_OK DEFAULT_HOST_OK DEFAULT_GPU_OK DEFAULT_CTX_OK DEFAULT_THREADS_OK
+# (all 1 = keep; 0 = omit). Unreadable --help text sets all OK = 1 (warn).
+validate_default_flags() {
+    local bin="$1" version="$2"
+    shift 2
+    local requested=("$@")
+    local requested_str=" ${requested[*]:-} "
+
+    DEFAULT_PORT_OK=1; DEFAULT_HOST_OK=1; DEFAULT_GPU_OK=1; DEFAULT_CTX_OK=1; DEFAULT_THREADS_OK=1
+
+    local help_text
+    help_text="$("$bin" --help 2>/dev/null)" || {
+        warn "Cannot obtain llama-server --help output — skipping default flag validation"
+        return 0
+    }
+
+    local spec flag ok_var
+    # flag | ok_var — the always-emitted defaults a user may not have requested.
+    local specs=(
+        "--port|DEFAULT_PORT_OK"
+        "--host|DEFAULT_HOST_OK"
+        "--n-gpu-layers|DEFAULT_GPU_OK"
+        "--ctx-size|DEFAULT_CTX_OK"
+        "--threads|DEFAULT_THREADS_OK"
+    )
+    for spec in "${specs[@]}"; do
+        flag="${spec%%|*}"
+        ok_var="${spec#*|}"
+        case "$requested_str" in
+            *" $flag "*) continue ;;   # requested → already hard-validated, keep
+        esac
+        if printf '%s' "$help_text" | grep -qE -- "(^|[[:space:]])${flag}([[:space:]]|=|$)"; then
+            eval "$ok_var=1"
+        else
+            warn "installed llama.cpp ${version} does not support default flag ${flag} — omitting it from the unit"
+            eval "$ok_var=0"
         fi
     done
 }
@@ -126,9 +191,11 @@ human_size() {
 
 # ── Health check ───────────────────────────────────────────────
 check_health() {
-    local port="${LLAMACPP_PORT:-8088}"
+    # Probe the SAME host/port the unit binds (HOST/PORT, defaults
+    # 127.0.0.1/8088) — previously probes hardcoded 127.0.0.1 and missed a
+    # non-localhost LLAMACPP_HOST bind.
     local resp
-    resp="$(curl -sf "http://127.0.0.1:$port/health" 2>/dev/null)" || { echo "not running"; return 1; }
+    resp="$(curl -sf "http://$HOST:$PORT/health" 2>/dev/null)" || { echo "not running"; return 1; }
     local status
     status="$(printf '%s' "$resp" | jq -r '.status // "unknown"' 2>/dev/null)"
     echo "$status"
@@ -253,7 +320,7 @@ Config (~/.config/linux_post_install/ai.env):
   LLAMACPP_GPU_LAYERS GPU layers: -1=auto, 0=CPU only (default -1)
   LLAMACPP_THREADS    CPU threads (default: nproc)
 
-Requires: llama-server binary (install llama.cpp: https://github.com/ggerganov/llama.cpp)
+Requires: llama-server binary — install llama.cpp with the app installer: 'apps/ai/llamacpp.sh' (run 'bash apps/install.sh llamacpp', or pass '--apps'/'--full' to install.sh), see 'pos help ai server' (https://github.com/ggerganov/llama.cpp)
 EOF
     exit 0
 }
@@ -394,7 +461,7 @@ systemd_quote() {
 cmd_start() {
     # Resolve the llama-server binary
     local llamacpp_bin
-    llamacpp_bin="$(find_llamacpp)" || err "llama-server not found — install llama.cpp (https://github.com/ggerganov/llama.cpp)"
+    llamacpp_bin="$(find_llamacpp)" || err "llama-server not found — install llama.cpp with the app installer: 'apps/ai/llamacpp.sh' (run 'bash apps/install.sh llamacpp', or pass '--apps'/'--full' to install.sh), see 'pos help ai server' (https://github.com/ggerganov/llama.cpp)"
     local llamacpp_full
     llamacpp_full="$(command -v "$llamacpp_bin")"
 
@@ -403,10 +470,21 @@ cmd_start() {
     local version
     version="$(detect_llama_version "$llamacpp_bin")"
 
-    # Validate explicitly requested flags against this binary's --help
-    if [ "${#REQUESTED_FLAGS[@]}" -gt 0 ]; then
-        validate_requested_flags "$llamacpp_bin" "$version" "${REQUESTED_FLAGS[@]}"
+    # Validate EVERY flag that will appear in ExecStart (D-F):
+    #  - Requested flags (CLI OR config/env) → hard error if unsupported.
+    #  - Always-emitted defaults → warn + omit if unsupported.
+    local all_requested=("${REQUESTED_FLAGS[@]}" "${CONFIG_REQUESTED_FLAGS[@]}")
+    local deduped=() flag
+    for flag in "${all_requested[@]}"; do
+        case " ${deduped[*]:-} " in
+            *" $flag "*) continue ;;
+        esac
+        deduped+=("$flag")
+    done
+    if [ "${#deduped[@]}" -gt 0 ]; then
+        validate_requested_flags "$llamacpp_bin" "$version" "${deduped[@]}"
     fi
+    validate_default_flags "$llamacpp_bin" "$version" "${deduped[@]}"
 
     # Resolve model
     local explicit_model="${SUBCMD_ARGS[0]:-}"
@@ -441,11 +519,17 @@ cmd_start() {
     # unquoted whitespace, so the binary and the model path — the only tokens
     # that may contain spaces — are systemd_quote()d; plain flag/number
     # tokens stay unquoted.
+    # Build the command with ONLY the flags that passed validation. Requested
+    # flags (hard-validated) and supported defaults are always emitted; an
+    # unsupported DEFAULT is omitted here (validate_default_flags set the
+    # DEFAULT_*_OK globals) so the unit never carries an unsupported flag.
     local exec_cmd
-    exec_cmd="$(systemd_quote "$llamacpp_full") -m $(systemd_quote "$model") --port $PORT --host $HOST"
-    exec_cmd+=" --n-gpu-layers $gpu_layers"
-    exec_cmd+=" --ctx-size $CTX_SIZE"
-    exec_cmd+=" --threads $THREADS"
+    exec_cmd="$(systemd_quote "$llamacpp_full") -m $(systemd_quote "$model")"
+    if [ "$DEFAULT_PORT_OK" -eq 1 ]; then exec_cmd+=" --port $PORT"; fi
+    if [ "$DEFAULT_HOST_OK" -eq 1 ]; then exec_cmd+=" --host $HOST"; fi
+    if [ "$DEFAULT_GPU_OK" -eq 1 ]; then exec_cmd+=" --n-gpu-layers $gpu_layers"; fi
+    if [ "$DEFAULT_CTX_OK" -eq 1 ]; then exec_cmd+=" --ctx-size $CTX_SIZE"; fi
+    if [ "$DEFAULT_THREADS_OK" -eq 1 ]; then exec_cmd+=" --threads $THREADS"; fi
     if [ -n "$GPU_THREADS" ]; then
         exec_cmd+=" --gpu-threads $GPU_THREADS"
     fi
@@ -560,7 +644,7 @@ cmd_status() {
     # llama-server must be present for the version probe below — same
     # actionable deps message as `start`
     if ! find_llamacpp >/dev/null 2>&1; then
-        err "llama-server not found — install llama.cpp (https://github.com/ggerganov/llama.cpp)"
+        err "llama-server not found — install llama.cpp with the app installer: 'apps/ai/llamacpp.sh' (run 'bash apps/install.sh llamacpp', or pass '--apps'/'--full' to install.sh), see 'pos help ai server' (https://github.com/ggerganov/llama.cpp)"
     fi
 
     # Service state
@@ -573,7 +657,7 @@ cmd_status() {
     # Model (from health endpoint if running)
     if [ "$svc_state" = "running" ]; then
         local models_resp
-        models_resp="$(curl -sf "http://127.0.0.1:$PORT/v1/models" 2>/dev/null)" || true
+        models_resp="$(curl -sf "http://$HOST:$PORT/v1/models" 2>/dev/null)" || true
         local model_id
         model_id="$(printf '%s' "$models_resp" | jq -r '.data[0].id // "unknown"' 2>/dev/null)" || model_id="unknown"
         printf 'model:     %s\n' "$model_id"

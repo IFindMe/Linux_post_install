@@ -21,36 +21,25 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/user-timers-lib.sh" 2>/dev/null \
     || source "$(dirname "$0")/../lib/user-timers-lib.sh" 2>/dev/null \
     || source "$(dirname "$0")/user-timers-lib.sh"
 
+# Canonical config read/write + env loader (cfg_value/cfg_write/load_env_file).
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/config-ui.sh" 2>/dev/null \
+    || source "$(dirname "${BASH_SOURCE[0]}")/config-ui.sh" 2>/dev/null \
+    || source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null \
+    || source "$(dirname "$0")/config-ui.sh"
+
 # Per-plugin last-run state (rc + timestamp + first output line).
 LAST_RUN_DIR="${LAST_RUN_DIR:-$HOME/.local/share/linux_post_install/entertainment/last}"
 
-# ── Config file helpers (file is the source of truth, never sourced) ──
+# ── Config file helpers (thin wrappers over lib/config-ui.sh — the
+# canonical read/write API; same semantics, CRLF-safe, chmod 600) ──
 config_value() {
-    local k="$1" v
-    [ -f "$CONFIG_FILE" ] || return 0
-    v="$(sed -n "s|^${k}=||p" "$CONFIG_FILE" | tail -1)"
-    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-    printf '%s' "$v"
+    local k="$1"
+    cfg_value "$CONFIG_FILE" "$k"
 }
 
 write_config_key() {
-    local key="$1" val="$2" tmp
-    val="${val//$'\r'/}"
-    val="${val%%$'\n'*}"
-    mkdir -p "$CONFIG_DIR"
-    if [ "$val" = "-" ]; then
-        [ -f "$CONFIG_FILE" ] || return 0
-        tmp="$(mktemp)"
-        grep -v "^${key}=" "$CONFIG_FILE" >"$tmp" || true
-        mv "$tmp" "$CONFIG_FILE"
-        chmod 600 "$CONFIG_FILE"
-        return 0
-    fi
-    tmp="$(mktemp)"
-    grep -v "^${key}=" "$CONFIG_FILE" 2>/dev/null >"$tmp" || true
-    printf '%s="%s"\n' "$key" "$val" >>"$tmp"
-    mv "$tmp" "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
+    local key="$1" val="$2"
+    cfg_write "$CONFIG_FILE" "$key" "$val"
 }
 
 # ── Plugin lookup ──────────────────────────────────────────────────

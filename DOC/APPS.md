@@ -1,6 +1,6 @@
 # Optional Apps Reference
 
-`apps/` holds 15 optional desktop application installers, one script per app in `apps/<category>/<name>.sh`. They are **not** installed by the core bootstrap — run the picker explicitly.
+`apps/` holds 18 optional desktop application installers, one script per app in `apps/<category>/<name>.sh`. They are **not** installed by the core bootstrap — run the picker explicitly.
 
 - [The picker — `apps/install.sh`](#the-picker--appsinstallsh)
 - [How an app installer works](#how-an-app-installer-works)
@@ -34,7 +34,7 @@ bash apps/install.sh --uninstall brave   # uninstall a specific app
 
 ### Configuration
 
-- Categories: `browsers`, `development`, `media`, `networking`, `remote-access`, `system`, `utilities`.
+- Categories: `ai`, `browsers`, `development`, `media`, `networking`, `remote-access`, `system`, `utilities`.
 - Adding an app = dropping `apps/<category>/<name>.sh` into the folder. See [DEV.md](DEV.md) for the required installer conventions.
 
 ---
@@ -70,6 +70,7 @@ Installation methods used across the catalog:
 
 | App | Category | What it is | Install method |
 |-----|----------|------------|----------------|
+| llama.cpp | ai | Local LLM inference server (llama-server) | GitHub release → `/usr/local/lib/llama.cpp-<tag>` + `/usr/local/bin` symlinks |
 | Brave | browsers | Brave browser | apt repo + `apt install brave-browser` |
 | opencode | development | AI coding agent | official script → `~/.opencode/bin` |
 | VS Code | development | Code editor | Microsoft apt repo + `apt install code` |

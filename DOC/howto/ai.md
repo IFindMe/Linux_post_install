@@ -25,6 +25,9 @@ attaches the latest pos command output or captured output (tail, max 4096 chars)
 to the question and notes on stderr which source was attached, its age, and a
 staleness warning once it is older than an hour (`ask` only; stdout stays pure
 answer). Use `capture` to save output from any command for `--last`.
+`--trust` and `--no-command-execution` control how (if at all) agent-detected
+command blocks run — see [Command execution posture](#command-execution-posture)
+below.
 
 Backward compatibility: `pos ai gemini`, `pos ai openrouter`, and
 `pos ai llamacpp` still work as shorthand for `pos ai --provider gemini`,
@@ -244,6 +247,31 @@ truncated). To disable: `unset __POS_CAPTURE_ACTIVE`.
   `/reset` drops it (and empties the session file).
 - On a non-2xx response the API's `error.message` is shown and the exit code is
   non-zero — so scripts can rely on `ask` failing loudly.
+
+## Command execution posture
+
+When a model's answer contains a ```sh/shell fenced code block, `ask`/`chat`
+offer to **run** it as a shell command on your machine. Because that code is
+untrusted, AI-generated external authority, the default is to **deny**:
+
+- On an interactive terminal, `ask`/`chat` print the detected command and prompt
+  `Run this command? [y/N]` — you must type **`y`** (or `Y`) to execute it.
+  Enter or any other key **declines**: the command is added to your shell
+  history (press ↑ to recall and edit it) but never run.
+- Without an interactive controlling tty (pipes, scripts, cron, the Telegram /
+  Matrix bridges) commands are **never** executed — the code block is neither
+  printed nor run.
+
+`--trust` auto-executes detected commands **without** the confirmation prompt —
+but only on an interactive terminal. It is meant for trusted alias wrappers;
+do not pass it unless you fully trust the agent's output. It has no effect in a
+non-tty/chat-bridge context, which never executes commands anyway.
+
+`--no-command-execution` disables execution entirely: the detected command is
+neither printed nor run and no confirmation prompt appears. It is the
+structural guard used by the chat bridges so that a future refactor cannot
+accidentally auto-execute model output. When both `--trust` and
+`--no-command-execution` are given, the last one on the command line wins.
 
 ## Troubleshooting
 

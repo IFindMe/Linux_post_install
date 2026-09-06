@@ -5,7 +5,7 @@ set -euo pipefail
 # TEMPLATE — new optional app installer
 #
 #  1. Copy:  cp templates/app.sh apps/<category>/<name>.sh
-#     Categories: browsers, development, media, networking,
+#     Categories: ai, browsers, development, media, networking,
 #     remote-access, system, utilities.
 #  2. Fill in install_myapp() / uninstall_myapp() (rename to your app).
 #  3. Docs:  add a row to the catalog table in DOC/APPS.md.
