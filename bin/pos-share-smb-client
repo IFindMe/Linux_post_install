@@ -495,8 +495,8 @@ smb_server_path() { # <host> <share> — stdout: server-side dir · rc 1 = unres
 }
 
 # Mountpoint picker — local port of the share_pick primitive with exactly
-# two deltas: the hint line offers `n=new`, and typing n runs the
-# create-new-dir flow below. share_pick cannot intercept `n` (it filters on
+# two deltas: the hint line offers `t=type`, and typing t runs the
+# manual-entry flow below. share_pick cannot intercept `t` (it filters on
 # it) and lib/menu-lib.sh is shared, so the fork lives here. Rendering of
 # numbered picks / text filter / 0=back is byte-identical to menu_pick.
 # stdout: chosen item text (or the freshly created dir) · rc 1 = back/cancel.
@@ -535,16 +535,16 @@ pick_mountpoint() {
                 done
             fi
         } >&2
-        if ! read -rp "${prompt} [1-${n}], n=new, text=filter, 0=back " ans; then
+        if ! read -rp "${prompt} [1-${n}], t=type, text=filter, 0=back " ans; then
             return 1                     # EOF — cancel
         fi
         case "$ans" in
             "")  [ -z "$filter" ] || filter="" ; continue ;;
             "/") filter="" ; continue ;;
             0 | q | Q | b | B) return 1 ;;
-            n | N)
-                made="$(ask_new_mountpoint)" && { echo "$made"; return 0; }
-                continue                 # declined/invalid/mkdir-failed → redraw
+            t | T)
+                made="$(ask_mountpoint)" && { echo "$made"; return 0; }
+                continue                 # cancelled/invalid/mkdir-failed → redraw
                 ;;
             *[!0-9]*)
                 filter="$ans"
@@ -561,15 +561,16 @@ pick_mountpoint() {
     done
 }
 
-# Create-new-dir flow behind the picker's `n` key. Validates the shape
-# (absolute, no trailing slash), confirm-gates the creation, then mkdir -p.
+# Manual entry flow behind the picker's `t` key. Validates the shape
+# (absolute, no trailing slash, system-path refusal), then branches:
+# existing dir → use as-is; new dir → confirm-gate the creation + mkdir -p.
 # Any decline, invalid input, EOF or mkdir failure is a warning + rc 1 —
 # the picker redraws, the tool never aborts.
-ask_new_mountpoint() { # stdout: created dir · rc 1 = cancelled/failed
+ask_mountpoint() { # stdout: absolute path (existing or newly created) · rc 1 = cancelled/failed
     # NOTE: runs inside $( ) from the picker — every display line MUST go to
     # stderr (menu-lib contract: display → stderr, result → stdout).
     local dir
-    dir="$(share_ask_value "New mountpoint (absolute path)")" || return 1
+    dir="$(share_ask_value "Mountpoint (absolute path)")" || return 1
     case "$dir" in
         /*) ;;
         *) warn "'$dir' is not an absolute path — must start with /" >&2; return 1 ;;
@@ -583,6 +584,14 @@ ask_new_mountpoint() { # stdout: created dir · rc 1 = cancelled/failed
             return 1
             ;;
     esac
+    if [ -d "$dir" ]; then
+        echo "$dir"
+        return 0
+    fi
+    if [ -e "$dir" ]; then
+        warn "$dir exists and is not a directory — pick another mount point" >&2
+        return 1
+    fi
     confirm "Create mountpoint ${dir}?" n || return 1
     if ! run sudo mkdir -p "$dir"; then
         warn "Could not create ${dir}" >&2
@@ -624,9 +633,7 @@ menu_ask_mountpoint() { # [server_path] — stdout: absolute path · rc 1 cancel
             esac
         fi
     fi
-    dir="$(share_ask_value "Mountpoint (absolute path)")" || return 1
-    [ -n "$dir" ] || { warn "No mountpoint given"; return 1; }
-    echo "$dir"
+    ask_mountpoint
 }
 
 menu_mount() { # ephemeral|persist
