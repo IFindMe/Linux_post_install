@@ -14,8 +14,11 @@ provider_default_model() { printf 'gemini-2.5-flash'; }
 provider_generate() {
     local model="$1" messages="$2" system="${3:-}" body resp code body_out errmsg
     # Convert OpenAI messages format to Gemini contents format
-    body="$(printf '%s' "$messages" | jq -c '{
-        contents: [.messages[]? | {role: (.role | gsub("assistant";"model")), parts: [{text: .content}]}]
+    local mt="${AI_MAX_TOKENS:-2048}"
+    [[ "$mt" =~ ^[1-9][0-9]*$ ]] || mt=2048
+    body="$(printf '%s' "$messages" | jq -c --arg mt "$mt" '{
+        contents: [.messages[]? | {role: (.role | gsub("assistant";"model")), parts: [{text: .content}]}],
+        generationConfig: {maxOutputTokens: ($mt|tonumber)}
     }')"
     if [ -n "$system" ]; then
         body="$(printf '%s' "$body" | jq -c --arg s "$system" \

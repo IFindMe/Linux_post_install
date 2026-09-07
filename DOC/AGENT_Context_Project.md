@@ -488,7 +488,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 - `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
 - `~/.config/linux_post_install/system.env` — shared "system" tool settings (loaded by `pos system health` / `pos system backup` via `load_system_env()` in `lib/common.sh`; env already exported wins over the file); template `config/system.env`
 - `~/.config/linux_post_install/notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out); read by `lib/notify.sh`; template `config/notify.env`
-- `~/.config/linux_post_install/ai.env` — AI provider config (`AI_PROVIDER`, `AI_API_KEY` secret, `AI_MODEL`, `AI_SYSTEM_PROMPT`, plus legacy fallbacks `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`); read by `pos ai`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
+- `~/.config/linux_post_install/ai.env` — AI provider config (`AI_PROVIDER`, `AI_API_KEY` secret, `AI_MODEL`, `AI_SYSTEM_PROMPT`, `AI_MAX_TOKENS`, `AI_SESSION_TURNS`, plus legacy fallbacks `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`); read by `pos ai`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -655,7 +655,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 517 | Remove pos toolkit binaries, services, shell integration, config, and data |
-| `bin/pos-ai` | 705 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-ai` | 709 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 314 | Dynamic bash completion |

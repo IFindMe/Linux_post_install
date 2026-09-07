@@ -61,7 +61,7 @@ Category-less tools (`config`, `tree`) live outside any category and are documen
 
 | Command | Behavior |
 |---------|----------|
-| `pos ai ask "<prompt>"` | Sends the prompt to the active provider (default: gemini) and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai/default.json`, capped at 40 turns; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it; `AI_SYSTEM_PROMPT` env/config provides a custom default). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
+| `pos ai ask "<prompt>"` | Sends the prompt to the active provider (default: gemini) and prints the answer text to stdout. The prompt may also be piped in via stdin when no argument is given. Runs in the persistent `default` session (`~/.local/share/linux_post_install/ai/default.json`, capped at 40 turns, configurable via `AI_SESSION_TURNS`; `--session <name>` picks another). Terse by default: a built-in system instruction asks for commands-first minimal prose and to diagnose pasted errors/output with the fix first (`--system "<text>"` replaces it wholesale, `--full` skips it; `AI_SYSTEM_PROMPT` env/config provides a custom default). With `--last`, the output of the most recent logged pos command or captured output (tail, max 4096 chars) is appended to the question. On a tty the answer is rendered as markdown (`glow` if installed, else a built-in renderer); non-tty stdout gets the raw markdown bytes unchanged |
 | `pos ai --provider openrouter ask "<prompt>"` | Same, but uses OpenRouter instead of the default Gemini provider |
 | `pos ai capture <cmd..>` | Run a command, capture its stdout+stderr to screen and to `~/.local/share/linux_post_install/last_cmd_output` for `--last`. Each capture overwrites the previous one. Returns the command's exit code |
 | `pos ai chat` | Interactive REPL with multi-turn history (the `messages[]` array is appended per turn and persisted to the session file — `default` unless `--session`); replies are rendered like `ask` on a tty; `q`/`quit`/`exit` or Ctrl+C quit, `/reset` clears the history, empty input re-prompts |
@@ -91,6 +91,8 @@ Backward compatibility: `pos ai gemini`, `pos ai openrouter`, and `pos ai llamac
 | `AI_API_KEY` | yes | — | API key for the active provider (secret — masked in `pos config ai`) |
 | `AI_MODEL` | no | per provider | Model id used by `ask`/`chat`/`models` |
 | `AI_SYSTEM_PROMPT` | no | built-in terse prompt | Custom system prompt (overrides built-in; empty to reset) |
+| `AI_MAX_TOKENS` | no | `2048` | Max output tokens per request (OpenRouter/Gemini cost cap) |
+| `AI_SESSION_TURNS` | no | `40` | Session message cap — 2 per exchange; 10 = last 5 exchanges |
 | `AI_GEMINI_API_KEY` | fallback | — | Legacy: Gemini API key (used when `AI_API_KEY` is empty) |
 | `AI_GEMINI_MODEL` | fallback | `gemini-2.5-flash` | Legacy: Gemini model id (used when `AI_MODEL` is empty) |
 | `OPENROUTER_API_KEY` | fallback | — | Legacy: OpenRouter API key (used when `AI_API_KEY` is empty) |

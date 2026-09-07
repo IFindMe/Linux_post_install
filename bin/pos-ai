@@ -3,7 +3,7 @@ set -euo pipefail
 # POS: ai ask — AI assistant: ask, chat, sessions, capture, models, providers
 # POS_SUBCMDS: ask chat sessions capture models providers llamacpp
 # POS_FLAGS: --provider --model --session --system --full --last --trust --no-command-execution
-# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini, openrouter or llamacpp, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @[AI_PROVIDER=llamacpp] llamacpp | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE=num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS=num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS=num:CPU threads (default: nproc) | *providers=llamacpp | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset)
+# POS_CONFIG: ai | ai.env | AI_PROVIDER=:Provider (gemini, openrouter or llamacpp, default gemini) | @[AI_PROVIDER=gemini|] Gemini | *providers=gemini | @[AI_PROVIDER=openrouter] OpenRouter | *providers=openrouter | @[AI_PROVIDER=llamacpp] llamacpp | LLAMACPP_PORT=:Server port (default 8088) | LLAMACPP_HOST=:Bind address (default 127.0.0.1) | LLAMACPP_MODEL=:Default model path (GGUF) | LLAMACPP_CTX_SIZE=num:Context window size (default 4096) | LLAMACPP_GPU_LAYERS=num:GPU layers (-1=auto, 0=CPU, default -1) | LLAMACPP_THREADS=num:CPU threads (default: nproc) | *providers=llamacpp | @General | AI_SYSTEM_PROMPT=:Custom system prompt (overrides built-in, empty to reset) | AI_MAX_TOKENS=num:Max output tokens per request (default 2048; OpenRouter/Gemini cost cap) | AI_SESSION_TURNS=num:Session message cap — 2 per exchange (default 40 = 20 exchanges; 10 = last 5)
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
@@ -91,6 +91,8 @@ Options:
 Config:  $CONFIG_FILE  (edit with 'pos config ai')
   AI_PROVIDER         Provider to use (gemini|openrouter|llamacpp, default gemini)
   AI_SYSTEM_PROMPT    Custom system prompt (overrides built-in; empty to reset)
+  AI_MAX_TOKENS       Max output tokens per request (default 2048; OpenRouter/Gemini cost cap)
+  AI_SESSION_TURNS    Session message cap — 2 per exchange (default 40 = 20 exchanges; 10 = last 5)
   Provider keys:      auto-discovered from lib/ai-providers/*.sh
                       (AI_GEMINI_API_KEY, OPENROUTER_API_KEY, etc.)
 
@@ -285,8 +287,10 @@ session_save() {
 # Append a turn and prune to the last MAX_SESSION_TURNS entries. stdout = JSON.
 session_push() {
     local messages="$1" role="$2" text="$3"
-    printf '%s' "$messages" | jq -c --arg r "$role" --arg t "$text" \
-        '.messages += [{role:$r, content:$t}] | .messages |= .[-'"$MAX_SESSION_TURNS"':]'
+    local n="${AI_SESSION_TURNS:-$MAX_SESSION_TURNS}"
+    [[ "$n" =~ ^[1-9][0-9]*$ ]] || n="$MAX_SESSION_TURNS"
+    printf '%s' "$messages" | jq -c --arg r "$role" --arg t "$text" --argjson n "$n" \
+        '.messages += [{role:$r, content:$t}] | .messages |= .[-$n:]'
 }
 
 # ── Terminal markdown rendering (tty-only; raw bytes otherwise) ──

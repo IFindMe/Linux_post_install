@@ -19,8 +19,10 @@ provider_generate() {
     else
         body="$(printf '%s' "$messages" | jq -c '.messages')"
     fi
-    body="$(printf '%s' "$body" | jq -nc --arg m "$model" --argjson msgs "$body" \
-        '{model:$m, messages:$msgs}')"
+    local mt="${AI_MAX_TOKENS:-2048}"
+    [[ "$mt" =~ ^[1-9][0-9]*$ ]] || mt=2048
+    body="$(printf '%s' "$body" | jq -nc --arg m "$model" --argjson msgs "$body" --arg mt "$mt" \
+        '{model:$m, messages:$msgs, max_tokens:($mt|tonumber)}')"
     resp="$(curl -sS -m 60 -X POST "https://openrouter.ai/api/v1/chat/completions" \
         -H "Authorization: Bearer ${AI_API_KEY}" \
         -H "Content-Type: application/json" \
