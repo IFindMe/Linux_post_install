@@ -24,7 +24,7 @@
 #   menu_guard                          rc 0 iff stdin is a terminal
 #   menu_run <title> <item...>          numbered menu loop → chosen index
 #   menu_pick <prompt> <item...>        type-to-filter picker → chosen index
-#   menu_ask_value <label> [default]    prompted value → entered text
+#   menu_ask_value [--allow-empty] <label> [default]    prompted value → entered text
 #   menu_read_value <label>             raw-mode bracketed-paste reader
 #   menu_redraw                         internal redraw (menu_read_value only)
 
@@ -347,15 +347,23 @@ menu_redraw() {
 # text — including multi-line pastes — inserts it literally instead of letting
 # leftover lines escape to the shell as commands.
 #   rc 0  value on stdout · rc 1  EOF/cancel, or empty answer with no default.
+#   With --allow-empty: empty answer with no default → rc 0 + empty value;
+#   only genuine cancel/EOF returns rc 1.
 menu_ask_value() {
+    local allow_empty=0
+    if [ "${1:-}" = "--allow-empty" ]; then
+        allow_empty=1
+        shift
+    fi
     local label="$1" def="${2:-}" val pr="$1"
     [ -n "$def" ] && pr="$pr [$def]"
     if ! val="$(menu_read_value "$pr")"; then
         return 1                          # EOF / cancel
     fi
     if [ -z "$val" ]; then
-        [ -n "$def" ] || return 1
-        echo "$def"
+        [ -n "$def" ] && { echo "$def"; return 0; }
+        [ "$allow_empty" -eq 1 ] || return 1
+        echo ""
         return 0
     fi
     echo "$val"
