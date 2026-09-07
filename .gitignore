@@ -30,3 +30,6 @@ session
 # Scratch/plan notes — never committed
 TEMP_PLAN.md
 dream.md
+
+# Agent process reports — local-only shared memory (not tracked)
+AgentsReport/
