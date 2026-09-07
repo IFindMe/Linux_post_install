@@ -42,6 +42,7 @@ silently.
 | --- | --- |
 | `t-ai-server-flags.sh` | `pos-ai-server` ExecStart flag set: defaults, CLI, config, dedupe, one-token-per-flag |
 | `t-ai-hf-download.sh` | `pos ai hf download` success + failure honesty (no `.hf-meta` on partial failure, rc != 0) |
+| `t-ai-key-resolution.sh` | `pos ai` API-key contract: provider key > legacy `AI_API_KEY` fallback > error; leakage guard, env-wins, providers status sync |
 | `t-ai-llama-detect.sh` | `pos ai-server status` version detection, "unknown", missing-binary failure |
 | `t-unsupported-flags.sh` | unsupported-option handling: CLI/config/env hard errors, dropped defaults, word-boundary match |
 | `t-systemd-unit.sh` | generated unit: one ExecStart, quoted paths, `systemd-analyze verify` |

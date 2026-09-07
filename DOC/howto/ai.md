@@ -69,7 +69,7 @@ exactly as before (no added blank lines), so scripting stays byte-stable.
 2. Configure it (masked input):
 
    ```bash
-   pos config ai          # enter AI_API_KEY (or AI_GEMINI_API_KEY)
+   pos config ai          # enter AI_GEMINI_API_KEY
    ```
 
 3. Test:
@@ -81,7 +81,10 @@ exactly as before (no added blank lines), so scripting stays byte-stable.
    ```
 
 `ai.env` lives at `~/.config/linux_post_install/ai.env` (chmod 600); `pos config ai`
-is the only place the key is written. The key is never printed by `pos`.
+is where the provider keys are written, and keys are never printed by `pos`. The
+legacy shared `AI_API_KEY` is still honored as a fallback when the provider's own
+key is unset — set it via the shell environment or by hand-editing `ai.env` (it is
+not part of the `pos config ai` prompt).
 
 ## OpenRouter — many providers, one key
 
@@ -98,7 +101,7 @@ pos ai openrouter ask "hi"
 Configure the API key:
 
 ```bash
-pos config ai              # enter AI_API_KEY (or OPENROUTER_API_KEY)
+pos config ai              # enter OPENROUTER_API_KEY
 ```
 
 The default model is `openrouter/auto` (OpenRouter picks the best available

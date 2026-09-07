@@ -488,7 +488,7 @@ All `.service` files in `systemd/` are automatically copied to `/etc/systemd/sys
 - `~/.config/linux_post_install/entertainment.env` — entertainment plugin defaults: weather location + `ENABLED` auto-trigger list (`plugin, interval` pairs scheduled via `pos entertainment enable/disable`, systemd user timers); auto-installed from `config/entertainment.env` by `postinstall.sh` (no clobber, template printed)
 - `~/.config/linux_post_install/system.env` — shared "system" tool settings (loaded by `pos system health` / `pos system backup` via `load_system_env()` in `lib/common.sh`; env already exported wins over the file); template `config/system.env`
 - `~/.config/linux_post_install/notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`, comma-separated = fan out); read by `lib/notify.sh`; template `config/notify.env`
-- `~/.config/linux_post_install/ai.env` — AI provider config (`AI_PROVIDER`, `AI_API_KEY` secret, `AI_MODEL`, `AI_SYSTEM_PROMPT`, `AI_MAX_TOKENS`, `AI_SESSION_TURNS`, plus legacy fallbacks `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`); read by `pos ai`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
+- `~/.config/linux_post_install/ai.env` — AI provider config (`AI_PROVIDER`, `AI_MODEL`, `AI_SYSTEM_PROMPT`, `AI_MAX_TOKENS`, `AI_SESSION_TURNS`, provider keys `AI_GEMINI_API_KEY`/`OPENROUTER_API_KEY` (secrets), legacy shared fallback `AI_API_KEY` accepted when the provider's key is unset, plus model fallbacks `AI_GEMINI_MODEL`, `OPENROUTER_MODEL`); read by `pos ai`; template `config/ai.env`, auto-installed by postinstall, edit with `pos config ai`
 - `~/.bashrc` — Modified by postinstall (PATH, bash completion)
 
 ### Feature Flags
@@ -655,7 +655,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 517 | Remove pos toolkit binaries, services, shell integration, config, and data |
-| `bin/pos-ai` | 709 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 314 | Dynamic bash completion |
@@ -692,7 +692,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | Modify Music→USB sync logic | Edit `bin/pos-media-sync` / shared USB layer `lib/usb-lib.sh` (seams `MEDIA_SYNC_SOURCE`/`MEDIA_SYNC_DEST`/`USB_MOUNT_BASE`/`USB_BYID` in `~/.config/linux_post_install/system.env`) |
 | Modify YouTube channel sync logic | Edit `bin/pos-media-ytsync` (state in `~/.local/share/linux_post_install/ytsync`; config scope `ytsync` via `pos config ytsync`; research notes `tools-docs/ytsync.md`) |
 | Modify the scheduler / scheduled jobs | Edit `bin/pos-system-schedule` / `lib/scheduler-lib.sh` (jobs in `~/.config/linux_post_install/schedule.d/`) |
-| Modify AI logic | Edit `bin/pos-ai` (main tool) + `lib/ai-providers/*.sh` (provider adapters); config scope `ai` via `pos config ai`; `AI_API_KEY`/`AI_MODEL`/`AI_PROVIDER` in `~/.config/linux_post_install/ai.env` |
+| Modify AI logic | Edit `bin/pos-ai` (main tool) + `lib/ai-providers/*.sh` (provider adapters); config scope `ai` via `pos config ai`; `AI_PROVIDER`, `AI_MODEL`, per-provider `AI_GEMINI_API_KEY`/`OPENROUTER_API_KEY` (legacy shared `AI_API_KEY` accepted as fallback) in `~/.config/linux_post_install/ai.env` |
 | Modify UFW/firewall logic | Edit `bin/pos-system-firewall` |
 | Modify pos logging | Edit log setup in `bin/pos` |
 | Modify install phases/flags | Edit arg parsing in `install.sh` |

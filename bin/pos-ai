@@ -156,10 +156,14 @@ load_config() {
 resolve_key() {
     load_config
     local p="${PROVIDER:-gemini}"
-    # Each provider has its own API key — set AI_API_KEY internally for adapters
+    # Provider-specific key wins (leakage guard); legacy shared AI_API_KEY is a
+    # read-only fallback when the provider's own key is empty — load_config/env
+    # already exported it (env-wins), so never overwrite it here.
     case "$p" in
-        gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && export AI_API_KEY="$AI_GEMINI_API_KEY" && return 0 ;;
-        openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && export AI_API_KEY="$OPENROUTER_API_KEY" && return 0 ;;
+        gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && export AI_API_KEY="$AI_GEMINI_API_KEY" && return 0
+                    [ -n "${AI_API_KEY:-}" ] && return 0 ;;
+        openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && export AI_API_KEY="$OPENROUTER_API_KEY" && return 0
+                    [ -n "${AI_API_KEY:-}" ] && return 0 ;;
         llamacpp)   return 0 ;;  # No API key needed for local server
     esac
     return 1
@@ -626,9 +630,10 @@ cmd_providers() {
         [ -n "$pmodel" ] || pmodel="unknown"
         # Check if API key exists for this provider
         configured="not configured"
+        # Same key set as resolve_key(): provider key, or legacy AI_API_KEY fallback
         case "$name" in
-            gemini)     [ -n "${AI_GEMINI_API_KEY:-}" ] && configured="configured" ;;
-            openrouter) [ -n "${OPENROUTER_API_KEY:-}" ] && configured="configured" ;;
+            gemini)     { [ -n "${AI_GEMINI_API_KEY:-}" ] || [ -n "${AI_API_KEY:-}" ]; } && configured="configured" ;;
+            openrouter) { [ -n "${OPENROUTER_API_KEY:-}" ] || [ -n "${AI_API_KEY:-}" ]; } && configured="configured" ;;
             llamacpp)   configured="configured" ;;  # Local server — always configured
         esac
         current=""

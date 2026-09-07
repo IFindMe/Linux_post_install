@@ -42,7 +42,7 @@ templates (without overwriting an existing file):
 | `system.env` | `pos system health`, `pos system backup` | `BACKUP_SERVICE_ROOTS`, `HEALTH_BACKUP_MAX_AGE_DAYS` |
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
 | `entertainment.env` | `pos entertainment *` | plugin keys (`WEATHER_LAT`…), `ENABLED` |
-| `ai.env` | `pos ai` | `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `AI_SYSTEM_PROMPT`, `AI_MAX_TOKENS`, `AI_SESSION_TURNS`, `AI_GEMINI_API_KEY`, `AI_GEMINI_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` |
+| `ai.env` | `pos ai` | `AI_PROVIDER`, `AI_MODEL`, `AI_SYSTEM_PROMPT`, `AI_MAX_TOKENS`, `AI_SESSION_TURNS`, provider keys `AI_GEMINI_API_KEY` / `OPENROUTER_API_KEY` (+ legacy `AI_API_KEY` fallback) |
 | `schedule.d/` | `pos system schedule` | one `<name>.env` per job: `INTERVAL`, `NOTIFY`, `MSG`, `RULE`, `COMMAND` |
 
 ```bash

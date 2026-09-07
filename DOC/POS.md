@@ -88,17 +88,17 @@ Backward compatibility: `pos ai gemini`, `pos ai openrouter`, and `pos ai llamac
 | Key | Required | Default | Purpose |
 |-----|----------|---------|---------|
 | `AI_PROVIDER` | no | `gemini` | Active provider (gemini\|openrouter\|llamacpp) |
-| `AI_API_KEY` | yes | — | API key for the active provider (secret — masked in `pos config ai`) |
+| `AI_API_KEY` | no (legacy fallback) | — | Legacy shared API key, used when the active provider's key is empty; not part of the `pos config ai` prompt (set via env or hand-edit); secret |
 | `AI_MODEL` | no | per provider | Model id used by `ask`/`chat`/`models` |
 | `AI_SYSTEM_PROMPT` | no | built-in terse prompt | Custom system prompt (overrides built-in; empty to reset) |
 | `AI_MAX_TOKENS` | no | `2048` | Max output tokens per request (OpenRouter/Gemini cost cap) |
 | `AI_SESSION_TURNS` | no | `40` | Session message cap — 2 per exchange; 10 = last 5 exchanges |
-| `AI_GEMINI_API_KEY` | fallback | — | Legacy: Gemini API key (used when `AI_API_KEY` is empty) |
+| `AI_GEMINI_API_KEY` | yes (gemini) | — | Gemini API key (the active key when provider is gemini; secret — masked in `pos config ai`) |
 | `AI_GEMINI_MODEL` | fallback | `gemini-2.5-flash` | Legacy: Gemini model id (used when `AI_MODEL` is empty) |
-| `OPENROUTER_API_KEY` | fallback | — | Legacy: OpenRouter API key (used when `AI_API_KEY` is empty) |
+| `OPENROUTER_API_KEY` | yes (openrouter) | — | OpenRouter API key (the active key when provider is openrouter; secret — masked in `pos config ai`) |
 | `OPENROUTER_MODEL` | fallback | `openrouter/auto` | Legacy: OpenRouter model id (used when `AI_MODEL` is empty) |
 
-Model precedence: `--model` flag > `AI_MODEL` env > provider-specific fallback (`AI_GEMINI_MODEL`/`OPENROUTER_MODEL`) > provider default. API key precedence: `AI_API_KEY` env > provider-specific fallback (`AI_GEMINI_API_KEY`/`OPENROUTER_API_KEY`) > error. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES). Sessions are stored in OpenAI `messages` format universally; old Gemini-format sessions (`contents[]`) are auto-migrated on load.
+Model precedence: `--model` flag > `AI_MODEL` env > provider-specific fallback (`AI_GEMINI_MODEL`/`OPENROUTER_MODEL`) > provider default. API key precedence: `<provider>_API_KEY` (`AI_GEMINI_API_KEY` for gemini / `OPENROUTER_API_KEY` for openrouter) > legacy `AI_API_KEY` fallback > error. `AI_API_KEY` is an internal adapter shim and a backward-compat input — it is not offered by `pos config ai`. `postinstall.sh` copies the repo's `config/ai.env` template to `~/.config/linux_post_install/ai.env` on install (no clobber). Dependencies: `curl` + `jq` (both in `preinstall.sh` PACKAGES). Sessions are stored in OpenAI `messages` format universally; old Gemini-format sessions (`contents[]`) are auto-migrated on load.
 
 **Messaging bridges:** the Telegram and Matrix listeners forward non-command messages starting with `ai ` (case-insensitive) to `pos ai ask` and reply with the model's answer — see [communication → listener](#communication). The Telegram bridge uses one session per chat (`telegram-<chat id>`), the Matrix bridge one per room (`matrix-<room>`).
 
