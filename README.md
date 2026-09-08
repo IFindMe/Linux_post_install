@@ -35,6 +35,7 @@ cd Linux_post_install
 | `--apps` | Interactive app picker after core install |
 | `--full` | Core install + all apps (non-interactive) |
 | `--dry-run` | Preview without executing |
+| `--force` | Re-install even if the version matches |
 | `--skip <phase>` | Skip a phase: `preinstall`, `scripts`, `postinstall`, `scalepoint`, `apps` |
 | `--steps <spec>` | Run only specific phases, e.g. `--steps 1,3` |
 | `--no-color` | Disable colored output |

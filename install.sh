@@ -14,11 +14,26 @@ fi
 source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/flags.sh"
 
+# Return the current install.sh version (e.g. "0.0c174").
+# Derived from git commit count. Empty when .git is absent.
+# Override with INSTALL_VERSION_OVERRIDE for testing.
+install_version() {
+    if [ "${INSTALL_VERSION_OVERRIDE+x}" ]; then
+        printf '%s' "$INSTALL_VERSION_OVERRIDE"
+        return
+    fi
+    local repo_dir count
+    repo_dir="$(cd "$(dirname "$0")" && pwd)"
+    count="$(git -C "$repo_dir" rev-list --count HEAD 2>/dev/null)" || { printf ''; return; }
+    printf '0.0c%s' "$count"
+}
+
 # Exported so child phases (preinstall.sh, postinstall.sh) inherit it —
 # otherwise '--dry-run' silently executes them for real.
 export DRY_RUN=0
 RUN_APPS=0
 RUN_FEATURES=0
+FORCE=0
 SKIP_PHASES=""
 STEPS_SPEC=""
 
@@ -58,6 +73,7 @@ Options:
   --full            Core install + all optional apps (non-interactive)
   --feature         Install features/ scripts (prompts before overwriting)
   --dry-run         Show what would be done without executing
+  --force           Re-install even if the version matches
   --skip <phase>    Skip a phase (repeatable):
                       preinstall, scripts, postinstall, scalepoint, apps
   --steps <spec>    Run only specific phases. Format: 1,3,4 or 1-3
@@ -79,6 +95,7 @@ while [[ $# -gt 0 ]]; do
         --full) RUN_APPS=2; shift ;;
         --feature) RUN_FEATURES=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
+        --force) FORCE=1; shift ;;
         --skip)
             [ -z "${2:-}" ] && err "Missing value for --skip"
             SKIP_PHASES="${SKIP_PHASES:+$SKIP_PHASES,}$2"
@@ -94,6 +111,24 @@ while [[ $# -gt 0 ]]; do
         *) err "Unknown option: $1" ;;
     esac
 done
+
+# ── Version gate ────────────────────────────────────────────────
+CURRENT_VERSION="$(install_version)"
+if [ "${FORCE:-0}" -ne 1 ] && [ -n "$CURRENT_VERSION" ]; then
+    INSTALLED_VERSION="$(flag_value installed_version 2>/dev/null)" || true
+    if [ -n "$INSTALLED_VERSION" ]; then
+        current_num="${CURRENT_VERSION#0.0c}"
+        installed_num="${INSTALLED_VERSION#0.0c}"
+        if [ "$current_num" -eq "$installed_num" ] 2>/dev/null; then
+            if [ "${DRY_RUN:-0}" -eq 1 ]; then
+                log "(dry-run) Would skip install: already at version $CURRENT_VERSION"
+            else
+                log "Already installed ($CURRENT_VERSION). Use --force to re-install."
+            fi
+            exit 0
+        fi
+    fi
+fi
 
 # ── Phase runner ────────────────────────────────────────────────
 # Phase names → numbers:  preinstall=1 scripts=2 postinstall=3 scalepoint=4
@@ -247,6 +282,11 @@ echo
 echo "${GREEN}════════════════════════════════════════════${RESET}"
 echo "${GREEN}  Bootstrap complete ($(timer_stop))${RESET}"
 echo "${GREEN}════════════════════════════════════════════${RESET}"
+
+# ── Record installed version ────────────────────────────────────
+if [ "${DRY_RUN:-0}" -ne 1 ] && [ -n "${CURRENT_VERSION:-}" ]; then
+    flag_set installed_version "$CURRENT_VERSION"
+fi
 
 # ── Optional apps ──────────────────────────────────────────────
 if [ "$RUN_APPS" -eq 1 ]; then

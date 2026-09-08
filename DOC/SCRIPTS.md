@@ -34,7 +34,8 @@ Everything that runs during the bootstrap install: `install.sh`, `preinstall.sh`
 1. **Pre-parse `--no-color`** before anything else, so colors are disabled early (`TERM=dumb` is exported).
 2. Source `lib/common.sh` (logging, `run`, `spawn`, …) and `lib/flags.sh` (feature flags).
 3. Parse CLI options.
-4. For each phase, `should_run <num> <name>` decides whether to run it:
+4. **Version gate:** derive the current version (`0.0c<git commit count>` via `install_version()`; empty when `.git` is absent). If the installed version (stored as the `installed_version` flag) matches and `--force` is not given, skip the install — with `--dry-run` it prints `(dry-run) Would skip install: already at version <v>`, otherwise `Already installed (<v>). Use --force to re-install.` and exits 0. When no `installed_version` flag exists or the current version cannot be determined (no `.git`), the gate is skipped.
+5. For each phase, `should_run <num> <name>` decides whether to run it:
    - `--skip <phase>` removes a phase (takes precedence).
    - `--steps <spec>` restricts the run to the listed phases only (`1,3,4` or `1-3`).
    - Phase map: `1=preinstall`, `2=scripts`, `3=postinstall`, `4=scalepoint` (+ `apps` handled separately).
@@ -63,6 +64,7 @@ No config file — everything is command-line:
 | `--full` | Core install + every app (non-interactive) |
 | `--feature` | Install `features/` scripts to `/usr/local/bin/` (prompts on overwrite), sets their flags |
 | `--dry-run` | Log every action instead of executing. **Note:** applies to `install.sh` itself; `postinstall.sh` runs as a subprocess and does not inherit `DRY_RUN` |
+| `--force` | Re-install even if the version matches |
 | `--skip <phase>` | Skip a phase (repeatable): `preinstall`, `scripts`, `postinstall`, `scalepoint`, `apps` |
 | `--steps <spec>` | Run only listed phases: `1,3,4` or `1-3` |
 | `--no-color` | Disable colored output |

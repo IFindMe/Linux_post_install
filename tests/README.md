@@ -53,4 +53,5 @@ silently.
 | `t-uninstall-manifest.sh` | install.sh ↔ POS_LIBS symmetry, user-unit discovery, marker-driven plugin removal |
 | `t-gen-docs-drift.sh` | `make gen` idempotence on a pristine tracked tree (CI drift gate) |
 | `t-lint-gate.sh` | `make lint` green on the real tree; planted violations are caught and named |
+| `t-install-version.sh` | install.sh version gate: match→skip, mismatch→proceed, --force bypass, dry-run variant, flag write, numeric comparison |
 | `t-share-mountpoint.sh` | share-client `ask_mountpoint` UX: existing/new/declined/rejected paths, confirm gate, mkdir side effects, non-TTY stdin contract, static `n`→`t` guards |

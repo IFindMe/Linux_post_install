@@ -11,18 +11,18 @@
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
 | ## 2. Directory Structure | 44–210 |
-| ## 3. Installation Flow | 211–264 |
-| ## 4. The `pos` CLI System | 265–346 |
-| ## 5. Shared Library — `lib/common.sh` | 347–378 |
-| ## 6. Docker Compose / ScaleTail | 379–421 |
-| ## 7. Optional Apps (`apps/`) | 422–451 |
-| ## 8. Entertainment Module | 452–465 |
-| ## 9. Systemd Services | 466–477 |
-| ## 10. Configuration Files | 478–504 |
-| ## 11. Coding Conventions | 505–537 |
-| ## 12. Development Workflow | 538–590 |
-| ## 13. Key File Quick Reference | 591–666 |
-| ## 14. Common Tasks for Agents | 667–700 |
+| ## 3. Installation Flow | 211–269 |
+| ## 4. The `pos` CLI System | 270–351 |
+| ## 5. Shared Library — `lib/common.sh` | 352–383 |
+| ## 6. Docker Compose / ScaleTail | 384–426 |
+| ## 7. Optional Apps (`apps/`) | 427–456 |
+| ## 8. Entertainment Module | 457–470 |
+| ## 9. Systemd Services | 471–482 |
+| ## 10. Configuration Files | 483–509 |
+| ## 11. Coding Conventions | 510–542 |
+| ## 12. Development Workflow | 543–595 |
+| ## 13. Key File Quick Reference | 596–671 |
+| ## 14. Common Tasks for Agents | 672–705 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -211,7 +211,11 @@ Linux_post_install/
 ## 3. Installation Flow
 
 ```
-User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--steps <spec>]
+User runs: ./install.sh [--apps|--full|--feature|--dry-run|--force|--skip <phase>|--steps <spec>]
+│
+├─ Version gate: compares installed version (flag) vs current (0.0c<commit count>)
+│   └─ match + no --force → "Already installed. Use --force to re-install." / exit 0
+│       (--dry-run variant prints "Would skip install"); no git or no flag → skip gate
 │
 ├─ Phase 1: preinstall.sh        (requires root)
 │   └─ apt update + installs 25+ packages + yt-dlp + fail2ban
@@ -249,6 +253,7 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--skip <phase>|--step
 | `--full` | Core install + all apps (non-interactive) |
 | `--feature` | Install `features/` scripts to `/usr/local/bin/` (asks before overwriting), set their flags |
 | `--dry-run` | Preview without executing |
+| `--force` | Re-install even if the version matches |
 | `--skip <phase>` | Skip a phase (repeatable): `preinstall`, `scripts`, `postinstall`, `scalepoint`, `apps` |
 | `--steps <spec>` | Run only specific phases. Format: `1,3,4` or `1-3` |
 | `--no-color` | Disable colored output |
@@ -592,7 +597,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `install.sh` | 248 | Main orchestrator — 4 phases with CLI flags, `--feature`, prebuilt arch bins |
+| `install.sh` | 301 | Main orchestrator — 4 phases with CLI flags, `--feature`, `--force`, version gate, prebuilt arch bins |
 | `preinstall.sh` | 76 | System packages + hotspot deps + yt-dlp + fail2ban |
 | `postinstall.sh` | 168 | fail2ban config, PATH, bash completion, systemd (flag-gated) |
 | `lib/common.sh` | 151 | Shared library (log/warn/err/run/spawn, dry-run aware, `load_system_env`, CONFIG_DIR) |
