@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: media yt-subtitles — Extract subtitles/captions from a URL (yt-dlp)
+# POS_FLAGS: --lang --format --auto-only --output --list-subs --no-playlist --dry-run
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/yt-lib.sh" 2>/dev/null || source "$(dirname "$0")/yt-lib.sh"
+
+# --dry-run / --list-subs are parsed before the deps guards (below): dry-run
+# previews the yt-dlp command without requiring yt-dlp to be installed.
+DRY_RUN=0
+LIST_SUBS=0
+for arg in "$@"; do
+    [ "$arg" = "--dry-run" ] && DRY_RUN=1
+    [ "$arg" = "--list-subs" ] && LIST_SUBS=1
+done
+
+# Deps guards sit before -h|--help. Subtitles needs only yt-dlp (no ffmpeg).
+# dry-run skips the deps check entirely (preview needs no binary).
+if [ "$DRY_RUN" -eq 0 ]; then
+    command -v yt-dlp &>/dev/null || err "yt-dlp not found — install it with: sudo apt install yt-dlp"
+fi
+
+LANG_SPEC=""
+FMT="srt"
+AUTO_ONLY=0
+OUT_DIR=""
+NO_PLAYLIST=0
+
+usage() {
+    cat <<EOF
+Usage: pos media yt subtitles [options] <url>
+
+Extract subtitles/captions from a URL via yt-dlp. Fetches manual captions and
+auto-generated captions by default.
+
+Options:
+  --lang <list>         Subtitle languages (comma-separated), default: best
+  --format <fmt>        Output format: srt (default), vtt, or txt
+  --auto-only           Only auto-generated captions (no manual subs)
+  -o, --output <dir>    Output directory (default: current directory)
+  --list-subs           List available subtitles and exit (probe only)
+  --no-playlist         Download only the single video
+  --dry-run             Print the yt-dlp command without running it
+  -h, --help            This help
+
+Examples:
+  pos media yt subtitles https://youtube.com/watch?v=dQw4w9WgXcQ
+  pos media yt subtitles --lang en,ar https://youtube.com/watch?v=dQw4w9WgXcQ
+  pos media yt subtitles --format txt https://youtu.be/dQw4w9WgXcQ
+  pos media yt subtitles --list-subs https://youtube.com/watch?v=dQw4w9WgXcQ
+EOF
+    exit 0
+}
+
+# convert_srt_to_txt <srt-file> — strip SRT timestamps, seq numbers, HTML tags
+convert_srt_to_txt() {
+    local srt_file="$1" txt_file="${1%.srt}.txt"
+    sed '/^[0-9][0-9]:[0-9][0-9]/d; /^$/d; s/<[^>]*>//g' "$srt_file" > "$txt_file"
+}
+
+URL=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --lang)
+            [ $# -ge 2 ] || err "--lang needs a value"
+            LANG_SPEC="$2"; shift 2 ;;
+        --format)
+            [ $# -ge 2 ] || err "--format needs a value"
+            case "$2" in
+                srt|vtt|txt) FMT="$2" ;;
+                *) err "unknown format '$2' (use srt, vtt, or txt)" ;;
+            esac
+            shift 2 ;;
+        --auto-only) AUTO_ONLY=1; shift ;;
+        -o|--output)
+            [ $# -ge 2 ] || err "--output needs a value"
+            OUT_DIR="$2"; shift 2 ;;
+        --list-subs) LIST_SUBS=1; shift ;;
+        --no-playlist) NO_PLAYLIST=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
+        -*) err "Unknown option: $1 (see --help)" ;;
+        *)
+            [ -z "$URL" ] && URL="$1" && shift || err "Unexpected argument: $1" ;;
+    esac
+done
+[ -n "$URL" ] || err "missing URL (see --help)"
+
+yt_validate_url "$URL" 2>/dev/null || err "not a valid URL: $URL (must start with http:// or https://)"
+
+# ── Build the yt-dlp command ─────────────────────────────────
+if [ "$LIST_SUBS" -eq 1 ]; then
+    args=(yt-dlp --list-subs "$URL")
+    if [ "$DRY_RUN" -eq 1 ]; then
+        yt_echo_cmd "${args[@]:1}"
+        exit 0
+    fi
+    spawn "listing subtitles" "${args[@]}"
+    exit 0
+fi
+
+# Output template
+OUT_TEMPLATE=""
+if [ -n "$OUT_DIR" ]; then
+    OUT_TEMPLATE="$OUT_DIR/%(title)s.%(sub_lang)s.%(ext)s"
+else
+    OUT_TEMPLATE="./%(title)s.%(sub_lang)s.%(ext)s"
+fi
+
+args=(yt-dlp)
+if [ "$AUTO_ONLY" -eq 1 ]; then
+    args+=(--write-auto-subs)
+else
+    args+=(--write-subs --write-auto-subs)
+fi
+
+if [ -n "$LANG_SPEC" ]; then
+    args+=(--sub-langs "$LANG_SPEC")
+else
+    args+=(--sub-langs best)
+fi
+
+case "$FMT" in
+    vtt) args+=(--sub-format vtt) ;;
+    txt) args+=(--sub-format srt) ;;
+    *)   args+=(--sub-format srt) ;;
+esac
+
+[ "$NO_PLAYLIST" -eq 1 ] && args+=(--no-playlist)
+
+args+=(-o "$OUT_TEMPLATE" "$URL")
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    yt_echo_cmd "${args[@]:1}"
+    exit 0
+fi
+
+# ── Execute ───────────────────────────────────────────────────
+set +e
+out="$(mktemp)"
+err_tmp="$(mktemp)"
+"${args[@]}" >"$out" 2>"$err_tmp"
+rc=$?
+set -e
+
+if [ "$rc" -ne 0 ]; then
+    # Unavailable-subtitle detection: exit!=0 AND stderr matches no-subs patterns
+    if grep -qiE 'no subtitles|no captions|unable to extract|subtitles not available' "$err_tmp"; then
+        rm -f "$out" "$err_tmp"
+        err "unavailable subtitles for this video (try --list-subs to check)"
+    fi
+    # Re-surface the real yt-dlp error otherwise
+    sed 's/^/    /' "$err_tmp" >&2
+    rm -f "$out" "$err_tmp"
+    exit "$rc"
+fi
+rm -f "$out" "$err_tmp"
+
+# ── Post-conversion for txt format ────────────────────────────
+if [ "$FMT" = "txt" ]; then
+    search_dir="."
+    [ -n "$OUT_DIR" ] && search_dir="$OUT_DIR"
+    while IFS= read -r -d '' f; do
+        case "$f" in
+            *.srt) convert_srt_to_txt "$f" ;;
+        esac
+    done < <(find "$search_dir" -maxdepth 1 -name '*.srt' -print0 2>/dev/null || true)
+fi

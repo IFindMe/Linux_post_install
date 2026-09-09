@@ -3,26 +3,34 @@
 Download audio and video from the web via `yt-dlp`, auto-classify URLs,
 sync your library to a USB stick, and keep YouTube channels incrementally
 up to date.
-Tools: `grab`, `mp3`, `mp4`, `sync`, `ytsync`.
+Tools: `yt mp3`, `yt mp4`, `yt grab`, `yt subtitles`, `sync`, `ytsync`.
+
+The YouTube download tools live under `pos media yt` (`mp3`, `mp4`, `grab`,
+`subtitles`, `ytsync`). The legacy standalone names `pos media mp3`, `pos media
+mp4` and `pos media grab` still work — they are thin forwarders to the `yt`
+forms.
 
 | Tool | What it does |
 |------|--------------|
-| `pos media grab` | Auto-classify URL and download as audio or video |
-| `pos media mp3` | Download audio, convert to MP3 |
-| `pos media mp4` | Download video with smart/interactive format selection |
+| `pos media yt mp3` | Download audio, convert to MP3 |
+| `pos media yt mp4` | Download video with smart/interactive format selection |
+| `pos media yt grab` | Auto-classify URL and download as audio or video |
+| `pos media yt subtitles` | Extract subtitles/captions from a URL |
+| `pos media yt ytsync` | Forwarder → `pos media ytsync` |
 | `pos media sync` | Incrementally copy `~/Music` onto a USB stick (mp3/mp4) |
 | `pos media ytsync` | Track YouTube channels/playlists and download only new videos into `~/Videos` |
 
-Requires `yt-dlp` and `ffmpeg` (`sudo apt install yt-dlp ffmpeg`); the tools
-fail with a clean error message instead of a raw `command not found` if either
-is missing.
+Requires `yt-dlp` and `ffmpeg` (`sudo apt install yt-dlp ffmpeg`) for `mp3`/
+`mp4`/`grab`; `subtitles` needs only `yt-dlp` (no ffmpeg). The tools fail with a
+clean error message instead of a raw `command not found` if a dependency is
+missing.
 
 ---
 
-## `pos media mp3` — audio as MP3
+## `pos media yt mp3` — audio as MP3
 
 ```bash
-pos media mp3 <url>
+pos media yt mp3 <url>        # or the legacy: pos media mp3 <url>
 ```
 
 Extracts and converts the audio track to MP3 in `~/Music/`. With `--by-artist`
@@ -30,8 +38,8 @@ files land in `~/Music/<artist>/<title>.mp3` (falls back to the uploader name
 when there's no artist tag), so a library stays organized.
 
 ```bash
-pos media mp3 https://youtube.com/watch?v=dQw4w9WgXcQ
-pos media mp3 --by-artist https://youtu.be/dQw4w9WgXcQ
+pos media yt mp3 https://youtube.com/watch?v=dQw4w9WgXcQ
+pos media yt mp3 --by-artist https://youtu.be/dQw4w9WgXcQ
 ```
 
 MP3s are encoded at best quality with title/artist/album/date/chapters embedded
@@ -48,15 +56,15 @@ cover art as a JPEG thumbnail. Existing files are never overwritten.
 
 **Recipe:** batch — loop over a list of URLs:
 ```bash
-while read -r url; do pos media mp3 --by-artist "$url"; done < urls.txt
+while read -r url; do pos media yt mp3 --by-artist "$url"; done < urls.txt
 ```
 
 ---
 
-## `pos media mp4` — video with smart format choice
+## `pos media yt mp4` — video with smart format choice
 
 ```bash
-pos media mp4 <url>
+pos media yt mp4 <url>        # or the legacy: pos media mp4 <url>
 ```
 
 Without a format flag, the available formats are shown as a **short curated
@@ -77,8 +85,8 @@ Non-interactive (scripting-friendly):
 | `--dry-run` | Print the yt-dlp command without running it |
 
 ```bash
-pos media mp4 --best https://youtube.com/watch?v=dQw4w9WgXcQ
-pos media mp4 -f 22 https://youtube.com/watch?v=dQw4w9WgXcQ
+pos media yt mp4 --best https://youtube.com/watch?v=dQw4w9WgXcQ
+pos media yt mp4 -f 22 https://youtube.com/watch?v=dQw4w9WgXcQ
 ```
 
 Videos merge to MP4 with metadata, chapters, subtitles (all languages) and the
@@ -90,13 +98,13 @@ video+audio and merges them.
 
 ---
 
-## `pos media grab` — auto-classify URL and download
+## `pos media yt grab` — auto-classify URL and download
 
 ```bash
-pos media grab <url>
+pos media yt grab <url>       # or the legacy: pos media grab <url>
 ```
 
-Smart URL classifier that routes to `pos media mp3` or `pos media mp4`
+Smart URL classifier that routes to `pos media yt mp3` or `pos media yt mp4`
 automatically based on the domain. Send a URL from your phone via Telegram and
 the bot downloads it to the right place without you thinking about it.
 
@@ -116,16 +124,16 @@ unrecognized domains is `video` — change it with `pos config grab` or set
 `GRAB_DEFAULT=audio` in `~/.config/linux_post_install/grab.env`.
 
 ```bash
-pos media grab https://music.youtube.com/watch?v=abc          # → ~/Music
-pos media grab https://youtube.com/watch?v=xyz                # → ~/Videos
-pos media grab --audio https://vimeo.com/123                  # force mp3
-pos media grab --worst https://youtu.be/abc                   # lowest quality
-pos media grab --dry-run https://soundcloud.com/artist/track  # preview only
+pos media yt grab https://music.youtube.com/watch?v=abc          # → ~/Music
+pos media yt grab https://youtube.com/watch?v=xyz                # → ~/Videos
+pos media yt grab --audio https://vimeo.com/123                  # force mp3
+pos media yt grab --worst https://youtu.be/abc                   # lowest quality
+pos media yt grab --dry-run https://soundcloud.com/artist/track  # preview only
 ```
 
-Non-interactive by design — `pos media mp4` receives `--best` by default so it
-never prompts for a format (critical for Telegram bot context where there's no
-TTY). Pass `--worst` if you want the smallest file.
+Non-interactive by design — `pos media yt mp4` receives `--best` by default so
+it never prompts for a format (critical for Telegram bot context where there's
+no TTY). Pass `--worst` if you want the smallest file.
 
 | Flag | Meaning |
 |------|---------|
@@ -137,6 +145,39 @@ TTY). Pass `--worst` if you want the smallest file.
 | `--no-playlist` | Download only the single video |
 | `--cookies <file>` | Netscape cookies.txt for age-gated content |
 | `--dry-run` | Print the command that would run, don't execute |
+
+---
+
+## `pos media yt subtitles` — extract subtitles/captions
+
+```bash
+pos media yt subtitles <url>
+```
+
+Downloads subtitles/captions from a URL via yt-dlp. Fetches manual captions and
+auto-generated captions by default (`--write-subs --write-auto-subs
+--sub-langs best` — "best" picks the manually-created track when available,
+otherwise the auto one). Output files land in the current directory as
+`<title>.<lang>.<ext>`.
+
+```bash
+pos media yt subtitles https://youtube.com/watch?v=dQw4w9WgXcQ
+pos media yt subtitles --lang en https://youtu.be/dQw4w9WgXcQ
+pos media yt subtitles --lang en,ar --format txt https://youtube.com/watch?v=dQw4w9WgXcQ
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--lang <list>` | Subtitle languages, comma-separated (default `best`) — `en,ar` is passed as ONE `--sub-langs` arg |
+| `--format <fmt>` | `srt` (default) / `vtt` / `txt` — `txt` converts srt→txt (timestamps, seq numbers and HTML tags stripped) |
+| `--auto-only` | Only auto-generated captions (no manual subs) |
+| `-o, --output <dir>` | Output directory (default: current directory) |
+| `--list-subs` | List available subtitles for the URL and exit (probe only, no download) |
+| `--no-playlist` | Download only the single video |
+| `--dry-run` | Print the yt-dlp command without running it |
+
+If a video has no available subtitles the tool reports
+`unavailable subtitles for this video (try --list-subs to check)`.
 
 ---
 

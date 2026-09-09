@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: media yt-ytsync — Incrementally sync YouTube channels/playlists into ~/Videos
+# -h|--help forwarded via exec below
+exec pos media ytsync "$@"

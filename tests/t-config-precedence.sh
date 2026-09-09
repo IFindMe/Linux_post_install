@@ -201,7 +201,7 @@ STUB
     for tool in pos-ai pos-ai-hf pos-ai-server pos-communication-matrix-listener \
                  pos-communication-matrix-sender pos-communication-scrcpy \
                  pos-communication-telegram-listener pos-communication-telegram-sender \
-                 pos-media-grab pos-network-download; do
+                 pos-media-yt-grab pos-network-download; do
         if grep -q "load_env_file" "$ROOT/bin/$tool"; then
             printf '  PASS  %s uses shared load_env_file\n' "$tool"
         else

@@ -55,3 +55,4 @@ silently.
 | `t-lint-gate.sh` | `make lint` green on the real tree; planted violations are caught and named |
 | `t-install-version.sh` | install.sh version gate: match→skip, mismatch→proceed, --force bypass, dry-run variant, flag write, numeric comparison |
 | `t-share-mountpoint.sh` | share-client `ask_mountpoint` UX: existing/new/declined/rejected paths, confirm gate, mkdir side effects, non-TTY stdin contract, static `n`→`t` guards |
+| `t-pos-media-yt.sh` | unified `pos media yt` suite: dispatcher + forwarder resolution, shared yt-lib helpers, yt-mp3/mp4/grab/subtitles flags, dry-run deps, `YT_OUT_DIR` seam, `GRAB_DEFAULT` config, negative controls (unsafe-URL no-expansion, `--lang en,ar` single arg, txt timestamp-stripping) |

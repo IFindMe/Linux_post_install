@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–210 |
-| ## 3. Installation Flow | 211–269 |
-| ## 4. The `pos` CLI System | 270–351 |
-| ## 5. Shared Library — `lib/common.sh` | 352–383 |
-| ## 6. Docker Compose / ScaleTail | 384–426 |
-| ## 7. Optional Apps (`apps/`) | 427–456 |
-| ## 8. Entertainment Module | 457–470 |
-| ## 9. Systemd Services | 471–482 |
-| ## 10. Configuration Files | 483–509 |
-| ## 11. Coding Conventions | 510–542 |
-| ## 12. Development Workflow | 543–595 |
-| ## 13. Key File Quick Reference | 596–671 |
-| ## 14. Common Tasks for Agents | 672–705 |
+| ## 2. Directory Structure | 44–216 |
+| ## 3. Installation Flow | 217–275 |
+| ## 4. The `pos` CLI System | 276–363 |
+| ## 5. Shared Library — `lib/common.sh` | 364–395 |
+| ## 6. Docker Compose / ScaleTail | 396–438 |
+| ## 7. Optional Apps (`apps/`) | 439–468 |
+| ## 8. Entertainment Module | 469–482 |
+| ## 9. Systemd Services | 483–494 |
+| ## 10. Configuration Files | 495–521 |
+| ## 11. Coding Conventions | 522–554 |
+| ## 12. Development Workflow | 555–607 |
+| ## 13. Key File Quick Reference | 608–690 |
+| ## 14. Common Tasks for Agents | 691–724 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -90,7 +90,13 @@ Linux_post_install/
 │   ├── pos-media-mp4                       # Download video as MP4 (smart/interactive format select)
 │   ├── pos-media-sync                      # Incremental Music → USB sync (mp3/mp4, add/update only)
 │   │   [deps: lsblk jq]
+│   ├── pos-media-yt-grab                   # Auto-download URL as audio or video (classify + route)
+│   ├── pos-media-yt-mp3                    # Download audio as MP3 (yt-dlp)
+│   ├── pos-media-yt-mp4                    # Download video as MP4 (smart/interactive format select)
+│   ├── pos-media-yt-subtitles              # Extract subtitles/captions from a URL (yt-dlp)
+│   ├── pos-media-yt-ytsync                 # Incrementally sync YouTube channels/playlists into ~/Videos
 │   ├── pos-media-ytsync                    # Incrementally sync YouTube channels/playlists into ~/Videos
+│   ├── pos-media-yt                        # YouTube download tools (mp3/mp4/grab/ytsync/subtitles)
 │   ├── pos-network-checkport               # Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view
 │   ├── pos-network-download                # aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits)
 │   │   [deps: aria2c jq curl]
@@ -311,7 +317,13 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | media | mp3 | `pos-media-mp3` | Download audio as MP3 (yt-dlp) |  |  |
 | media | mp4 | `pos-media-mp4` | Download video as MP4 (smart/interactive format select) |  |  |
 | media | sync | `pos-media-sync` | Incremental Music → USB sync (mp3/mp4, add/update only) | lsblk jq | pos media sync --mp3 → Sync only MP3 files to USB · pos media sync --mp4 --dry-run → Preview MP4 sync without copying |
+| media | yt-grab | `pos-media-yt-grab` | Auto-download URL as audio or video (classify + route) |  |  |
+| media | yt-mp3 | `pos-media-yt-mp3` | Download audio as MP3 (yt-dlp) |  |  |
+| media | yt-mp4 | `pos-media-yt-mp4` | Download video as MP4 (smart/interactive format select) |  |  |
+| media | yt-subtitles | `pos-media-yt-subtitles` | Extract subtitles/captions from a URL (yt-dlp) |  |  |
+| media | yt-ytsync | `pos-media-yt-ytsync` | Incrementally sync YouTube channels/playlists into ~/Videos |  |  |
 | media | ytsync | `pos-media-ytsync` | Incrementally sync YouTube channels/playlists into ~/Videos |  |  |
+| media | yt | `pos-media-yt` | YouTube download tools (mp3/mp4/grab/ytsync/subtitles) |  |  |
 | network | checkport | `pos-network-checkport` | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |  |  |
 | network | download | `pos-network-download` | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) | aria2c jq curl | pos network download add https://example.com/file.zip → Enqueue an HTTP download (auto-starts daemon) · pos network download status → Daemon health + global transfer stats · pos network download watch → Live progress view |
 | network | hotspot | `pos-network-hotspot` | Wi-Fi hotspot via create_ap + wihotspot-gui |  |  |
@@ -376,7 +388,7 @@ source "$(dirname "$0")/../lib/common.sh"
 
 **Scripts that do NOT source common.sh** (self-contained):
 <!-- GEN:START selfcontained -->
-`pos`, `pos-ai-gemini`, `pos-ai-llamacpp`, `pos-ai-openrouter`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
+`pos`, `pos-ai-gemini`, `pos-ai-llamacpp`, `pos-ai-openrouter`, `pos-communication-matrix-sender`, `pos-communication-telegram-listener`, `pos-communication-telegram-sender`, `pos-media-grab`, `pos-media-mp3`, `pos-media-mp4`, `pos-media-yt-ytsync`, `pos-network-checkport`, `pos-network-hotspot`, `pos-network-ip`, `pos-network-scan`, `pos-ssh-load-keys`, `pos-system-firewall`.
 <!-- GEN:END selfcontained -->
 
 ---
@@ -611,6 +623,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/share-lib.sh` | 318 | Domain layer for the share suite (usbsrv/smbclient record parsers, folder+mountpoint candidates, remote listings, service/firewall advisories; EOF-safe) + compat shims to `lib/menu-lib.sh` — used by all five `pos share *` tools |
 | `lib/menu-lib.sh` | 362 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default via raw-mode bracketed-paste-safe `menu_read_value`; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
 | `lib/registry.sh` | 199 | Shared query API for POS tool metadata headers (`# POS_*:`) — `reg_scan`/`reg_list`/`reg_lookup`/`reg_each`/config scope helpers; used by `pos-tree` and `gen-docs.sh` |
+| `lib/yt-lib.sh` | 50 | Shared YouTube helpers for `pos media yt *` (`yt_check_deps`, `yt_validate_url`, `yt_echo_cmd`, `classify_url`) — sourced by `yt-mp3`/`yt-mp4`/`yt-grab`/`yt-subtitles` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -639,11 +652,17 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-entertainment-enable` | 49 | Enable an auto-trigger for a plugin on a schedule |
 | `bin/pos-entertainment-send` | 95 | Run a public-API plugin and send its output via the configured notify platforms |
 | `bin/pos-entertainment-status` | 62 | Show enabled plugins and scheduler state |
-| `bin/pos-media-grab` | 219 | Auto-download URL as audio or video (classify + route) |
-| `bin/pos-media-mp3` | 86 | Download audio as MP3 (yt-dlp) |
-| `bin/pos-media-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
+| `bin/pos-media-grab` | 5 | Auto-download URL as audio or video (classify + route) |
+| `bin/pos-media-mp3` | 5 | Download audio as MP3 (yt-dlp) |
+| `bin/pos-media-mp4` | 5 | Download video as MP4 (smart/interactive format select) |
 | `bin/pos-media-sync` | 219 | Incremental Music → USB sync (mp3/mp4, add/update only) |
+| `bin/pos-media-yt-grab` | 208 | Auto-download URL as audio or video (classify + route) |
+| `bin/pos-media-yt-mp3` | 86 | Download audio as MP3 (yt-dlp) |
+| `bin/pos-media-yt-mp4` | 132 | Download video as MP4 (smart/interactive format select) |
+| `bin/pos-media-yt-subtitles` | 169 | Extract subtitles/captions from a URL (yt-dlp) |
+| `bin/pos-media-yt-ytsync` | 5 | Incrementally sync YouTube channels/playlists into ~/Videos |
 | `bin/pos-media-ytsync` | 1213 | Incrementally sync YouTube channels/playlists into ~/Videos |
+| `bin/pos-media-yt` | 33 | YouTube download tools (mp3/mp4/grab/ytsync/subtitles) |
 | `bin/pos-network-checkport` | 498 | Check TCP/UDP port reachability (nmap, or bash/nc fallback) + local interface view |
 | `bin/pos-network-download` | 1113 | aria2 RPC daemon + queue control (add/torrent/metalink, watch, limits) |
 | `bin/pos-network-hotspot` | 93 | Wi-Fi hotspot via create_ap + wihotspot-gui |
@@ -663,7 +682,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 314 | Dynamic bash completion |
+| `completions/pos.bash` | 316 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 
