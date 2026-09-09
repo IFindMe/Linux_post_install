@@ -36,10 +36,12 @@ Commands:
   (none)       Interactive editor for the /command → bash map
   --enable     Install + start the systemd user service (autostarts on login)
   --disable    Stop + disable + remove the service
-  --status     Show service state and the command map
+  --status     Show service state (single-instance lock) and the command map
   --sync-commands
                Push the mapped /commands to the bot's "/" menu (setMyCommands)
-  --run        Run the polling loop in the foreground (used by the service)
+  --run        Run the polling loop in the foreground (used by the service).
+               Single instance: only one --run may poll the bot token at a
+               time — a second --run exits immediately with an error.
   prefix [word [command...]]
                Manage the text-prefix map (telegram_prefixes.env): any
                non-command message '<prefix> <text>' runs the mapped command
@@ -337,24 +339,67 @@ prefix_map_show() {
     return 1
 }
 
-# Run a mapped command line and reply with its output: empty output → "OK",
-# non-zero exit → "exit <rc>" + output; quiet=1 suppresses the reply (for
-# '@quiet ' entries that self-notify). Used by the /command map (60s cap)
-# and the text-prefix bridge (120s cap for app calls).
+# ── async command execution ─────────────────────────────────────
+# Commands run in the background so the listener never blocks.  stdin is
+# /dev/null (prevents interactive hangs — FFmpeg reading 'q', scripts
+# waiting for prompts); stdout+stderr go to a temp file; output is collected
+# and replied asynchronously from the main loop.
+#
+# PID → metadata arrays (populated by run_and_reply, drained by reap_commands)
+declare -A _CMD_OUT _CMD_MSG _CMD_QUIET
+# Exit codes stored by the SIGCHLD handler (wait -n) so reap_commands can
+# retrieve them without calling blocking wait.
+declare -A _EXIT_CODES
+
+# run_and_reply <cmdline> <msg_id> [timeout] [quiet]
+# Starts the command in the background and returns immediately.  The main
+# loop calls reap_commands after each getUpdates cycle to collect output
+# and send replies.
 run_and_reply() {
-    local cmdline="$1" msg_id="$2" tmo="${3:-120}" quiet="${4:-0}" output rc
-    if output="$(timeout "$tmo" bash -c "$cmdline" 2>&1)"; then
-        rc=0
-    else
-        rc=$?
-    fi
-    [ "$quiet" -eq 1 ] && return
-    [ -n "$output" ] || output="OK"
-    if [ "$rc" -ne 0 ]; then
-        reply "$(printf 'exit %s\n%s' "$rc" "$output")" "$msg_id" "$rc"
-    else
-        reply "$output" "$msg_id"
-    fi
+    local cmdline="$1" msg_id="$2" tmo="${3:-120}" quiet="${4:-0}"
+    local out_file
+    out_file="$(mktemp /tmp/pos-cmd.XXXXXX)"
+    # stdin=/dev/null: prevents interactive hangs (FFmpeg 'q', read prompts).
+    # The child inherits nothing from the listener's own stdin.
+    timeout "$tmo" bash -c "$cmdline" </dev/null >"$out_file" 2>&1 &
+    local pid=$!
+    _CMD_OUT[$pid]="$out_file"
+    _CMD_MSG[$pid]="$msg_id"
+    _CMD_QUIET[$pid]="$quiet"
+}
+
+# reap_commands — called from the main loop after each getUpdates cycle.
+# Checks every tracked PID with kill -0 (non-blocking); when a process has
+# exited, reads its output file and sends the reply.  Never blocks the loop.
+reap_commands() {
+    local pid
+    for pid in "${!_CMD_OUT[@]}"; do
+        # Non-blocking: has the process exited?
+        if ! kill -0 "$pid" 2>/dev/null; then
+            # Retrieve exit code (SIGCHLD handler stores it; fallback to wait).
+            local rc="${_EXIT_CODES[$pid]:-}"
+            if [ -n "$rc" ]; then
+                unset _EXIT_CODES[$pid]
+            else
+                wait "$pid" 2>/dev/null; rc=$?
+            fi
+            local out_file="${_CMD_OUT[$pid]}"
+            local msg_id="${_CMD_MSG[$pid]}"
+            local quiet="${_CMD_QUIET[$pid]}"
+            local output=""
+            [ -s "$out_file" ] && output="$(cat "$out_file" 2>/dev/null)"
+            rm -f "$out_file"
+            if [ "$quiet" -ne 1 ]; then
+                [ -n "$output" ] || output="OK"
+                if [ "$rc" -ne 0 ]; then
+                    reply "$(printf 'exit %s\n%s' "$rc" "$output")" "$msg_id" "$rc"
+                else
+                    reply "$output" "$msg_id"
+                fi
+            fi
+            unset _CMD_OUT[$pid] _CMD_MSG[$pid] _CMD_QUIET[$pid]
+        fi
+    done
 }
 
 ui_run_command() {
@@ -521,8 +566,8 @@ disable_service() {
 }
 
 status() {
-    if systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; then
-        echo "listener:  running"
+    if lock_held; then
+        echo "listener:  running (single instance lock held)"
     else
         echo "listener:  not running"
     fi
@@ -750,7 +795,31 @@ handle_message() {
     run_and_reply "$value" "$msg_id" 60 "$quiet"
 }
 
+# ── single-instance guard ──────────────────────────────────────
+# flock(1) on a runtime lockfile — the kernel drops the lock when the process
+# dies, so there is no stale-lock/pidfile bookkeeping and the systemd
+# Restart=always unit restarts cleanly. Two getUpdates loops on one bot token
+# cause Telegram 409 conflicts and command stealing, so a second --run fails
+# closed instead of racing the active listener.
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/pos-telegram-listener.lock"
+
+acquire_lock() {
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || err "listener already running (single instance) — check: systemctl --user status pos-telegram-listener"
+}
+
+lock_held() {
+    # Non-blocking probe: acquiring then dropping the flock in a subshell
+    # succeeds only when nobody else holds it. Returns 0 when held.
+    if ( flock -n 9 ) 9>"$LOCK_FILE" 2>/dev/null; then
+        return 1
+    fi
+    return 0
+}
+
 run_daemon() {
+    command -v flock &>/dev/null || err "flock not found (install util-linux)"
+    acquire_lock
     command -v jq &>/dev/null || err "jq not found (install jq — in preinstall PACKAGES)"
     load_config
     [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "No bot token — run 'pos config telegram'"
@@ -764,7 +833,10 @@ run_daemon() {
 
     local offset=0
     log "listener running (chat ${TELEGRAM_CHAT_ID}, owner ${TELEGRAM_OWNER_ID:-unset}) — Ctrl+C to stop"
-    trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM INT
+    # SIGCHLD: reap finished children and store their exit codes so
+    # reap_commands can retrieve them without blocking.
+    trap 'local _p; while _p=$(wait -n 2>/dev/null); do _EXIT_CODES[$_p]=$?; done' CHLD
+    trap 'kill $(jobs -p) 2>/dev/null; rm -f /tmp/pos-cmd.* 2>/dev/null; wait 2>/dev/null; exit 0' TERM INT
     while true; do
         local resp n i
         resp="$(curl -fsS -m 45 "${API}/bot${TELEGRAM_BOT_TOKEN}/getUpdates" \
@@ -799,6 +871,8 @@ run_daemon() {
             fi
             handle_message "$text" "$msg_id" "$reply_text"
         done
+        # Collect output from finished background commands and send replies.
+        reap_commands
     done
 }
 

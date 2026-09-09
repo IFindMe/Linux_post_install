@@ -640,7 +640,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-matrix-listener` | 582 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 215 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 245 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| `bin/pos-communication-telegram-listener` | 815 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 889 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 212 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
