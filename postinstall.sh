@@ -156,6 +156,11 @@ if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
             warn "usb-automount feature not installed — skipping usb-automount.service (run ./install.sh --feature)"
             continue
         fi
+        # ssh-agent.service — gated on ssh-agent flag
+        if [ "$svc_name" = "ssh-agent.service" ] && ! flag_is_set ssh-agent; then
+            warn "ssh-agent feature not installed — skipping ssh-agent.service (run ./install.sh --feature)"
+            continue
+        fi
         run sudo systemctl enable --now "$svc_name" 2>/dev/null || \
             run sudo systemctl enable "$svc_name"
         log "service enabled: $svc_name"

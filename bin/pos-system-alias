@@ -1,0 +1,488 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: system alias — Manage persistent command aliases (wrapper scripts in ~/.local/bin/)
+# POS_SUBCMDS: create edit remove list show
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
+
+# ── Paths & constants ──────────────────────────────────────────
+ENV_FILE="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}/aliases.env"
+
+# ── Core helpers ───────────────────────────────────────────────
+
+# Load aliases from ENV_FILE into parallel arrays.
+# Loop vars use _a* prefix to avoid dynamic-scope collisions with callers.
+_alias_load() {
+    _ALIAS_NAMES=(); _ALIAS_COMMANDS=()
+    [ -f "$ENV_FILE" ] || return 0
+    local _an _ac
+    while IFS='|' read -r _an _ac; do
+        [[ "$_an" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${_an// /}" ]] && continue
+        _an="${_an## }"; _an="${_an%% }"
+        [[ "$_an" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]] || continue
+        _ac="${_ac## }"; _ac="${_ac%% }"
+        _ALIAS_NAMES+=("$_an")
+        _ALIAS_COMMANDS+=("$_ac")
+    done < <(grep -v '^[[:space:]]*#' "$ENV_FILE" | grep -v '^[[:space:]]*$' || true)
+}
+
+# Save parallel arrays back to ENV_FILE (atomic overwrite).
+_alias_save() {
+    mkdir -p "$(dirname "$ENV_FILE")"
+    {
+        printf '%s\n' "# System aliases — managed by pos system alias (do not hand-edit)"
+        printf '%s\n' "# Format: alias_name|command"
+        local i
+        for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
+            printf '%s|%s\n' "${_ALIAS_NAMES[$i]}" "${_ALIAS_COMMANDS[$i]}"
+        done
+    } >"$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+}
+
+# ── Wrapper scripts ────────────────────────────────────────────
+
+_wrapper_path() {
+    printf '%s/.local/bin/%s' "$HOME" "$1"
+}
+
+# Ownership test: line 2 must carry our generator marker.
+_alias_owned() {
+    [ -f "$1" ] && sed -n '2p' "$1" 2>/dev/null | grep -q 'Managed by pos system alias'
+}
+
+# Render one wrapper to stdout (args: name command).
+_wrapper_render() {
+    local name="$1" command="$2"
+    cat <<WRAPPER_EOF
+#!/usr/bin/env bash
+# Managed by pos system alias — regenerated automatically; hand-edits are overwritten.
+# Alias: ${name} | command: ${command}
+set -euo pipefail
+exec bash -c '${command} "\$@"' _ "\$@"
+WRAPPER_EOF
+}
+
+# Atomically install/refresh one wrapper. Skips when content matches.
+# Pre-commit validation: bash -n on the rendered file; failure keeps previous.
+_wrapper_install() {
+    local name="$1" command="$2" path tmp
+    path="$(_wrapper_path "$name")"
+    tmp="$(mktemp "${HOME}/.local/bin/.pos-alias.XXXXXX")"
+    _wrapper_render "$name" "$command" >"$tmp"
+    if cmp -s "$tmp" "$path" 2>/dev/null; then
+        rm -f "$tmp"
+        return 0
+    fi
+    if ! bash -n "$tmp" 2>/dev/null; then
+        warn "Wrapper for '$name' failed syntax check — keeping previous version" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$path"
+    chmod 755 "$path"
+}
+
+# rc 0 iff ~/.local/bin is on PATH.
+_alias_check_path() {
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Two-way reconciliation on every invocation:
+#   forward:  each ENV entry → render-diff-install
+#   reverse:  owned wrappers whose name is not in ENV → deleted
+#   plus: PATH guidance when owned wrappers exist but ~/.local/bin is absent
+_alias_sync() {
+    _alias_load
+    local bin_dir="${HOME}/.local/bin" i name f base match any=0
+    mkdir -p "$bin_dir"
+    for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
+        _wrapper_install "${_ALIAS_NAMES[$i]}" "${_ALIAS_COMMANDS[$i]}" || :
+    done
+    for f in "$bin_dir"/*; do
+        [ -f "$f" ] || continue
+        _alias_owned "$f" || continue
+        base="${f##*/}"
+        match=0
+        for name in ${_ALIAS_NAMES[@]+"${_ALIAS_NAMES[@]}"}; do
+            [ "$base" = "$name" ] && { match=1; break; }
+        done
+        [ "$match" -eq 1 ] || rm -f "$f"
+    done
+    if ! _alias_check_path; then
+        for f in "$bin_dir"/*; do
+            [ -f "$f" ] && _alias_owned "$f" && { any=1; break; }
+        done
+        if [ "$any" -eq 1 ]; then
+            warn "~/.local/bin is not on your PATH — alias scripts will not resolve by name."
+            warn "  Fix now:     export PATH=\"\$HOME/.local/bin:\$PATH\""
+            warn "  Persist it:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.profile"
+        fi
+    fi
+    return 0
+}
+
+_alias_find() {
+    local name="$1" i
+    for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
+        if [ "${_ALIAS_NAMES[$i]}" = "$name" ]; then
+            echo "$i"
+            return 0
+        fi
+    done
+    echo "-1"
+    return 0
+}
+
+_alias_name_valid() {
+    [[ "$1" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]
+}
+
+# Truncate a command string for display (inline pipes, redirects).
+_command_truncate() {
+    local s="$1" max="${2:-42}"
+    s="${s//$'\n'/ }"
+    if [ ${#s} -gt "$max" ]; then
+        printf '%s…' "${s:0:max}"
+    else
+        printf '%s' "$s"
+    fi
+}
+
+# ── Non-interactive output ─────────────────────────────────────
+
+_alias_table() {
+    local count=${#_ALIAS_NAMES[@]} i
+    [ "$count" -eq 0 ] && return 0
+    printf '  %-16s %s\n' "Name" "Command"
+    printf '  %-16s %s\n' "----------------" "----------------------------------------"
+    for ((i = 0; i < count; i++)); do
+        printf '  %-16s %s\n' "${_ALIAS_NAMES[$i]}" "$(_command_truncate "${_ALIAS_COMMANDS[$i]}" 60)"
+    done
+}
+
+_alias_list() {
+    printf 'Aliases (%d):\n' "${#_ALIAS_NAMES[@]}"
+    _alias_table
+}
+
+_alias_show() {
+    local idx
+    idx="$(_alias_find "$1")"
+    [ "$idx" = "-1" ] && err "Alias '$1' not found"
+    local name="${_ALIAS_NAMES[$idx]}" command="${_ALIAS_COMMANDS[$idx]}"
+    printf '  %-12s %s\n' "Alias:" "$name"
+    printf '  %-12s %s\n' "Command:" "$command"
+    if _alias_check_path; then
+        printf '  %-12s %s\n' "Wrapper:" "$(_wrapper_path "$name")"
+    else
+        printf '  %-12s %s\n' "Wrapper:" "(not installed — ~/.local/bin not on PATH)"
+    fi
+    printf '  %-12s %s\n' "Test:" "$name"
+}
+
+# ── Interactive: main menu ─────────────────────────────────────
+
+_alias_menu() {
+    menu_guard || return 1
+    while true; do
+        {
+            _alias_load
+            if [ ${#_ALIAS_NAMES[@]} -eq 0 ]; then
+                echo "${YELLOW}[!] No aliases defined yet — create one with option 1.${RESET}"
+            else
+                _alias_table
+                printf '  %d alias(es)\n' "${#_ALIAS_NAMES[@]}"
+            fi
+            echo >&2
+        } >&2
+        local choice
+        choice="$(menu_run "System Aliases" "Create new alias" "Edit existing alias" \
+            "Remove alias" "List aliases")" || return 0
+        case "$choice" in
+            1) _alias_create ;;
+            2) _alias_edit ;;
+            3) _alias_remove ;;
+            4) : ;;  # List aliases — the loop's pre-render IS the current table
+        esac
+    done
+}
+
+# ── Interactive: create ────────────────────────────────────────
+
+_alias_create() {
+    local preset_name="${1:-}"
+    section "Create System Alias" >&2
+
+    # Step 1: Alias name
+    local name="$preset_name"
+    while true; do
+        if [ -z "$name" ]; then
+            step 1 2 "Alias Name" >&2
+            name="$(menu_ask_value "Alias name" "")" || return 0
+        fi
+        [ -z "$name" ] && { warn "Alias name cannot be empty" >&2; name=""; continue; }
+        if ! _alias_name_valid "$name"; then
+            warn "Invalid name '$name' — use letters, digits, hyphens, underscores (start with a letter)" >&2
+            name=""; continue
+        fi
+        _alias_load
+        local existing
+        existing="$(_alias_find "$name")"
+        if [ "$existing" != "-1" ]; then
+            warn "Alias '$name' already exists — use 'pos system alias edit $name' instead" >&2
+            [ -n "$preset_name" ] && return 1
+            name=""; continue
+        fi
+        # Collision: wrapper exists without our marker → refuse
+        local wpath
+        wpath="$(_wrapper_path "$name")"
+        if [ -e "$wpath" ]; then
+            _alias_owned "$wpath" || err "File '~/.local/bin/$name' already exists and was not created by pos system alias — pick another name"
+        fi
+        # Collision: name resolves to another binary on PATH → refuse
+        if command -v "$name" >/dev/null 2>&1; then
+            err "'$name' already exists on PATH as $(command -v "$name") — pick another name"
+        fi
+        break
+    done
+
+    # Step 2: Command
+    local command=""
+    while true; do
+        step 2 2 "Command" >&2
+        command="$(menu_ask_value "Command to execute" "")" || return 0
+        [ -z "$command" ] && { warn "Command cannot be empty" >&2; continue; }
+        [[ "$command" == *'|'* ]] || break
+        warn "Command must not contain '|' characters" >&2
+        command=""
+    done
+
+    # Confirmation
+    {
+        echo "────────────────────────────────────────────"
+        printf '  Create alias '\''%s'\''?\n' "$name"
+        printf '    Command: %s\n' "$command"
+        echo "────────────────────────────────────────────"
+    } >&2
+    if ! confirm "Create alias '$name'?" y; then
+        log "Aborted." >&2
+        return 0
+    fi
+
+    _alias_load
+    _ALIAS_NAMES+=("$name")
+    _ALIAS_COMMANDS+=("$command")
+    _alias_save
+    _alias_sync
+    log "Alias '$name' created." >&2
+    log "Test it: $name" >&2
+    log "Available immediately: $(_wrapper_path "$name")" >&2
+}
+
+# ── Interactive: edit ──────────────────────────────────────────
+
+_alias_edit() {
+    local preset_name="${1:-}"
+    _alias_load
+    if [ ${#_ALIAS_NAMES[@]} -eq 0 ]; then
+        warn "No aliases to edit — create one first" >&2
+        return 0
+    fi
+
+    local name="$preset_name"
+    if [ -z "$name" ]; then
+        section "Edit System Alias" >&2
+        local display_items=() i
+        for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
+            local c="${_ALIAS_COMMANDS[$i]}"
+            if [ ${#c} -gt 30 ]; then
+                c="${c:0:30}…"
+            fi
+            display_items+=("${_ALIAS_NAMES[$i]} → ${c}")
+        done
+        local picked
+        picked="$(menu_pick "Pick alias to edit" "${display_items[@]}")" || return 0
+        name="${_ALIAS_NAMES[$((picked - 1))]}"
+    fi
+
+    local idx
+    idx="$(_alias_find "$name")"
+    if [ "$idx" = "-1" ]; then
+        err "Alias '$name' not found"
+    fi
+
+    # Show current values
+    {
+        echo "  Current values for '$name':"
+        printf '    Command: %s\n' "${_ALIAS_COMMANDS[$idx]}"
+        echo >&2
+    } >&2
+
+    local new_command="${_ALIAS_COMMANDS[$idx]}"
+    local changed=0
+
+    # Edit command
+    step 1 1 "Command" >&2
+    local default_display="${_ALIAS_COMMANDS[$idx]}"
+    [ ${#default_display} -gt 60 ] && default_display="${default_display:0:60}…"
+    local tmp_command
+    tmp_command="$(menu_ask_value "Command to execute" "$default_display")" || return 0
+    if [ -n "$tmp_command" ]; then
+        if [[ "$tmp_command" == *'|'* ]]; then
+            warn "Command must not contain '|' characters" >&2
+            return 0
+        fi
+        if [ "$tmp_command" != "${_ALIAS_COMMANDS[$idx]}" ]; then
+            new_command="$tmp_command"
+            changed=1
+        fi
+    fi
+
+    # No changes?
+    if [ "$changed" -eq 0 ]; then
+        log "No changes — nothing to save." >&2
+        return 0
+    fi
+
+    # Show diff summary
+    {
+        echo "────────────────────────────────────────────"
+        printf '  Save changes to '\''%s'\''?\n' "$name"
+        local tag_c
+        [ "$new_command" = "${_ALIAS_COMMANDS[$idx]}" ] && tag_c="(unchanged)" || tag_c="(changed)"
+        printf '    Command: %s %s\n' "$new_command" "$tag_c"
+        echo "────────────────────────────────────────────"
+    } >&2
+    if ! confirm "Save changes to '$name'?" y; then
+        log "Discarded." >&2
+        return 0
+    fi
+
+    _alias_load
+    _ALIAS_COMMANDS[$idx]="$new_command"
+    _alias_save
+    _alias_sync
+    log "Alias '$name' updated — the change is live on next invocation." >&2
+}
+
+# ── Interactive: remove ────────────────────────────────────────
+
+_alias_remove() {
+    local preset_name="${1:-}"
+    _alias_load
+    if [ ${#_ALIAS_NAMES[@]} -eq 0 ]; then
+        warn "No aliases to remove" >&2
+        return 0
+    fi
+
+    local name="$preset_name"
+    if [ -z "$name" ]; then
+        section "Remove System Alias" >&2
+        local display_items=() i
+        for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
+            local c="${_ALIAS_COMMANDS[$i]}"
+            if [ ${#c} -gt 30 ]; then
+                c="${c:0:30}…"
+            fi
+            display_items+=("${_ALIAS_NAMES[$i]} → ${c}")
+        done
+        local picked
+        picked="$(menu_pick "Pick alias to remove" "${display_items[@]}")" || return 0
+        name="${_ALIAS_NAMES[$((picked - 1))]}"
+    fi
+
+    local idx
+    idx="$(_alias_find "$name")"
+    if [ "$idx" = "-1" ]; then
+        err "Alias '$name' not found"
+    fi
+
+    # Show alias detail
+    {
+        echo "  Alias:    $name"
+        printf '  Command:  %s\n' "${_ALIAS_COMMANDS[$idx]}"
+        echo >&2
+    } >&2
+
+    if ! confirm "Remove alias '$name'? This cannot be undone." n; then
+        log "Cancelled." >&2
+        return 0
+    fi
+
+    _alias_load
+    local new_names=() new_commands=() i
+    for ((i = 0; i < ${#_ALIAS_NAMES[@]}; i++)); do
+        if [ "${_ALIAS_NAMES[$i]}" != "$name" ]; then
+            new_names+=("${_ALIAS_NAMES[$i]}")
+            new_commands+=("${_ALIAS_COMMANDS[$i]}")
+        fi
+    done
+    _ALIAS_NAMES=("${new_names[@]+"${new_names[@]}"}")
+    _ALIAS_COMMANDS=("${new_commands[@]+"${new_commands[@]}"}")
+    _alias_save
+    _alias_sync
+    log "Alias '$name' removed — script deleted from $(_wrapper_path "$name")." >&2
+    log "If the name still autocompletes stale in this shell, run: hash -r" >&2
+}
+
+# ── Usage ──────────────────────────────────────────────────────
+
+usage() {
+    cat <<'EOF'
+Usage: pos system alias [subcommand] [args]
+
+Manage persistent command aliases — create, edit, remove, list, and show
+named aliases. Each alias maps a name to a shell command, materialized as
+an executable wrapper script in ~/.local/bin/.
+
+Subcommands:
+  (no args)         Interactive menu
+  create [name]     Create a new alias (interactive prompts)
+  edit [name]       Edit an existing alias (interactive, Enter = keep)
+  remove [name]     Remove an alias (with confirmation)
+  list              List all aliases (non-interactive, machine-readable)
+  show <name>       Show one alias's details
+
+Activation: every alias is materialized as an executable script at
+~/.local/bin/<name>, synced automatically on every invocation. Changes are
+live on the next invocation.
+
+Options:
+  -h|--help         Show this help.
+
+Examples:
+  pos system alias                     # interactive menu
+  pos system alias list                # show all aliases
+  pos system alias create              # interactive create
+  pos system alias create restart-dns   # create 'restart-dns' alias
+  pos system alias edit restart-dns     # edit the 'restart-dns' alias
+  pos system alias remove restart-dns   # remove 'restart-dns' (with confirm)
+  pos system alias show restart-dns     # show alias details
+EOF
+    exit 0
+}
+
+# ── Main dispatch ──────────────────────────────────────────────
+# Every subcommand syncs first: artifacts always equal ENV truth before any
+# subcommand logic runs.
+
+case "${1:-}" in
+    -h|--help) usage ;;
+    create)  shift; _alias_sync; _alias_create "${1:-}" ;;
+    edit)    shift; _alias_sync; _alias_edit "${1:-}" ;;
+    remove)  shift; _alias_sync; _alias_remove "${1:-}" ;;
+    list)    _alias_sync; _alias_list ;;
+    show)
+        [ -n "${2:-}" ] || err "Usage: pos system alias show <name>"
+        _alias_sync
+        _alias_show "$2"
+        ;;
+    "") _alias_sync; _alias_menu ;;
+    *)  err "Unknown subcommand '$1' (use -h for help)" ;;
+esac

@@ -79,7 +79,7 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-**Configuration:** socket at `/run/ssh-agent/socket` (world-readable/writable). `~/.bashrc` (set by `postinstall.sh`) exports `SSH_AUTH_SOCK` to it. Not gated on any feature flag.
+**Configuration:** socket at `/run/ssh-agent/socket` (world-readable/writable). `~/.bashrc` (set by `postinstall.sh`) exports `SSH_AUTH_SOCK` to it. Gated on the `ssh-agent` feature flag — only enabled when the flag is set (`./install.sh --feature` or `flag-set ssh-agent`).
 
 ---
 
@@ -124,7 +124,7 @@ SIGTERM. A oneshot job that happens to be running at shutdown gets SIGKILLed
 
 ## Feature-flag gating
 
-The systemd loop in `postinstall.sh` special-cases two units:
+The systemd loop in `postinstall.sh` special-cases three units:
 
 ```bash
 if [ "$svc_name" = "autostart.service" ] && ! flag_is_set autostart; then
@@ -135,10 +135,15 @@ if [ "$svc_name" = "usb-automount.service" ] && ! flag_is_set usb-automount; the
     warn "usb-automount feature not installed — skipping usb-automount.service (run ./install.sh --feature)"
     continue
 fi
+if [ "$svc_name" = "ssh-agent.service" ] && ! flag_is_set ssh-agent; then
+    warn "ssh-agent feature not installed — skipping ssh-agent.service (run ./install.sh --feature)"
+    continue
+fi
 ```
 
 - `autostart.service` is **enabled** only when the `autostart` feature flag is set (`./install.sh --feature` or `flag-set autostart`). See [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libflagssh--feature-flags).
 - `usb-automount.service` is **enabled** only when the `usb-automount` feature flag is set — same mechanism.
+- `ssh-agent.service` is **enabled** only when the `ssh-agent` feature flag is set — same mechanism.
 
 ---
 
