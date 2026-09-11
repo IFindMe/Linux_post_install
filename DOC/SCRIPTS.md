@@ -45,7 +45,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` + `lib/registry.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` + `lib/registry.sh` + `lib/yt-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |
@@ -242,6 +242,13 @@ Sourced by `bin/pos-entertainment-send|config|enable|disable|status` (after `lib
 **Purpose:** the one query API over the tools' `# POS_*:` metadata headers, so consumers source it instead of re-implementing sed/grep header scans. `reg_scan [dir]` reads every executable `pos-*` file once — sorted under `LC_ALL=C`, and cheap enough to call lazily (plain dispatch paths skip it entirely); each tool's key is its filename after `pos-` with the category split off at the first dash (category-less tools carry an empty category). The populated stores serve `reg_list`, `reg_categories`, `reg_tools_in` and `reg_lookup <tool> <field>` with fields `cat|desc|flags|subcmds|deps|examples` (`deps`/`examples` come from the optional `# POS_DEPS:` / `# POS_EXAMPLES:` headers); the multi-line `# POS_CONFIG:` registry gets its own helpers (`reg_config_scopes`, `reg_config_keys`, `reg_config_envfile`); `reg_each <callback>` iterates every tool calling `cb(category, tool_key, description)`; `reg_tool_exists` is the membership probe. Like `lib/config-ui.sh` it defines guarded `log`/`warn`/`err` fallbacks so it sources cleanly without `lib/common.sh`; no shebang and never executed (installed 644).
 
 Sourced by `bin/pos-tree` (tree rendering incl. the `[deps: …]` annotations) and by `bin/pos` `_pos_category_help()` for `pos <category> --help` (lazy load there, so plain dispatch never pays the scan cost). `scripts/gen-docs.sh` predates the registry and keeps parsing the same headers independently for its generated blocks; new consumers should prefer the registry.
+
+---
+
+## lib/yt-lib.sh — shared YouTube helpers
+
+**File:** `lib/yt-lib.sh` (installed to `/usr/local/bin/yt-lib.sh`)
+**Purpose:** shared helpers for yt-dlp-based media tools (`pos media yt *`). Provides `yt_check_deps` (dependency validation for yt-dlp/ffmpeg), `yt_validate_url` (return-1 URL checker, never exits — callers prefix errors), `yt_echo_cmd` (dry-run command display), and `classify_url` (URL type classification). Sourced by `bin/pos-media-yt-mp3`, `bin/pos-media-yt-mp4`, `bin/pos-media-yt-grab`, and `bin/pos-media-yt-subtitles` via the standard fallback chain.
 
 ---
 

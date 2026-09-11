@@ -231,7 +231,7 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--force|--skip <phase
 │   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
 │   └─ Copies lib/*.sh (common, flags, notify, registry, entertainment-lib,
 │      scheduler-lib, config-ui, user-timers-lib, entertainment-plugin-lib,
-│      usb-lib, share-lib, menu-lib) → /usr/local/bin/ (chmod 644)
+│      usb-lib, share-lib, menu-lib, yt-lib) → /usr/local/bin/ (chmod 644)
 │   └─ Copies x64_bin/* → /usr/local/bin/ on x86_64 (arm64_bin/ on aarch64)
 │   └─ [if --feature] Copies features/* → /usr/local/bin/ (asks before overwriting),
 │                      then sets the matching feature flag
