@@ -28,6 +28,9 @@ _pos_commands() {
 # ── Category list (sorted, filename-derived) ─────────────────────
 # Nested sub-tools (pos-<cat>-<a>-<b> where pos-<cat>-<a> exists) are
 # omitted from the cheat-sheet line — they are shown under their parent tool.
+# Category-less tools (pos-bank, pos-config, pos-tree) are emitted as their
+# own line with an empty subcommand column; a name already present as a
+# category (pos-ai vs the ai category built from pos-ai-*) is NOT duplicated.
 _pos_category_list() {
     local -A cats=()
     local cmd cat f
@@ -35,7 +38,10 @@ _pos_category_list() {
         [ -x "$f" ] || continue
         cmd="${f##*/pos-}"
         cat="${cmd%%-*}"
-        [ "$cat" = "$cmd" ] && continue
+        if [ "$cat" = "$cmd" ]; then
+            cats["$cmd"]="${cats[$cmd]:-}"
+            continue
+        fi
         cats["$cat"]+="${cmd#*-} "
     done
     local c subs joined s s2 top=() is_nested
@@ -207,6 +213,8 @@ EXAMPLES
   pos config                              Pick a config scope to edit
 
   pos tree                                Show the command tree (categories + subcommands)
+
+  pos bank run <name>                     Run a saved command from the bank
 
   pos docker vbox create lab1              Create disposable Docker VM
   pos docker vbox create lab1 --dir .      Create VM using current directory

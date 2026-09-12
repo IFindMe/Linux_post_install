@@ -147,7 +147,8 @@ cmd_show() {
 
 # ── cmd_run ──────────────────────────────────────────────────────
 cmd_run() {
-    local name="" -a cli_params=()
+    local name=""
+    local -a cli_params=()
     if [ $# -eq 0 ]; then
         name="$(_pick_command)" || return 0
     else

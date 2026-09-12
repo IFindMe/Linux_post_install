@@ -334,4 +334,29 @@ BANK
     test_run env BANK_FILE="$sandbox/b11.bank.env" "$pos_bank" add "1bad" "desc" "cmd"
     check_not_contains "pos bank add invalid name exits non-zero" "0" "$TR_RC"
     check_contains "pos bank add invalid name message" "Invalid name" "$TR_OUT"
+
+    # B12: pos bank run — executes a saved command (no params)
+    # Negative control: the old `local name="" -a cli_params=()` declaration
+    # crashed at line 150 before any output (rc != 0, no "Running:" line).
+    : > "$sandbox/b12.bank.env"
+    test_run env BANK_FILE="$sandbox/b12.bank.env" "$pos_bank" add "greet" "Greet" "echo bank-run-ok"
+    check_rc "pos bank add for run exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b12.bank.env" "$pos_bank" run "greet"
+    check_rc "pos bank run executes saved command" 0 "$TR_RC"
+    check_contains "pos bank run logs the command" "Running: echo bank-run-ok" "$TR_OUT"
+    check_contains "pos bank run executes output" "bank-run-ok" "$TR_OUT"
+
+    # B13: pos bank run missing command — fails
+    test_run env BANK_FILE="$sandbox/b12.bank.env" "$pos_bank" run "ghost"
+    check_not_contains "pos bank run missing exits non-zero" "0" "$TR_RC"
+    check_contains "pos bank run missing message" "Command not found" "$TR_OUT"
+
+    # B14: pos bank run with params — CLI key=val substitution, no interactive prompt
+    : > "$sandbox/b14.bank.env"
+    test_run env BANK_FILE="$sandbox/b14.bank.env" "$pos_bank" add "echo-param" "Echo param" "echo hi {who}"
+    check_rc "pos bank add param exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b14.bank.env" "$pos_bank" run "echo-param" "who=there"
+    check_rc "pos bank run with params exits 0" 0 "$TR_RC"
+    check_contains "pos bank run substitutes param" 'Running: echo hi "there"' "$TR_OUT"
+    check_contains "pos bank run executes substituted command" "hi there" "$TR_OUT"
 }

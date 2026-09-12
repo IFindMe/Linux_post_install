@@ -635,7 +635,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `features/autostart.sh` | 50 | Boot-time feature (moved from `bin/`, flag-gated service) |
 | `features/usb-automount.sh` | 138 | USB automount feature (udev rule + flag-gated service) |
 <!-- GEN:START filetable -->
-| `bin/pos` | 302 | CLI dispatcher with smart arg matching + logging + category help |
+| `bin/pos` | 310 | CLI dispatcher with smart arg matching + logging + category help |
 | `bin/pos-ai-alias` | 760 | manage AI agent aliases |
 | `bin/pos-ai-gemini` | 7 | Forward to pos ai --provider gemini (backward compat) |
 | `bin/pos-ai-hf` | 993 | Download AI models from Hugging Face (search, download, manage) |
@@ -686,7 +686,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 518 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
-| `bin/pos-bank` | 313 | Persistent command bank for saving and running shell commands |
+| `bin/pos-bank` | 314 | Persistent command bank for saving and running shell commands |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 318 | Dynamic bash completion |
