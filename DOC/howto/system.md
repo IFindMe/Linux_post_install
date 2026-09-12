@@ -1,131 +1,14 @@
 # How-To: `pos system`
 
-Host care: encrypted backups, firewall, health dashboard, persistent aliases, and uninstall. Tools:
-`alias`, `backup`, `firewall`, `health`, `uninstall`.
+Host care: encrypted backups, firewall, health dashboard, and uninstall. Tools:
+`backup`, `firewall`, `health`, `uninstall`.
 
 | Tool | What it does |
 |------|--------------|
-| `pos system alias` | Manage persistent command aliases (wrapper scripts in `~/.local/bin/`) |
 | `pos system health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker) |
 | `pos system backup` | gpg-encrypted (AES-256) folder snapshots |
 | `pos system firewall` | Interactive UFW ("UFW POWER") management |
 | `pos system uninstall` | Safe, interactive uninstaller for the pos toolkit |
-
----
-
-## `pos system alias` — persistent command aliases
-
-Create named shortcuts for shell commands. Each alias becomes an executable
-wrapper script in `~/.local/bin/` that runs the mapped command with any
-arguments forwarded.
-
-### Quick start
-
-```bash
-pos system alias                     # interactive menu
-pos system alias list                # show all aliases
-pos system alias create              # interactive create wizard
-pos system alias show restart-dns    # show one alias's details
-```
-
-### Examples
-
-**Create an alias:**
-
-```bash
-pos system alias create restart-dns
-# Step 1: Alias name → restart-dns
-# Step 2: Command → sudo systemctl restart systemd-resolved
-# Confirm → [y]
-# Alias 'restart-dns' created.
-# Test it: restart-dns
-```
-
-**Create more aliases:**
-
-```bash
-pos system alias create exit-google
-# Command → pkill -f chrome
-
-pos system alias create update-all
-# Command → sudo apt update && sudo apt upgrade -y
-
-pos system alias create my-ip
-# Command → curl -s ifconfig.me
-```
-
-**Use them directly** (no `pos` needed — just the alias name):
-
-```bash
-restart-dns          # runs: sudo systemctl restart systemd-resolved
-exit-google          # runs: pkill -f chrome
-update-all           # runs: sudo apt update && sudo apt upgrade -y
-my-ip                # runs: curl -s ifconfig.me
-restart-dns 1.1.1.1  # arguments are forwarded to the command
-```
-
-**Edit an alias:**
-
-```bash
-pos system alias edit restart-dns
-# Shows current command, prompts for new value (Enter = keep current)
-```
-
-**Remove an alias:**
-
-```bash
-pos system alias remove restart-dns
-# Shows details, asks for confirmation (default: no)
-```
-
-**List all aliases:**
-
-```bash
-pos system alias list
-#   Name             Command
-#   ---------------- ----------------------------------------
-#   restart-dns      sudo systemctl restart systemd-resolved
-#   exit-google      pkill -f chrome
-```
-
-### How it works
-
-- Aliases are stored in `~/.config/linux_post_install/aliases.env`
-  (pipe-delimited: `name|command`, chmod 600).
-- Each alias is materialized as an executable wrapper at
-  `~/.local/bin/<name>` (chmod 755).
-- Wrappers are synced automatically on every `pos system alias` invocation
-  — edits are live on the next run.
-- Name validation: must start with a letter, then letters/digits/hyphens/
-  underscores. Collisions with existing files or PATH binaries are refused.
-
-### PATH requirement
-
-`~/.local/bin` must be on your `PATH` for alias scripts to resolve by name.
-If it isn't, you'll see a warning with a fix:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-# Persist it:
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
-```
-
-### Recipes
-
-- **DNS restart shortcut:** `pos system alias create restart-dns`
-  with command `sudo systemctl restart systemd-resolved`.
-- **Quick app launcher:** `pos system alias create open-code`
-  with command `code ~/projects`.
-- **Custom backup alias:** `pos system alias create snap-docs`
-  with command `pos system backup ~/Documents`.
-
-### Troubleshooting
-
-- `Alias 'X' already exists` → use `pos system alias edit X` instead.
-- `File '~/.local/bin/X' already exists` → pick a different name (pos
-  won't overwrite non-pos-owned files).
-- `~/.local/bin is not on your PATH` → add it to `~/.profile` (see above).
-- Alias name autocompletes stale after removal → run `hash -r`.
 
 ---
 
@@ -357,4 +240,3 @@ confirmation. The git repo is **never** removed — delete it manually if desire
 - Reference: [DOC/POS.md → system](../POS.md)
 - Notify platform config: [communication.md](communication.md)
 - Backup roots shared with health: `system.env` ([DOC/POS.md](../POS.md))
-- Alias storage: `~/.config/linux_post_install/aliases.env` ([DOC/POS.md → pos system alias](../POS.md#pos-system-alias-in-detail))

@@ -296,22 +296,33 @@ reported as "N videos require sign-in — skipped" (escape hatch:
 | `pos system health` | `bin/pos-system-health` | Host health dashboard: disk per mount, RAM/swap, failed systemd units, backup age, fail2ban, docker containers. Exits 1 if any check FAILs | Console-only reporter — health itself never sends notifications; forward the output with a wrapper (e.g. the Telegram/Matrix listener map `/status=pos system health`) or schedule it via `pos system schedule` with a `NOTIFY` policy. `HEALTH_BACKUP_MAX_AGE_DAYS` (default 2) and `BACKUP_SERVICE_ROOTS` come from `~/.config/linux_post_install/system.env`; `--help` shows the effective values |
 | `pos system schedule <cmd>` | `bin/pos-system-schedule` | Scheduled jobs — run a command on a timer, notify (or stay silent): `run [name\|all]`, `list`, `config`, `enable [name\|all]`, `disable [name\|all]`, `status`, `migrate`. Each job is a file in `~/.config/linux_post_install/schedule.d/<name>.env` with `INTERVAL` (`5m…59m`, `1h…23h`, `hourly`, `daily`, `weekly`, `OnCalendar=…`), `NOTIFY` policy, optional `MSG`, `RULE` (threshold only), and `COMMAND` = the literal rest of the line (pipes/quotes/`sudo` fine). Policies: `always` (full output every run), `onchange` (send when output differs from the last run; first run always sends), `onerror` (non-zero exit or empty output), `threshold` (first numeric output vs `RULE`, alert on false→true + one recovery — the old event-trigger behavior), `never` (side-effect jobs, no notify) | One systemd **user** timer pair per job (`pos-schedule-<name>.timer` + oneshot `.service`, `Persistent=true`), reconciled on `enable`/`disable`; the legacy single `pos-event-trigger` timer is auto-removed. `migrate` converts a pre-existing `event.env` rule set into `schedule.d/rule-N.env` threshold jobs. `config` is an interactive editor (add/edit/remove/enable/disable, validates interval + threshold); alerts via `lib/notify.sh`; `--dry-run` previews runs/writes/sends; jobs are arbitrary shell commands (chmod 600, same trust model as the Telegram map); starter jobs in `config/schedule.d/` auto-installed no-clobber by postinstall. Bare invocation on a terminal (or the `menu` subcommand) opens an interactive hub over these verbs (list, timer status, run-now, enable, disable, config editor) — a menu run-now asks y/N first and goes through the same `run <name>` path the systemd timers use |
 | `pos system uninstall` | `bin/pos-system-uninstall` | Safe, interactive uninstaller for the pos toolkit — scans and removes binaries, services, shell integration, config, and data in three tiers | Tier 1 (always): binaries in `/usr/local/bin/` (pos, pos-*, libs, ai-providers, entertainment plugins, prebuilt, features), systemd services (disable+remove) including runtime-created `~/.config/systemd/user/pos-*` user units, ScaleTail templates + feature-flag store under `/usr/local/share/linux_post_install/`, shell integration in `~/.bashrc` (PATH, completion, pos-ai-hook source), completion file. Tier 2 (`--config`): `~/.config/linux_post_install/` (.env files, schedule.d/, authorized_keys, rclone.conf). Tier 3 (`--data`): `~/.local/share/linux_post_install/` (ai sessions, logs, captured output). Flags: `--yes` (skip prompts, tier 1 only), `--config` (include tier 2), `--data` (include tier 3). Combine all three for nuclear removal. Git repo is never removed |
-| `pos system alias` | `bin/pos-system-alias` | Manage persistent command aliases — create, edit, remove, list, and show named aliases that map names to shell commands via executable wrapper scripts in `~/.local/bin/` | Aliases stored in `~/.config/linux_post_install/aliases.env` (pipe-delimited: `name\|command`). Each alias materializes as a wrapper script at `~/.local/bin/<name>` (chmod 755) that runs the mapped command with any arguments forwarded. Wrapper scripts are synced automatically on every invocation; changes are live immediately. Name validation: must start with a letter, then letters/digits/hyphens/underscores. Refuses name collisions with existing files on `~/.local/bin/` (unless pos-owned) and existing binaries on `PATH`. Requires `~/.local/bin` on `PATH` — a warning with a copy-paste fix appears when it isn't |
+| `pos system bank` | `bin/pos-system-bank` | Persistent command bank for saving and running shell commands — list, add, show, run, edit, remove | Commands stored in `~/.config/linux_post_install/bank.env` (pipe-delimited: `name\|description\|command`, chmod 600, managed by the tool). Parameterized `{param}` templates are substituted at run time. Interactive menu on a TTY with no args. `BANK_FILE` env seam overrides the path |
 
 A scheduled job is the recommended way to run the health dashboard on a timer: a `daily` job with `COMMAND=pos system health` and `NOTIFY=always` sends the dashboard output as the alert — no separate systemd unit needed (the old `pos-health.{service,timer}` units are gone; a legacy install may still have them failed/leftover — disable and remove them).
 
-`pos system alias` in detail:
+#### system bank
 
-| Command | Behavior |
-|---------|----------|
-| `pos system alias` | Interactive menu: create / edit / remove / list aliases; shows the current alias table between picks |
-| `pos system alias create [name]` | Interactive 2-step wizard: alias name (must start with a letter, then letters/digits/-/_; unique — collisions with existing files on `~/.local/bin/` or binaries on `PATH` are refused), command (must not contain `\|`); confirms before saving |
-| `pos system alias edit [name]` | Edits an existing alias (pick from list or pass the name); shows current values, prompts for the new command (Enter keeps current); saves only if changed |
-| `pos system alias remove [name]` | Removes an alias (pick from list or pass the name); confirmation defaults to **no** — removal deletes the wrapper script and cannot be undone |
-| `pos system alias list` | Non-interactive: prints all aliases as a Name/Command table (commands truncated at 60 chars) |
-| `pos system alias show <name>` | Prints one alias's details: name, command, wrapper path, and how to test it |
+**File:** `bin/pos-system-bank`
 
-Alias storage & activation: records live in `~/.config/linux_post_install/aliases.env` — one `name\|command` line per alias, chmod 600, managed by the tool (do not hand-edit). **Activation needs no shell sourcing**: every `pos system alias` invocation syncs the ENV file against executable wrapper scripts at `~/.local/bin/<name>` (chmod 755) — missing or changed wrappers are atomically rewritten, wrappers pos owns but the ENV no longer lists are deleted, and hand-edited wrappers are healed. Wrapper scripts re-read their bytes on every run, so an edit is **live on the next invocation** (no reload), and the scripts work identically in interactive shells, scripts, cron, and non-login ssh sessions (`~/.local/bin` must stay on `PATH` — a loud warning with a copy-paste fix appears when it isn't). Create refuses name collisions: a foreign file at `~/.local/bin/<name>` and names resolving to another binary on `PATH` are never overwritten.
+Persistent command bank for saving and running shell commands. Commands are stored in `~/.config/linux_post_install/bank.env` (pipe-delimited: `name|description|command`, chmod 600, managed by the tool). Supports parameterized templates with `{param}` placeholders that are substituted at run time (quoted for safe shell evaluation).
+
+On a TTY with no arguments, `pos system bank` opens an interactive menu (list / add / run / edit / remove).
+
+| Command | Purpose |
+|---------|---------|
+| `pos system bank list` | List all saved commands |
+| `pos system bank add <name> [desc] [cmd]` | Add a new command (interactive for missing args) |
+| `pos system bank show <name>` | Show command details and detected parameters |
+| `pos system bank run <name> [key=val …]` | Run a command (interactive for missing params) |
+| `pos system bank edit <name>` | Edit an existing command |
+| `pos system bank remove <name>` | Remove a command |
+
+Example with parameters:
+
+```
+pos system bank add convert "Convert video" "ffmpeg -i {input} -crf {quality} {output}"
+pos system bank run convert input=clip.mp4 quality=23 output=clip.mkv
+```
 
 ### ssh
 
@@ -533,30 +544,6 @@ Feature-flag management CLIs (see [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libfl
 | `flag-reader --raw <name>` | Print only the stored value (script-friendly) |
 | `flag-set <name> [value]` | Set a flag, optionally with a value (requires sudo) |
 | `flag-clear <name>` | Unset a flag (requires sudo) |
-
-### bank
-
-**File:** `bin/pos-bank`
-
-Persistent command bank for saving and running shell commands. Commands are stored in `~/.config/linux_post_install/bank.env` (pipe-delimited: `name|description|command`). Supports parameterized templates with `{param}` placeholders that are substituted at run time (quoted for safe shell evaluation).
-
-On a TTY with no arguments, `pos bank` opens an interactive menu (list / add / run / edit / remove).
-
-| Command | Purpose |
-|---------|---------|
-| `pos bank list` | List all saved commands |
-| `pos bank add <name> [desc] [cmd]` | Add a new command (interactive for missing args) |
-| `pos bank show <name>` | Show command details and detected parameters |
-| `pos bank run <name> [key=val …]` | Run a command (interactive for missing params) |
-| `pos bank edit <name>` | Edit an existing command |
-| `pos bank remove <name>` | Remove a command |
-
-Example with parameters:
-
-```
-pos bank add convert "Convert video" "ffmpeg -i {input} -crf {quality} {output}"
-pos bank run convert input=clip.mp4 quality=23 output=clip.mkv
-```
 
 ### config
 

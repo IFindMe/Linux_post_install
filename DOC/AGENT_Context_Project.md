@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–218 |
-| ## 3. Installation Flow | 219–277 |
-| ## 4. The `pos` CLI System | 278–367 |
-| ## 5. Shared Library — `lib/common.sh` | 368–399 |
-| ## 6. Docker Compose / ScaleTail | 400–442 |
-| ## 7. Optional Apps (`apps/`) | 443–472 |
-| ## 8. Entertainment Module | 473–486 |
-| ## 9. Systemd Services | 487–498 |
-| ## 10. Configuration Files | 499–525 |
-| ## 11. Coding Conventions | 526–558 |
-| ## 12. Development Workflow | 559–611 |
-| ## 13. Key File Quick Reference | 612–697 |
-| ## 14. Common Tasks for Agents | 698–731 |
+| ## 2. Directory Structure | 44–217 |
+| ## 3. Installation Flow | 218–276 |
+| ## 4. The `pos` CLI System | 277–365 |
+| ## 5. Shared Library — `lib/common.sh` | 366–397 |
+| ## 6. Docker Compose / ScaleTail | 398–440 |
+| ## 7. Optional Apps (`apps/`) | 441–470 |
+| ## 8. Entertainment Module | 471–484 |
+| ## 9. Systemd Services | 485–496 |
+| ## 10. Configuration Files | 497–523 |
+| ## 11. Coding Conventions | 524–556 |
+| ## 12. Development Workflow | 557–609 |
+| ## 13. Key File Quick Reference | 610–694 |
+| ## 14. Common Tasks for Agents | 695–728 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -109,15 +109,14 @@ Linux_post_install/
 │   ├── pos-share-smb-server                # Manage the Samba server (status, share/unshare exports, users, enable/disable)
 │   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
-│   ├── pos-system-alias                    # Manage persistent command aliases (wrapper scripts in ~/.local/bin/)
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
 │   │   [deps: tar]
+│   ├── pos-system-bank                     # Persistent command bank for saving and running shell commands
 │   ├── pos-system-firewall                 # Interactive UFW management
 │   ├── pos-system-health                   # Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
 │   ├── pos-system-uninstall                # Remove pos toolkit binaries, services, shell integration, config, and data
 │   ├── pos-ai                              # AI assistant: ask, chat, sessions, capture, models, providers
-│   ├── pos-bank                            # Persistent command bank for saving and running shell commands
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 <!-- GEN:END tree -->
@@ -337,14 +336,13 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | share | smb-server | `pos-share-smb-server` | Manage the Samba server (status, share/unshare exports, users, enable/disable) |  |  |
 | share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |  |  |
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |  |  |
-| system | alias | `pos-system-alias` | Manage persistent command aliases (wrapper scripts in ~/.local/bin/) |  |  |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) | tar |  |
+| system | bank | `pos-system-bank` | Persistent command bank for saving and running shell commands |  |  |
 | system | firewall | `pos-system-firewall` | Interactive UFW management |  |  |
 | system | health | `pos-system-health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |  |  |
 | system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |  |  |
 | system | uninstall | `pos-system-uninstall` | Remove pos toolkit binaries, services, shell integration, config, and data |  |  |
 |  | ai | `pos-ai` | AI assistant: ask, chat, sessions, capture, models, providers |  |  |
-|  | bank | `pos-bank` | Persistent command bank for saving and running shell commands |  |  |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |  |  |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |  |  |
 <!-- GEN:END dispatch -->
@@ -628,7 +626,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/menu-lib.sh` | 362 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default via raw-mode bracketed-paste-safe `menu_read_value`; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
 | `lib/registry.sh` | 199 | Shared query API for POS tool metadata headers (`# POS_*:`) — `reg_scan`/`reg_list`/`reg_lookup`/`reg_each`/config scope helpers; used by `pos-tree` and `gen-docs.sh` |
 | `lib/yt-lib.sh` | 50 | Shared YouTube helpers for `pos media yt *` (`yt_check_deps`, `yt_validate_url`, `yt_echo_cmd`, `classify_url`) — sourced by `yt-mp3`/`yt-mp4`/`yt-grab`/`yt-subtitles` |
-| `lib/bank-lib.sh` | 183 | Shared Command Bank storage helpers for `pos bank` (`bank_load`/`bank_save`/`bank_add`/`bank_remove`/`bank_update`, `{param}` template substitution, v2 `\n`-escaped multiline storage with backward-compat raw load; store `~/.config/linux_post_install/bank.env`) — sourced by `pos-bank` |
+| `lib/bank-lib.sh` | 183 | Shared Command Bank storage helpers for `pos system bank` (`bank_load`/`bank_save`/`bank_add`/`bank_remove`/`bank_update`, `{param}` template substitution, v2 `\n`-escaped multiline storage with backward-compat raw load; store `~/.config/linux_post_install/bank.env`) — sourced by `pos-system-bank` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -679,17 +677,16 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
-| `bin/pos-system-alias` | 488 | Manage persistent command aliases (wrapper scripts in ~/.local/bin/) |
 | `bin/pos-system-backup` | 301 | Encrypted (AES-256) folder snapshots (tar + gpg) |
+| `bin/pos-system-bank` | 311 | Persistent command bank for saving and running shell commands |
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 518 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
-| `bin/pos-bank` | 311 | Persistent command bank for saving and running shell commands |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 331 | Dynamic bash completion |
+| `completions/pos.bash` | 330 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

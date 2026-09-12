@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: bank — Persistent command bank for saving and running shell commands
+# POS: system bank — Persistent command bank for saving and running shell commands
 # POS_SUBCMDS: list add show run edit remove
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
@@ -9,7 +9,7 @@ source "$(dirname "$0")/../lib/bank-lib.sh" 2>/dev/null || source "$(dirname "$0
 
 usage() {
     cat <<'EOF'
-Usage: pos bank [subcommand] [args]
+Usage: pos system bank [subcommand] [args]
 
 Persistent command bank for saving and running shell commands.
 
@@ -22,12 +22,12 @@ Subcommands:
   remove <name>         Remove a command
 
 Interactive menu:
-  pos bank              (no args on a terminal)
+  pos system bank              (no args on a terminal)
 
 Examples:
-  pos bank add disk-info "Disk usage" "df -h && du -sh /mnt/12T"
-  pos bank run disk-info
-  pos bank run convert-video input=/path/to/video.mp4 quality=23 output=/path/out.mp4
+  pos system bank add disk-info "Disk usage" "df -h && du -sh /mnt/12T"
+  pos system bank run disk-info
+  pos system bank run convert-video input=/path/to/video.mp4 quality=23 output=/path/out.mp4
 EOF
     exit 0
 }
@@ -41,7 +41,7 @@ _pick_command() {
     bank_load
     local count="${#BANK_NAMES[@]}"
     if [ "$count" -eq 0 ]; then
-        warn "Command bank is empty — add one with: pos bank add <name> \"desc\" \"cmd\""
+        warn "Command bank is empty — add one with: pos system bank add <name> \"desc\" \"cmd\""
         return 1
     fi
     local -a items=()
@@ -63,7 +63,7 @@ cmd_list() {
     bank_load
     local count="${#BANK_NAMES[@]}"
     if [ "$count" -eq 0 ]; then
-        log "Command bank is empty — add one with: pos bank add <name> \"desc\" \"cmd\""
+        log "Command bank is empty — add one with: pos system bank add <name> \"desc\" \"cmd\""
         return 0
     fi
     echo
@@ -103,7 +103,7 @@ cmd_add() {
     bank_load
     local i
     for ((i = 0; i < ${#BANK_NAMES[@]}; i++)); do
-        [[ "${BANK_NAMES[$i]}" == "$name" ]] && err "Command '$name' already exists (use 'pos bank edit' to modify)"
+        [[ "${BANK_NAMES[$i]}" == "$name" ]] && err "Command '$name' already exists (use 'pos system bank edit' to modify)"
     done
     bank_add "$name" "$desc" "$cmd"
     ok "Saved: $name"
@@ -111,7 +111,7 @@ cmd_add() {
 
 # ── cmd_show ─────────────────────────────────────────────────────
 cmd_show() {
-    [ -n "${1:-}" ] || err "Usage: pos bank show <name>"
+    [ -n "${1:-}" ] || err "Usage: pos system bank show <name>"
     local name="$1"
     bank_load
     bank_find "$name" >/dev/null 2>&1 || err "Command not found: $name"

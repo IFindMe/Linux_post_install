@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# t-bank.sh — Command Bank feature: bank-lib.sh unit tests + pos-bank CLI
+# t-bank.sh — Command Bank feature: bank-lib.sh unit tests + pos system bank CLI
 # integration tests.
 #
 # Storage contract: pipe-delimited name|description|command in $BANK_FILE.
@@ -233,7 +233,7 @@ HELPER
     (
         BANK_FILE="$sandbox/a18.bank.env"
         cat > "$BANK_FILE" <<'BANK'
-# Command Bank — managed by pos bank (do not hand-edit)
+# Command Bank — managed by pos system bank (do not hand-edit)
 # Format: name|description|command
 
 real|Real command|echo real
@@ -295,7 +295,7 @@ SCRIPT
     (
         BANK_FILE="$sandbox/a21.bank.env"
         cat > "$BANK_FILE" <<'BANK'
-# Command Bank — managed by pos bank (do not hand-edit)
+# Command Bank — managed by pos system bank (do not hand-edit)
 # Format: name|description|command
 raw|Raw echo|echo 'a\b'
 BANK
@@ -311,7 +311,7 @@ BANK
     (
         BANK_FILE="$sandbox/a22.bank.env"
         cat > "$BANK_FILE" <<'BANK'
-# Command Bank — managed by pos bank (do not hand-edit)
+# Command Bank — managed by pos system bank (do not hand-edit)
 # Format: name|description|command
 ts-google|Tailscale Google|tailscale status --json >/tmp/ts.json && grep -q '"ExitNodeStatus":null' /tmp/ts.json && tailscale set --exit-node=google || tailscale set --exit-node=
 BANK
@@ -328,116 +328,116 @@ BANK
       || printf '  FAIL  old-format entry round-trips through re-save\n'
 
     # ═══════════════════════════════════════════════════════════════
-    # Part B: pos-bank CLI integration tests
+    # Part B: pos system bank CLI integration tests
     # ═══════════════════════════════════════════════════════════════
 
-    local pos_bank="$ROOT/bin/pos-bank"
+    local pos_bank="$ROOT/bin/pos-system-bank"
 
-    # B1: pos bank --help shows usage
+    # B1: pos system bank --help shows usage
     test_run env BANK_FILE="$sandbox/b1.bank.env" "$pos_bank" --help
-    check_rc "pos bank --help exits 0" 0 "$TR_RC"
-    check_contains "pos bank --help shows Usage" "Usage:" "$TR_OUT"
-    check_contains "pos bank --help mentions subcommands" "Subcommands:" "$TR_OUT"
+    check_rc "pos system bank --help exits 0" 0 "$TR_RC"
+    check_contains "pos system bank --help shows Usage" "Usage:" "$TR_OUT"
+    check_contains "pos system bank --help mentions subcommands" "Subcommands:" "$TR_OUT"
 
-    # B2: pos bank list on empty bank shows empty message
+    # B2: pos system bank list on empty bank shows empty message
     : > "$sandbox/b2.bank.env"
     test_run env BANK_FILE="$sandbox/b2.bank.env" "$pos_bank" list
-    check_rc "pos bank list empty exits 0" 0 "$TR_RC"
-    check_contains "pos bank list empty message" "Command bank is empty" "$TR_OUT"
+    check_rc "pos system bank list empty exits 0" 0 "$TR_RC"
+    check_contains "pos system bank list empty message" "Command bank is empty" "$TR_OUT"
 
-    # B3: pos bank add — adds a command, verify in bank.env
+    # B3: pos system bank add — adds a command, verify in bank.env
     : > "$sandbox/b3.bank.env"
     test_run env BANK_FILE="$sandbox/b3.bank.env" "$pos_bank" add "disk-usage" "Check disk usage" "df -h"
-    check_rc "pos bank add exits 0" 0 "$TR_RC"
-    check_contains "pos bank add confirms" "Saved: disk-usage" "$TR_OUT"
+    check_rc "pos system bank add exits 0" 0 "$TR_RC"
+    check_contains "pos system bank add confirms" "Saved: disk-usage" "$TR_OUT"
     # Verify the file
     if grep -q '^disk-usage|Check disk usage|df -h$' "$sandbox/b3.bank.env"; then
-        printf '  PASS  pos bank add persists to bank.env\n'
+        printf '  PASS  pos system bank add persists to bank.env\n'
     else
-        printf '  FAIL  pos bank add did not persist to bank.env\n'
+        printf '  FAIL  pos system bank add did not persist to bank.env\n'
     fi
 
-    # B4: pos bank add duplicate — fails
+    # B4: pos system bank add duplicate — fails
     test_run env BANK_FILE="$sandbox/b3.bank.env" "$pos_bank" add "disk-usage" "dup" "echo dup"
-    check_not_contains "pos bank add duplicate errors" "0" "$TR_RC"
-    check_contains "pos bank add duplicate message" "already exists" "$TR_OUT"
+    check_not_contains "pos system bank add duplicate errors" "0" "$TR_RC"
+    check_contains "pos system bank add duplicate message" "already exists" "$TR_OUT"
 
-    # B5: pos bank show — shows command details
+    # B5: pos system bank show — shows command details
     test_run env BANK_FILE="$sandbox/b3.bank.env" "$pos_bank" show "disk-usage"
-    check_rc "pos bank show exits 0" 0 "$TR_RC"
-    check_contains "pos bank show shows name" "Name: disk-usage" "$TR_OUT"
-    check_contains "pos bank show shows description" "Check disk usage" "$TR_OUT"
-    check_contains "pos bank show shows command" "df -h" "$TR_OUT"
+    check_rc "pos system bank show exits 0" 0 "$TR_RC"
+    check_contains "pos system bank show shows name" "Name: disk-usage" "$TR_OUT"
+    check_contains "pos system bank show shows description" "Check disk usage" "$TR_OUT"
+    check_contains "pos system bank show shows command" "df -h" "$TR_OUT"
 
-    # B6: pos bank show missing — fails
+    # B6: pos system bank show missing — fails
     test_run env BANK_FILE="$sandbox/b3.bank.env" "$pos_bank" show "nonexistent"
-    check_not_contains "pos bank show missing exits non-zero" "0" "$TR_RC"
-    check_contains "pos bank show missing message" "not found" "$TR_OUT"
+    check_not_contains "pos system bank show missing exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank show missing message" "not found" "$TR_OUT"
 
-    # B7: pos bank list after add — shows the entry
+    # B7: pos system bank list after add — shows the entry
     test_run env BANK_FILE="$sandbox/b3.bank.env" "$pos_bank" list
-    check_rc "pos bank list populated exits 0" 0 "$TR_RC"
-    check_contains "pos bank list shows header" "COMMAND BANK" "$TR_OUT"
-    check_contains "pos bank list shows entry" "disk-usage" "$TR_OUT"
+    check_rc "pos system bank list populated exits 0" 0 "$TR_RC"
+    check_contains "pos system bank list shows header" "COMMAND BANK" "$TR_OUT"
+    check_contains "pos system bank list shows entry" "disk-usage" "$TR_OUT"
 
-    # B8: pos bank remove — removes a command
+    # B8: pos system bank remove — removes a command
     test_run env BANK_FILE="$sandbox/b3.bank.env" "$pos_bank" remove "disk-usage"
-    check_rc "pos bank remove exits 0" 0 "$TR_RC"
-    check_contains "pos bank remove confirms" "Removed: disk-usage" "$TR_OUT"
+    check_rc "pos system bank remove exits 0" 0 "$TR_RC"
+    check_contains "pos system bank remove confirms" "Removed: disk-usage" "$TR_OUT"
     # Verify gone
     if grep -q '^disk-usage|' "$sandbox/b3.bank.env"; then
-        printf '  FAIL  pos bank remove did not delete from bank.env\n'
+        printf '  FAIL  pos system bank remove did not delete from bank.env\n'
     else
-        printf '  PASS  pos bank remove deletes from bank.env\n'
+        printf '  PASS  pos system bank remove deletes from bank.env\n'
     fi
 
-    # B9: pos bank remove missing — fails
+    # B9: pos system bank remove missing — fails
     : > "$sandbox/b9.bank.env"
     test_run env BANK_FILE="$sandbox/b9.bank.env" "$pos_bank" remove "ghost"
-    check_not_contains "pos bank remove missing exits non-zero" "0" "$TR_RC"
-    check_contains "pos bank remove missing message" "not found" "$TR_OUT"
+    check_not_contains "pos system bank remove missing exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank remove missing message" "not found" "$TR_OUT"
 
-    # B10: pos bank add with parameters — show lists them
+    # B10: pos system bank add with parameters — show lists them
     : > "$sandbox/b10.bank.env"
     test_run env BANK_FILE="$sandbox/b10.bank.env" "$pos_bank" add "convert" "Convert video" "ffmpeg -i {input} -q:v {quality} {output}"
-    check_rc "pos bank add with params exits 0" 0 "$TR_RC"
+    check_rc "pos system bank add with params exits 0" 0 "$TR_RC"
     test_run env BANK_FILE="$sandbox/b10.bank.env" "$pos_bank" show "convert"
     check_contains "show lists input param" "input" "$TR_OUT"
     check_contains "show lists quality param" "quality" "$TR_OUT"
     check_contains "show lists output param" "output" "$TR_OUT"
 
-    # B11: pos bank add invalid name — fails
+    # B11: pos system bank add invalid name — fails
     : > "$sandbox/b11.bank.env"
     test_run env BANK_FILE="$sandbox/b11.bank.env" "$pos_bank" add "1bad" "desc" "cmd"
-    check_not_contains "pos bank add invalid name exits non-zero" "0" "$TR_RC"
-    check_contains "pos bank add invalid name message" "Invalid name" "$TR_OUT"
+    check_not_contains "pos system bank add invalid name exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank add invalid name message" "Invalid name" "$TR_OUT"
 
-    # B12: pos bank run — executes a saved command (no params)
+    # B12: pos system bank run — executes a saved command (no params)
     # Negative control: the old `local name="" -a cli_params=()` declaration
     # crashed at line 150 before any output (rc != 0, no "Running:" line).
     : > "$sandbox/b12.bank.env"
     test_run env BANK_FILE="$sandbox/b12.bank.env" "$pos_bank" add "greet" "Greet" "echo bank-run-ok"
-    check_rc "pos bank add for run exits 0" 0 "$TR_RC"
+    check_rc "pos system bank add for run exits 0" 0 "$TR_RC"
     test_run env BANK_FILE="$sandbox/b12.bank.env" "$pos_bank" run "greet"
-    check_rc "pos bank run executes saved command" 0 "$TR_RC"
-    check_contains "pos bank run logs the command" "Running: echo bank-run-ok" "$TR_OUT"
-    check_contains "pos bank run executes output" "bank-run-ok" "$TR_OUT"
+    check_rc "pos system bank run executes saved command" 0 "$TR_RC"
+    check_contains "pos system bank run logs the command" "Running: echo bank-run-ok" "$TR_OUT"
+    check_contains "pos system bank run executes output" "bank-run-ok" "$TR_OUT"
 
-    # B13: pos bank run missing command — fails
+    # B13: pos system bank run missing command — fails
     test_run env BANK_FILE="$sandbox/b12.bank.env" "$pos_bank" run "ghost"
-    check_not_contains "pos bank run missing exits non-zero" "0" "$TR_RC"
-    check_contains "pos bank run missing message" "Command not found" "$TR_OUT"
+    check_not_contains "pos system bank run missing exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank run missing message" "Command not found" "$TR_OUT"
 
-    # B14: pos bank run with params — CLI key=val substitution, no interactive prompt
+    # B14: pos system bank run with params — CLI key=val substitution, no interactive prompt
     : > "$sandbox/b14.bank.env"
     test_run env BANK_FILE="$sandbox/b14.bank.env" "$pos_bank" add "echo-param" "Echo param" "echo hi {who}"
-    check_rc "pos bank add param exits 0" 0 "$TR_RC"
+    check_rc "pos system bank add param exits 0" 0 "$TR_RC"
     test_run env BANK_FILE="$sandbox/b14.bank.env" "$pos_bank" run "echo-param" "who=there"
-    check_rc "pos bank run with params exits 0" 0 "$TR_RC"
-    check_contains "pos bank run substitutes param" 'Running: echo hi "there"' "$TR_OUT"
-    check_contains "pos bank run executes substituted command" "hi there" "$TR_OUT"
+    check_rc "pos system bank run with params exits 0" 0 "$TR_RC"
+    check_contains "pos system bank run substitutes param" 'Running: echo hi "there"' "$TR_OUT"
+    check_contains "pos system bank run executes substituted command" "hi there" "$TR_OUT"
 
-    # B15: pos bank add multiline + show — cmd_show retrieves the FULL script via arrays
+    # B15: pos system bank add multiline + show — cmd_show retrieves the FULL script via arrays
     # Negative control: bank_get + cut -f3 truncated the command at the first newline.
     # (Brace-free script: {param} template detection would prompt on run in a non-TTY.)
     : > "$sandbox/b15.bank.env"
@@ -451,17 +451,17 @@ done
 SCRIPT
 )"
     test_run env BANK_FILE="$sandbox/b15.bank.env" "$pos_bank" add "ml-demo" "Multiline demo" "$ml_script"
-    check_rc "pos bank add multiline exits 0" 0 "$TR_RC"
+    check_rc "pos system bank add multiline exits 0" 0 "$TR_RC"
     test_run env BANK_FILE="$sandbox/b15.bank.env" "$pos_bank" show "ml-demo"
-    check_rc "pos bank show multiline exits 0" 0 "$TR_RC"
-    check_contains "pos bank show prints script shebang" '#!/usr/bin/env bash' "$TR_OUT"
-    check_contains "pos bank show prints loop line" 'while [ "$n" -lt 2 ]; do' "$TR_OUT"
-    check_contains "pos bank show prints arithmetic line" 'n=$((n + 1))' "$TR_OUT"
-    check_contains "pos bank show prints substitution echo" 'echo "round $n: $(printf' "$TR_OUT"
+    check_rc "pos system bank show multiline exits 0" 0 "$TR_RC"
+    check_contains "pos system bank show prints script shebang" '#!/usr/bin/env bash' "$TR_OUT"
+    check_contains "pos system bank show prints loop line" 'while [ "$n" -lt 2 ]; do' "$TR_OUT"
+    check_contains "pos system bank show prints arithmetic line" 'n=$((n + 1))' "$TR_OUT"
+    check_contains "pos system bank show prints substitution echo" 'echo "round $n: $(printf' "$TR_OUT"
 
-    # B16: pos bank run multiline — executes the WHOLE script via eval of the full command
+    # B16: pos system bank run multiline — executes the WHOLE script via eval of the full command
     test_run env BANK_FILE="$sandbox/b15.bank.env" "$pos_bank" run "ml-demo"
-    check_rc "pos bank run multiline exits 0" 0 "$TR_RC"
-    check_contains "pos bank run multiline output line 1" "round 1: ok" "$TR_OUT"
-    check_contains "pos bank run multiline output line 2" "round 2: ok" "$TR_OUT"
+    check_rc "pos system bank run multiline exits 0" 0 "$TR_RC"
+    check_contains "pos system bank run multiline output line 1" "round 1: ok" "$TR_OUT"
+    check_contains "pos system bank run multiline output line 2" "round 2: ok" "$TR_OUT"
 }

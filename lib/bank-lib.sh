@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # lib/bank-lib.sh — shared storage helpers for the Command Bank.
-# Sourced by bin/pos-bank. Uses err() from lib/common.sh.
+# Sourced by bin/pos-system-bank. Uses err() from lib/common.sh.
 #
 # Storage: ~/.config/linux_post_install/bank.env
 # Format:  name|description|command
@@ -11,7 +11,7 @@
 #   * Defines ONLY bank_* functions — sourcing never clobbers a tool's helpers.
 #   * Requires common.sh to be sourced by the CALLER.
 #   * NEVER exits — return codes only.
-#   * Performs NO interactive prompts (those stay in bin/pos-bank).
+#   * Performs NO interactive prompts (those stay in bin/pos-system-bank).
 
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 BANK_FILE="${BANK_FILE:-${CONFIG_DIR}/bank.env}"

@@ -49,11 +49,10 @@ _pos_subcmds[share-nfs-client]="mount unmount list persist unpersist menu"
 _pos_subcmds[share-nfs-server]="status share unshare list reload enable disable menu"
 _pos_subcmds[share-smb-client]="mount unmount list persist unpersist menu"
 _pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable menu"
-_pos_subcmds[system-alias]="create edit remove list show"
 _pos_subcmds[system-backup]="menu"
+_pos_subcmds[system-bank]="list add show run edit remove"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
 _pos_subcmds[ai]="ask chat sessions capture models providers llamacpp alias gemini hf openrouter server"
-_pos_subcmds[bank]="list add show run edit remove"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)

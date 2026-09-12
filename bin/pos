@@ -28,7 +28,7 @@ _pos_commands() {
 # ── Category list (sorted, filename-derived) ─────────────────────
 # Nested sub-tools (pos-<cat>-<a>-<b> where pos-<cat>-<a> exists) are
 # omitted from the cheat-sheet line — they are shown under their parent tool.
-# Category-less tools (pos-bank, pos-config, pos-tree) are emitted as their
+# Category-less tools (pos-config, pos-tree) are emitted as their
 # own line with an empty subcommand column; a name already present as a
 # category (pos-ai vs the ai category built from pos-ai-*) is NOT duplicated.
 _pos_category_list() {
@@ -214,7 +214,7 @@ EXAMPLES
 
   pos tree                                Show the command tree (categories + subcommands)
 
-  pos bank run <name>                     Run a saved command from the bank
+  pos system bank run <name>              Run a saved command from the bank
 
   pos docker vbox create lab1              Create disposable Docker VM
   pos docker vbox create lab1 --dir .      Create VM using current directory
@@ -274,7 +274,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="bank docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-yt-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter ai-llamacpp ai-alias system-alias system-schedule entertainment-config config"
+INTERACTIVE_CMDS="system-bank docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-yt-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter ai-llamacpp ai-alias system-schedule entertainment-config config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"
