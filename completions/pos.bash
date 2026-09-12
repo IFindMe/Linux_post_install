@@ -115,7 +115,14 @@ _pos() {
 
     # ── Helpers ────────────────────────────────────────────────
     _pos_complete_categories() {
-        COMPREPLY=($(compgen -W "${!cat_cmds[*]} config" -- "$cur"))
+        local solos=()
+        for cmd in "${all_cmds[@]}"; do
+            local cat_c="${cmd%%-*}"
+            if [ "$cat_c" = "$cmd" ] && [ -z "${cat_cmds[$cmd]:-}" ]; then
+                solos+=("$cmd")
+            fi
+        done
+        COMPREPLY=($(compgen -W "${!cat_cmds[*]} ${solos[*]}" -- "$cur"))
     }
 
     _pos_complete_subcats() {
@@ -231,7 +238,13 @@ _pos() {
         3)
             case "${words[1]}" in
                 config) _pos_config_scopes ;;
-                *) _pos_complete_subcats ;;
+                *)
+                    if [[ "${words[1]}" == *-* ]]; then
+                        _pos_complete_subcats
+                    else
+                        _pos_complete_tool "${words[1]}"
+                    fi
+                    ;;
             esac
             ;;
         4)
