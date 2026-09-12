@@ -57,3 +57,4 @@ silently.
 | `t-share-mountpoint.sh` | share-client `ask_mountpoint` UX: existing/new/declined/rejected paths, confirm gate, mkdir side effects, non-TTY stdin contract, static `n`→`t` guards |
 | `t-pos-media-yt.sh` | unified `pos media yt` suite: dispatcher + forwarder resolution, shared yt-lib helpers, yt-mp3/mp4/grab/subtitles flags, dry-run deps, `YT_OUT_DIR` seam, `GRAB_DEFAULT` config, negative controls (unsafe-URL no-expansion, `--lang en,ar` single arg, txt timestamp-stripping) |
 | `t-telegram-listener-singleton.sh` | Telegram listener single-instance guard: first `--run` acquires the flock, second `--run` fails fast with the exact message, lock auto-releases so the next start is clean, `--status` reports the lock state |
+| `t-bank.sh` | Command Bank: bank-lib.sh unit tests (add/remove/update/find/get/list/count/valid/extract_params/substitute_params) + pos-bank CLI integration (help, list, add, show, remove, params, invalid name) |

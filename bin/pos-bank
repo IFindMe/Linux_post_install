@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: bank — Persistent command bank for saving and running shell commands
+# POS_SUBCMDS: list add show run edit remove
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
+source "$(dirname "$0")/../lib/bank-lib.sh" 2>/dev/null || source "$(dirname "$0")/bank-lib.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: pos bank [subcommand] [args]
+
+Persistent command bank for saving and running shell commands.
+
+Subcommands:
+  list                  List all saved commands
+  add <name> [desc] [cmd]  Add a new command (interactive if args missing)
+  show <name>           Show command details
+  run <name> [key=val ...] Run a command (interactive for missing params)
+  edit <name>           Edit an existing command
+  remove <name>         Remove a command
+
+Interactive menu:
+  pos bank              (no args on a terminal)
+
+Examples:
+  pos bank add disk-info "Disk usage" "df -h && du -sh /mnt/12T"
+  pos bank run disk-info
+  pos bank run convert-video input=/path/to/video.mp4 quality=23 output=/path/out.mp4
+EOF
+    exit 0
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+esac
+
+# ── Interactive command picker ───────────────────────────────────
+_pick_command() {
+    bank_load
+    local count="${#BANK_NAMES[@]}"
+    if [ "$count" -eq 0 ]; then
+        warn "Command bank is empty — add one with: pos bank add <name> \"desc\" \"cmd\""
+        return 1
+    fi
+    local -a items=()
+    local i
+    for ((i = 0; i < count; i++)); do
+        if [ -n "${BANK_DESCS[$i]}" ]; then
+            items+=("${BANK_NAMES[$i]} — ${BANK_DESCS[$i]}")
+        else
+            items+=("${BANK_NAMES[$i]}")
+        fi
+    done
+    local choice
+    choice="$(menu_pick "Pick command" "${items[@]}")" || return 1
+    echo "${BANK_NAMES[$((choice - 1))]}"
+}
+
+# ── cmd_list ─────────────────────────────────────────────────────
+cmd_list() {
+    bank_load
+    local count="${#BANK_NAMES[@]}"
+    if [ "$count" -eq 0 ]; then
+        log "Command bank is empty — add one with: pos bank add <name> \"desc\" \"cmd\""
+        return 0
+    fi
+    echo
+    echo "COMMAND BANK"
+    echo
+    local i
+    for ((i = 0; i < count; i++)); do
+        if [ -n "${BANK_DESCS[$i]}" ]; then
+            printf '  %-25s %s\n' "${BANK_NAMES[$i]}" "${BANK_DESCS[$i]}"
+        else
+            printf '  %s\n' "${BANK_NAMES[$i]}"
+        fi
+    done
+    echo
+}
+
+# ── cmd_add ──────────────────────────────────────────────────────
+cmd_add() {
+    local name="" desc="" cmd=""
+    case $# in
+        0) ;;
+        1) name="$1" ;;
+        2) name="$1"; desc="$2" ;;
+        *) name="$1"; desc="$2"; cmd="$3" ;;
+    esac
+    if [ -z "$name" ]; then
+        name="$(menu_ask_value "Name")" || return 0
+    fi
+    if [ -z "$desc" ]; then
+        desc="$(menu_ask_value "Description" "")" || return 0
+    fi
+    if [ -z "$cmd" ]; then
+        cmd="$(menu_read_value "Command")" || return 0
+    fi
+    bank_valid_name "$name" || err "Invalid name: $name (use letters, numbers, hyphens, underscores)"
+    [ -n "$cmd" ] || err "Command cannot be empty"
+    bank_load
+    local i
+    for ((i = 0; i < ${#BANK_NAMES[@]}; i++)); do
+        [[ "${BANK_NAMES[$i]}" == "$name" ]] && err "Command '$name' already exists (use 'pos bank edit' to modify)"
+    done
+    bank_add "$name" "$desc" "$cmd"
+    ok "Saved: $name"
+}
+
+# ── cmd_show ─────────────────────────────────────────────────────
+cmd_show() {
+    [ -n "${1:-}" ] || err "Usage: pos bank show <name>"
+    local name="$1"
+    bank_load
+    local entry
+    entry="$(bank_get "$name")" || err "Command not found: $name"
+    local cmd_name cmd_desc cmd_cmd
+    cmd_name="$(printf '%s' "$entry" | cut -f1)"
+    cmd_desc="$(printf '%s' "$entry" | cut -f2)"
+    cmd_cmd="$(printf '%s' "$entry" | cut -f3)"
+    echo
+    echo "Name: $cmd_name"
+    echo
+    echo "Description:"
+    if [ -n "$cmd_desc" ]; then
+        echo "$cmd_desc"
+    else
+        echo "  (none)"
+    fi
+    echo
+    echo "Command:"
+    echo
+    echo "$cmd_cmd"
+    local params
+    params="$(_extract_params "$cmd_cmd")"
+    if [ -n "$params" ]; then
+        echo
+        echo "Parameters:"
+        echo "$params" | while IFS= read -r p; do
+            echo "  $p"
+        done
+    fi
+    echo
+}
+
+# ── cmd_run ──────────────────────────────────────────────────────
+cmd_run() {
+    local name="" -a cli_params=()
+    if [ $# -eq 0 ]; then
+        name="$(_pick_command)" || return 0
+    else
+        name="$1"; shift
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                *=*) cli_params+=("$1") ;;
+                *) err "Invalid parameter format: $1 (expected key=value)" ;;
+            esac
+            shift
+        done
+    fi
+    bank_load
+    local entry
+    entry="$(bank_get "$name")" || err "Command not found: $name"
+    local cmd_name cmd_desc cmd_cmd
+    cmd_name="$(printf '%s' "$entry" | cut -f1)"
+    cmd_desc="$(printf '%s' "$entry" | cut -f2)"
+    cmd_cmd="$(printf '%s' "$entry" | cut -f3)"
+    # Detect parameters
+    local params_str
+    params_str="$(_extract_params "$cmd_cmd")"
+    local -a params=()
+    if [ -n "$params_str" ]; then
+        while IFS= read -r p; do
+            params+=("$p")
+        done <<< "$params_str"
+    fi
+    # Build parameter values from CLI args
+    local -A param_values=()
+    for p in "${cli_params[@]}"; do
+        local key="${p%%=*}" val="${p#*=}"
+        param_values["$key"]="$val"
+    done
+    # Interactively prompt for missing parameters
+    local -a missing=()
+    for p in "${params[@]}"; do
+        [[ -z "${param_values[$p]+x}" ]] && missing+=("$p")
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+        for p in "${missing[@]}"; do
+            local val
+            val="$(menu_ask_value "$p" "")" || return 0
+            param_values["$p"]="$val"
+        done
+    fi
+    # Substitute parameters
+    local final_cmd="$cmd_cmd"
+    if [ ${#params[@]} -gt 0 ]; then
+        local -a sub_args=()
+        for p in "${params[@]}"; do
+            sub_args+=("${p}=${param_values[$p]:-}")
+        done
+        final_cmd="$(_substitute_params "$cmd_cmd" "${sub_args[@]}")"
+    fi
+    echo
+    log "Running: $final_cmd"
+    echo
+    eval "$final_cmd"
+    return $?
+}
+
+# ── cmd_edit ─────────────────────────────────────────────────────
+cmd_edit() {
+    local name="${1:-}"
+    if [ -z "$name" ]; then
+        name="$(_pick_command)" || return 0
+    fi
+    bank_load
+    local entry
+    entry="$(bank_get "$name")" || err "Command not found: $name"
+    local old_name old_desc old_cmd
+    old_name="$(printf '%s' "$entry" | cut -f1)"
+    old_desc="$(printf '%s' "$entry" | cut -f2)"
+    old_cmd="$(printf '%s' "$entry" | cut -f3)"
+    echo
+    log "Editing: $old_name"
+    echo
+    local new_name new_desc new_cmd
+    new_name="$(menu_ask_value "New name" "$old_name")" || return 0
+    new_desc="$(menu_ask_value "New description" "$old_desc")" || return 0
+    new_cmd="$(menu_read_value "New command")" || return 0
+    [ -z "$new_name" ] && new_name="$old_name"
+    [ -z "$new_desc" ] && new_desc="$old_desc"
+    [ -z "$new_cmd" ] && new_cmd="$old_cmd"
+    if [ "$new_name" != "$old_name" ]; then
+        bank_valid_name "$new_name" || err "Invalid name: $new_name"
+        local i found=0
+        for ((i = 0; i < ${#BANK_NAMES[@]}; i++)); do
+            [[ "${BANK_NAMES[$i]}" == "$new_name" ]] && found=1
+        done
+        [[ "$found" -eq 1 ]] && err "A command named '$new_name' already exists"
+        bank_remove "$old_name"
+        bank_add "$new_name" "$new_desc" "$new_cmd"
+    else
+        bank_update "$new_name" "$new_desc" "$new_cmd"
+    fi
+    ok "Updated: $new_name"
+}
+
+# ── cmd_remove ───────────────────────────────────────────────────
+cmd_remove() {
+    local name="${1:-}"
+    if [ -z "$name" ]; then
+        name="$(_pick_command)" || return 0
+    fi
+    bank_load
+    bank_find "$name" >/dev/null 2>&1 || err "Command not found: $name"
+    if [ -t 0 ]; then
+        confirm "Remove '$name'?" n || { log "Cancelled"; return 0; }
+    fi
+    bank_remove "$name"
+    ok "Removed: $name"
+}
+
+# ── Interactive menu ─────────────────────────────────────────────
+run_menu() {
+    menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(menu_run "Command Bank" \
+            "List commands" \
+            "Add command" \
+            "Run command" \
+            "Edit command" \
+            "Remove command")" || return 0
+        case "$choice" in
+            1) cmd_list ;;
+            2) cmd_add ;;
+            3) cmd_run ;;
+            4) cmd_edit ;;
+            5) cmd_remove ;;
+        esac
+    done
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────
+if [ "${1:-}" = "menu" ]; then
+    run_menu
+    exit 0
+fi
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+    esac
+done
+
+if [ $# -eq 0 ] && [ -t 0 ]; then
+    run_menu
+    exit 0
+fi
+
+case "${1:-}" in
+    list)   shift; cmd_list "$@" ;;
+    add)    shift; cmd_add "$@" ;;
+    show)   shift; cmd_show "$@" ;;
+    run)    shift; cmd_run "$@" ;;
+    edit)   shift; cmd_edit "$@" ;;
+    remove) shift; cmd_remove "$@" ;;
+    "")     usage ;;
+    *)      err "Unknown subcommand: $1 (see --help)" ;;
+esac

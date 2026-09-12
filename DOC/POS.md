@@ -534,6 +534,30 @@ Feature-flag management CLIs (see [SCRIPTS.md → lib/flags.sh](SCRIPTS.md#libfl
 | `flag-set <name> [value]` | Set a flag, optionally with a value (requires sudo) |
 | `flag-clear <name>` | Unset a flag (requires sudo) |
 
+### bank
+
+**File:** `bin/pos-bank`
+
+Persistent command bank for saving and running shell commands. Commands are stored in `~/.config/linux_post_install/bank.env` (pipe-delimited: `name|description|command`). Supports parameterized templates with `{param}` placeholders that are substituted at run time (quoted for safe shell evaluation).
+
+On a TTY with no arguments, `pos bank` opens an interactive menu (list / add / run / edit / remove).
+
+| Command | Purpose |
+|---------|---------|
+| `pos bank list` | List all saved commands |
+| `pos bank add <name> [desc] [cmd]` | Add a new command (interactive for missing args) |
+| `pos bank show <name>` | Show command details and detected parameters |
+| `pos bank run <name> [key=val …]` | Run a command (interactive for missing params) |
+| `pos bank edit <name>` | Edit an existing command |
+| `pos bank remove <name>` | Remove a command |
+
+Example with parameters:
+
+```
+pos bank add convert "Convert video" "ffmpeg -i {input} -crf {quality} {output}"
+pos bank run convert input=clip.mp4 quality=23 output=clip.mkv
+```
+
 ### config
 
 **File:** `bin/pos-config`

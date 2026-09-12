@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–217 |
-| ## 3. Installation Flow | 218–276 |
-| ## 4. The `pos` CLI System | 277–365 |
-| ## 5. Shared Library — `lib/common.sh` | 366–397 |
-| ## 6. Docker Compose / ScaleTail | 398–440 |
-| ## 7. Optional Apps (`apps/`) | 441–470 |
-| ## 8. Entertainment Module | 471–484 |
-| ## 9. Systemd Services | 485–496 |
-| ## 10. Configuration Files | 497–523 |
-| ## 11. Coding Conventions | 524–556 |
-| ## 12. Development Workflow | 557–609 |
-| ## 13. Key File Quick Reference | 610–693 |
-| ## 14. Common Tasks for Agents | 694–727 |
+| ## 2. Directory Structure | 44–218 |
+| ## 3. Installation Flow | 219–277 |
+| ## 4. The `pos` CLI System | 278–367 |
+| ## 5. Shared Library — `lib/common.sh` | 368–399 |
+| ## 6. Docker Compose / ScaleTail | 400–442 |
+| ## 7. Optional Apps (`apps/`) | 443–472 |
+| ## 8. Entertainment Module | 473–486 |
+| ## 9. Systemd Services | 487–498 |
+| ## 10. Configuration Files | 499–525 |
+| ## 11. Coding Conventions | 526–558 |
+| ## 12. Development Workflow | 559–611 |
+| ## 13. Key File Quick Reference | 612–696 |
+| ## 14. Common Tasks for Agents | 697–730 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -117,6 +117,7 @@ Linux_post_install/
 │   ├── pos-system-schedule                 # Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently
 │   ├── pos-system-uninstall                # Remove pos toolkit binaries, services, shell integration, config, and data
 │   ├── pos-ai                              # AI assistant: ask, chat, sessions, capture, models, providers
+│   ├── pos-bank                            # Persistent command bank for saving and running shell commands
 │   ├── pos-config                          # Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry)
 │   ├── pos-tree                            # Show the pos CLI command tree: categories, commands, and subcommands
 <!-- GEN:END tree -->
@@ -343,6 +344,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | system | schedule | `pos-system-schedule` | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |  |  |
 | system | uninstall | `pos-system-uninstall` | Remove pos toolkit binaries, services, shell integration, config, and data |  |  |
 |  | ai | `pos-ai` | AI assistant: ask, chat, sessions, capture, models, providers |  |  |
+|  | bank | `pos-bank` | Persistent command bank for saving and running shell commands |  |  |
 |  | config | `pos-config` | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |  |  |
 |  | tree | `pos-tree` | Show the pos CLI command tree: categories, commands, and subcommands |  |  |
 <!-- GEN:END dispatch -->
@@ -683,9 +685,10 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 517 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
+| `bin/pos-bank` | 313 | Persistent command bank for saving and running shell commands |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 317 | Dynamic bash completion |
+| `completions/pos.bash` | 318 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

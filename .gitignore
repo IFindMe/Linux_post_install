@@ -33,3 +33,6 @@ dream.md
 
 # Agent process reports — local-only shared memory (not tracked)
 AgentsReport/
+
+# Task breakdown notes — never committed
+.tasks/

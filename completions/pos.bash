@@ -53,6 +53,7 @@ _pos_subcmds[system-alias]="create edit remove list show"
 _pos_subcmds[system-backup]="menu"
 _pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
 _pos_subcmds[ai]="ask chat sessions capture models providers llamacpp alias gemini hf openrouter server"
+_pos_subcmds[bank]="list add show run edit remove"
 # GEN:END possubcmds
 # GEN:START posconfigscopes
 declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)

@@ -266,7 +266,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-yt-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter ai-llamacpp ai-alias system-alias system-schedule entertainment-config config"
+INTERACTIVE_CMDS="bank docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-yt-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter ai-llamacpp ai-alias system-alias system-schedule entertainment-config config"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"
