@@ -4,6 +4,8 @@
 #
 # Storage: ~/.config/linux_post_install/bank.env
 # Format:  name|description|command
+# v2: commands with real newlines are saved with \\ (backslash) and \n
+#     (newline) escapes; files written by v1 have no marker and load raw.
 #
 # Contracts:
 #   * Defines ONLY bank_* functions — sourcing never clobbers a tool's helpers.
@@ -20,12 +22,13 @@ bank_load() {
     BANK_NAMES=(); BANK_DESCS=(); BANK_CMDS=()
     [ -f "$BANK_FILE" ] || return 0
 
-    local line name desc cmd
+    local line name desc cmd v2=0
     while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# ]] && { [[ "$line" == *"BANK_VERSION: 2"* ]] && v2=1; continue; }
         [[ -z "${line// /}" ]] && continue
         IFS='|' read -r name desc cmd <<< "$line"
         [[ -z "$name" ]] && continue
+        [ "$v2" -eq 1 ] && cmd="$(printf '%b' "$cmd")"
         BANK_NAMES+=("$name")
         BANK_DESCS+=("${desc:-}")
         BANK_CMDS+=("${cmd:-}")
@@ -42,10 +45,15 @@ bank_save() {
     tmp="$(mktemp "${dir}/.bank.XXXXXX")"
     {
         printf '%s\n' "# Command Bank — managed by pos bank (do not hand-edit)"
-        printf '%s\n' "# Format: name|description|command"
+        printf '%s\n' "# Format: name|description|command (\\n = escaped newline in command)"
+        printf '%s\n' "# BANK_VERSION: 2"
         local i
         for ((i = 0; i < ${#BANK_NAMES[@]}; i++)); do
-            printf '%s|%s|%s\n' "${BANK_NAMES[$i]}" "${BANK_DESCS[$i]}" "${BANK_CMDS[$i]}"
+            local cmd="${BANK_CMDS[$i]}"
+            # Escape: every backslash → \\, every real newline → \n (keeps one record per physical line)
+            cmd="${cmd//\\/\\\\}"
+            cmd="${cmd//$'\n'/\\n}"
+            printf '%s|%s|%s\n' "${BANK_NAMES[$i]}" "${BANK_DESCS[$i]}" "$cmd"
         done
     } > "$tmp"
     chmod 600 "$tmp"

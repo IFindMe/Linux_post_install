@@ -250,6 +250,83 @@ BANK
     ) && printf '  PASS  bank_load skips comments and blank lines\n' \
       || printf '  FAIL  bank_load skips comments and blank lines\n'
 
+    # A19: multiline command storage round-trip — escapes \n, single record line
+    (
+        BANK_FILE="$sandbox/a19.bank.env"
+        : > "$BANK_FILE"
+        source "$helper"
+        script="$(cat <<'SCRIPT'
+#!/usr/bin/env bash
+for tag in one two; do
+    out="$(printf '%s' "$tag" | tr 'a-z' 'A-Z')"
+    echo "tag=${tag} out=${out} done"
+done
+SCRIPT
+)"
+        bank_add "ml" "Multiline demo" "$script"
+        bank_load
+        [ "${#BANK_NAMES[@]}" -eq 1 ] || { echo "FAIL A19: expected 1 entry, got ${#BANK_NAMES[@]}"; exit 1; }
+        [ "${BANK_CMDS[0]}" = "$script" ] || { echo "FAIL A19: command bytes differ"; exit 1; }
+        rec_lines="$(grep -c '^ml|' "$BANK_FILE" || true)"
+        [ "$rec_lines" -eq 1 ] || { echo "FAIL A19: expected 1 record line, got $rec_lines"; exit 1; }
+        [ "$(wc -l < "$BANK_FILE")" -eq 4 ] || { echo "FAIL A19: file has bogus physical lines"; exit 1; }
+        grep -q '\\n' "$BANK_FILE" || { echo "FAIL A19: missing \\n escape in file"; exit 1; }
+        echo "PASS A19: multiline round-trip"
+    ) && printf '  PASS  multiline storage round-trip (one record line, \\n escapes)\n' \
+      || printf '  FAIL  multiline storage round-trip (one record line, \\n escapes)\n'
+
+    # A20: literal \n (backslash-n) in command round-trips literally — NOT a real newline
+    (
+        BANK_FILE="$sandbox/a20.bank.env"
+        : > "$BANK_FILE"
+        source "$helper"
+        esc="$(printf '%s' "printf 'a\\nb'")"
+        bank_add "esc" "Escapes" "$esc"
+        bank_load
+        [ "${BANK_CMDS[0]}" = "$esc" ] || { echo "FAIL A20: literal \\n not preserved [${BANK_CMDS[0]}]"; exit 1; }
+        case "${BANK_CMDS[0]}" in
+            *$'\n'*) echo "FAIL A20: decoded literal \\n into a real newline"; exit 1 ;;
+        esac
+        echo "PASS A20: literal \\n round-trip"
+    ) && printf '  PASS  literal \\n command round-trips literally\n' \
+      || printf '  FAIL  literal \\n command round-trips literally\n'
+
+    # A21: old-format file (no BANK_VERSION marker) keeps raw backslashes — no %b decode
+    (
+        BANK_FILE="$sandbox/a21.bank.env"
+        cat > "$BANK_FILE" <<'BANK'
+# Command Bank — managed by pos bank (do not hand-edit)
+# Format: name|description|command
+raw|Raw echo|echo 'a\b'
+BANK
+        source "$helper"
+        bank_load
+        expected="$(printf '%s' "echo 'a\\b'")"
+        [ "${BANK_CMDS[0]}" = "$expected" ] || { echo "FAIL A21: raw backslash changed [${BANK_CMDS[0]}]"; exit 1; }
+        echo "PASS A21: old-format raw backslash"
+    ) && printf '  PASS  old-format file keeps raw backslash (no decode)\n' \
+      || printf '  FAIL  old-format file keeps raw backslash (no decode)\n'
+
+    # A22: old-format entry survives a re-save byte-identically (escape + decode round-trip)
+    (
+        BANK_FILE="$sandbox/a22.bank.env"
+        cat > "$BANK_FILE" <<'BANK'
+# Command Bank — managed by pos bank (do not hand-edit)
+# Format: name|description|command
+ts-google|Tailscale Google|tailscale status --json >/tmp/ts.json && grep -q '"ExitNodeStatus":null' /tmp/ts.json && tailscale set --exit-node=google || tailscale set --exit-node=
+BANK
+        source "$helper"
+        bank_load
+        orig="${BANK_CMDS[0]}"
+        bank_add "new-cmd" "New entry" "echo ok"
+        bank_load
+        [ "${#BANK_NAMES[@]}" -eq 2 ] || { echo "FAIL A22: expected 2 entries, got ${#BANK_NAMES[@]}"; exit 1; }
+        [ "${BANK_CMDS[0]}" = "$orig" ] || { echo "FAIL A22: old entry changed after re-save"; exit 1; }
+        [ "${BANK_CMDS[1]}" = "echo ok" ] || { echo "FAIL A22: new entry missing"; exit 1; }
+        echo "PASS A22: old-format re-save round-trip"
+    ) && printf '  PASS  old-format entry round-trips through re-save\n' \
+      || printf '  FAIL  old-format entry round-trips through re-save\n'
+
     # ═══════════════════════════════════════════════════════════════
     # Part B: pos-bank CLI integration tests
     # ═══════════════════════════════════════════════════════════════
@@ -359,4 +436,32 @@ BANK
     check_rc "pos bank run with params exits 0" 0 "$TR_RC"
     check_contains "pos bank run substitutes param" 'Running: echo hi "there"' "$TR_OUT"
     check_contains "pos bank run executes substituted command" "hi there" "$TR_OUT"
+
+    # B15: pos bank add multiline + show — cmd_show retrieves the FULL script via arrays
+    # Negative control: bank_get + cut -f3 truncated the command at the first newline.
+    # (Brace-free script: {param} template detection would prompt on run in a non-TTY.)
+    : > "$sandbox/b15.bank.env"
+    ml_script="$(cat <<'SCRIPT'
+#!/usr/bin/env bash
+n=0
+while [ "$n" -lt 2 ]; do
+    n=$((n + 1))
+    echo "round $n: $(printf 'ok')"
+done
+SCRIPT
+)"
+    test_run env BANK_FILE="$sandbox/b15.bank.env" "$pos_bank" add "ml-demo" "Multiline demo" "$ml_script"
+    check_rc "pos bank add multiline exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b15.bank.env" "$pos_bank" show "ml-demo"
+    check_rc "pos bank show multiline exits 0" 0 "$TR_RC"
+    check_contains "pos bank show prints script shebang" '#!/usr/bin/env bash' "$TR_OUT"
+    check_contains "pos bank show prints loop line" 'while [ "$n" -lt 2 ]; do' "$TR_OUT"
+    check_contains "pos bank show prints arithmetic line" 'n=$((n + 1))' "$TR_OUT"
+    check_contains "pos bank show prints substitution echo" 'echo "round $n: $(printf' "$TR_OUT"
+
+    # B16: pos bank run multiline — executes the WHOLE script via eval of the full command
+    test_run env BANK_FILE="$sandbox/b15.bank.env" "$pos_bank" run "ml-demo"
+    check_rc "pos bank run multiline exits 0" 0 "$TR_RC"
+    check_contains "pos bank run multiline output line 1" "round 1: ok" "$TR_OUT"
+    check_contains "pos bank run multiline output line 2" "round 2: ok" "$TR_OUT"
 }

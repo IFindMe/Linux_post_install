@@ -114,12 +114,11 @@ cmd_show() {
     [ -n "${1:-}" ] || err "Usage: pos bank show <name>"
     local name="$1"
     bank_load
-    local entry
-    entry="$(bank_get "$name")" || err "Command not found: $name"
+    bank_find "$name" >/dev/null 2>&1 || err "Command not found: $name"
     local cmd_name cmd_desc cmd_cmd
-    cmd_name="$(printf '%s' "$entry" | cut -f1)"
-    cmd_desc="$(printf '%s' "$entry" | cut -f2)"
-    cmd_cmd="$(printf '%s' "$entry" | cut -f3)"
+    cmd_name="${BANK_NAMES[$BANK_IDX]}"
+    cmd_desc="${BANK_DESCS[$BANK_IDX]}"
+    cmd_cmd="${BANK_CMDS[$BANK_IDX]}"
     echo
     echo "Name: $cmd_name"
     echo
@@ -162,12 +161,11 @@ cmd_run() {
         done
     fi
     bank_load
-    local entry
-    entry="$(bank_get "$name")" || err "Command not found: $name"
+    bank_find "$name" >/dev/null 2>&1 || err "Command not found: $name"
     local cmd_name cmd_desc cmd_cmd
-    cmd_name="$(printf '%s' "$entry" | cut -f1)"
-    cmd_desc="$(printf '%s' "$entry" | cut -f2)"
-    cmd_cmd="$(printf '%s' "$entry" | cut -f3)"
+    cmd_name="${BANK_NAMES[$BANK_IDX]}"
+    cmd_desc="${BANK_DESCS[$BANK_IDX]}"
+    cmd_cmd="${BANK_CMDS[$BANK_IDX]}"
     # Detect parameters
     local params_str
     params_str="$(_extract_params "$cmd_cmd")"
@@ -218,12 +216,11 @@ cmd_edit() {
         name="$(_pick_command)" || return 0
     fi
     bank_load
-    local entry
-    entry="$(bank_get "$name")" || err "Command not found: $name"
+    bank_find "$name" >/dev/null 2>&1 || err "Command not found: $name"
     local old_name old_desc old_cmd
-    old_name="$(printf '%s' "$entry" | cut -f1)"
-    old_desc="$(printf '%s' "$entry" | cut -f2)"
-    old_cmd="$(printf '%s' "$entry" | cut -f3)"
+    old_name="${BANK_NAMES[$BANK_IDX]}"
+    old_desc="${BANK_DESCS[$BANK_IDX]}"
+    old_cmd="${BANK_CMDS[$BANK_IDX]}"
     echo
     log "Editing: $old_name"
     echo

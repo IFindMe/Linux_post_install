@@ -628,7 +628,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/menu-lib.sh` | 362 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default via raw-mode bracketed-paste-safe `menu_read_value`; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
 | `lib/registry.sh` | 199 | Shared query API for POS tool metadata headers (`# POS_*:`) — `reg_scan`/`reg_list`/`reg_lookup`/`reg_each`/config scope helpers; used by `pos-tree` and `gen-docs.sh` |
 | `lib/yt-lib.sh` | 50 | Shared YouTube helpers for `pos media yt *` (`yt_check_deps`, `yt_validate_url`, `yt_echo_cmd`, `classify_url`) — sourced by `yt-mp3`/`yt-mp4`/`yt-grab`/`yt-subtitles` |
-| `lib/bank-lib.sh` | 175 | Shared Command Bank storage helpers for `pos bank` (`bank_load`/`bank_save`/`bank_add`/`bank_remove`/`bank_update`, `{param}` template substitution; store `~/.config/linux_post_install/bank.env`) — sourced by `pos-bank` |
+| `lib/bank-lib.sh` | 183 | Shared Command Bank storage helpers for `pos bank` (`bank_load`/`bank_save`/`bank_add`/`bank_remove`/`bank_update`, `{param}` template substitution, v2 `\n`-escaped multiline storage with backward-compat raw load; store `~/.config/linux_post_install/bank.env`) — sourced by `pos-bank` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -686,7 +686,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
 | `bin/pos-system-uninstall` | 518 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
-| `bin/pos-bank` | 314 | Persistent command bank for saving and running shell commands |
+| `bin/pos-bank` | 311 | Persistent command bank for saving and running shell commands |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
 | `completions/pos.bash` | 331 | Dynamic bash completion |
