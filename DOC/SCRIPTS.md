@@ -45,7 +45,7 @@ The phases:
 | # | Phase | Script/action |
 |---|-------|----------------|
 | 1 | preinstall | `preinstall.sh` — apt packages + yt-dlp |
-| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` + `lib/registry.sh` + `lib/yt-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
+| 2 | scripts | Copies `bin/*` → `/usr/local/bin/` (755), `lib/common.sh` + `lib/flags.sh` + `lib/notify.sh` + `lib/entertainment-lib.sh` + `lib/entertainment-plugin-lib.sh` + `lib/scheduler-lib.sh` + `lib/config-ui.sh` + `lib/user-timers-lib.sh` + `lib/usb-lib.sh` + `lib/share-lib.sh` + `lib/menu-lib.sh` + `lib/registry.sh` + `lib/yt-lib.sh` + `lib/bank-lib.sh` → `/usr/local/bin/` (644). Copies precompiled arch binaries from `x64_bin/` (or `arm64_bin/`) → `/usr/local/bin/`. With `--feature`: also installs `features/*` (see below) |
 | 3 | postinstall | `postinstall.sh` — PATH, completion, SSH keys, systemd |
 | 4 | scalepoint | Shallow-clones ScaleTail templates to `/usr/local/share/linux_post_install/scale-tail` |
 | 5 (opt) | apps | `apps/install.sh` when `--apps` (interactive) or `--full` (all, non-interactive) |

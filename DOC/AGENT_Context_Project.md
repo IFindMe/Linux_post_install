@@ -21,8 +21,8 @@
 | ## 10. Configuration Files | 499–525 |
 | ## 11. Coding Conventions | 526–558 |
 | ## 12. Development Workflow | 559–611 |
-| ## 13. Key File Quick Reference | 612–696 |
-| ## 14. Common Tasks for Agents | 697–730 |
+| ## 13. Key File Quick Reference | 612–697 |
+| ## 14. Common Tasks for Agents | 698–731 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -232,7 +232,7 @@ User runs: ./install.sh [--apps|--full|--feature|--dry-run|--force|--skip <phase
 │   └─ Copies bin/* → /usr/local/bin/ (chmod 755)
 │   └─ Copies lib/*.sh (common, flags, notify, registry, entertainment-lib,
 │      scheduler-lib, config-ui, user-timers-lib, entertainment-plugin-lib,
-│      usb-lib, share-lib, menu-lib, yt-lib) → /usr/local/bin/ (chmod 644)
+│      usb-lib, share-lib, menu-lib, yt-lib, bank-lib) → /usr/local/bin/ (chmod 644)
 │   └─ Copies x64_bin/* → /usr/local/bin/ on x86_64 (arm64_bin/ on aarch64)
 │   └─ [if --feature] Copies features/* → /usr/local/bin/ (asks before overwriting),
 │                      then sets the matching feature flag
@@ -628,6 +628,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `lib/menu-lib.sh` | 362 | Category-neutral interactive menu primitives (`menu_guard` tty guard, `menu_run` looping boxed menu, `menu_pick` type-to-filter picker, `menu_ask_value` prompt-with-default via raw-mode bracketed-paste-safe `menu_read_value`; stderr render, fail-closed on non-tty/EOF) — sourced by `share-lib.sh`, open to any category |
 | `lib/registry.sh` | 199 | Shared query API for POS tool metadata headers (`# POS_*:`) — `reg_scan`/`reg_list`/`reg_lookup`/`reg_each`/config scope helpers; used by `pos-tree` and `gen-docs.sh` |
 | `lib/yt-lib.sh` | 50 | Shared YouTube helpers for `pos media yt *` (`yt_check_deps`, `yt_validate_url`, `yt_echo_cmd`, `classify_url`) — sourced by `yt-mp3`/`yt-mp4`/`yt-grab`/`yt-subtitles` |
+| `lib/bank-lib.sh` | 175 | Shared Command Bank storage helpers for `pos bank` (`bank_load`/`bank_save`/`bank_add`/`bank_remove`/`bank_update`, `{param}` template substitution; store `~/.config/linux_post_install/bank.env`) — sourced by `pos-bank` |
 | `bin/flag-reader` | 58 | Inspect flags (list/status/`--raw`) |
 | `bin/flag-set` | 21 | Set a flag (optionally with a value) |
 | `bin/flag-clear` | 21 | Unset a flag |
@@ -683,7 +684,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |
-| `bin/pos-system-uninstall` | 517 | Remove pos toolkit binaries, services, shell integration, config, and data |
+| `bin/pos-system-uninstall` | 518 | Remove pos toolkit binaries, services, shell integration, config, and data |
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-bank` | 313 | Persistent command bank for saving and running shell commands |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |

@@ -175,7 +175,7 @@ if should_run 2 scripts; then
     done
     lib_count=0
     lib_names=""
-    for lf in common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh user-timers-lib.sh entertainment-plugin-lib.sh usb-lib.sh share-lib.sh menu-lib.sh registry.sh yt-lib.sh; do
+    for lf in common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh user-timers-lib.sh entertainment-plugin-lib.sh usb-lib.sh share-lib.sh menu-lib.sh registry.sh yt-lib.sh bank-lib.sh; do
         run sudo install -m 644 "lib/$lf" "/usr/local/bin/$lf"
         lib_count=$((lib_count + 1))
         lib_names+="$lf "
