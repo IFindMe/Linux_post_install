@@ -42,7 +42,7 @@ summary (newest last).
 
 ## Done
 
-- **`pos bank` command bank** — feature (41efc91) + lib registration fix (73d15a2) + main-menu visibility & `run` crash fix. Done 2026-09-12.
+- **`pos bank` command bank** — feature (41efc91) + lib registration fix (73d15a2) + main-menu visibility & `run` crash fix (c5d501a) + tab-completion of category-less tools (e23d57e) + multiline command storage/execution fix (11b4a67, v2 escaped format with backward compat). Done 2026-09-12.
 
 - **2026-09-09** — New `pos system alias` tool (Architect→Builder→Reviewer→Writer): persistent command aliases via wrapper scripts in `~/.local/bin/`. Interactive menu (create/edit/remove/list/show), storage at `~/.config/linux_post_install/aliases.env` (pipe-delimited `name|command`), wrapper sync on every invocation, name validation (`^[a-zA-Z][a-zA-Z0-9_-]*$`), ownership markers, collision checks. Docs: POS.md system category + detail block, howto/system.md recipes section. Verified: `bash -n`, `make gen` byte-idempotent, `make check` OK, `make lint` 0 FAIL / 0 WARN.
 
