@@ -8,6 +8,9 @@ CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 CONFIG_FILE="$CONFIG_DIR/telegram.env"
 MAP_FILE="$CONFIG_DIR/telegram_commands.env"
 PREFIX_FILE="$CONFIG_DIR/telegram_prefixes.env"
+# Persisted getUpdates offset (survives restarts so unconfirmed updates are
+# never re-delivered in a burst after a crash/restart).
+STATE_FILE="${LISTENER_STATE_FILE:-$CONFIG_DIR/telegram-listener.state}"
 API="https://api.telegram.org"
 SERVICE="pos-telegram-listener.service"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -95,6 +98,31 @@ EOF
 # ── telegram.env (same pattern as pos-communication-telegram) ────
 load_config() {
     load_env_file "$CONFIG_FILE"
+}
+
+# ── getUpdates offset persistence ────────────────────────────────
+# load_offset — read the last confirmed update offset from STATE_FILE.
+# Returns 0 when the file is missing/invalid (fresh start).
+load_offset() {
+    local val
+    [ -f "$STATE_FILE" ] || { printf '0'; return 0; }
+    val="$(cat "$STATE_FILE" 2>/dev/null || true)"
+    case "$val" in
+        ''|*[!0-9]*) printf '0' ;;
+        *) printf '%s' "$val" ;;
+    esac
+}
+
+# save_offset — atomically persist the last processed update offset.
+save_offset() {
+    local val="$1"
+    mkdir -p "$(dirname "$STATE_FILE")"
+    local tmp
+    tmp="$(mktemp)"
+    printf '%s\n' "$val" > "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$STATE_FILE"
+    chmod 600 "$STATE_FILE"
 }
 
 # ── command map (MAP_FILE) ──────────────────────────────────────
@@ -347,9 +375,12 @@ prefix_map_show() {
 #
 # PID → metadata arrays (populated by run_and_reply, drained by reap_commands)
 declare -A _CMD_OUT _CMD_MSG _CMD_QUIET
-# Exit codes stored by the SIGCHLD handler (wait -n) so reap_commands can
-# retrieve them without calling blocking wait.
-declare -A _EXIT_CODES
+#
+# No SIGCHLD reaper: `wait -n`/`wait -n -p` inside a CHLD trap is unreliable
+# on bash 5.2 (it reports "no children" even when processes have exited), so
+# a trap-based reaper silently never fires. reap_commands below polls with
+# kill -0 and reaps via `wait "$pid" || rc=$?` — simple, non-blocking, and
+# exit-code-correct (see the crash this design replaces).
 
 # run_and_reply <cmdline> <msg_id> [timeout] [quiet]
 # Starts the command in the background and returns immediately.  The main
@@ -376,13 +407,12 @@ reap_commands() {
     for pid in "${!_CMD_OUT[@]}"; do
         # Non-blocking: has the process exited?
         if ! kill -0 "$pid" 2>/dev/null; then
-            # Retrieve exit code (SIGCHLD handler stores it; fallback to wait).
-            local rc="${_EXIT_CODES[$pid]:-}"
-            if [ -n "$rc" ]; then
-                unset _EXIT_CODES[$pid]
-            else
-                wait "$pid" 2>/dev/null; rc=$?
-            fi
+            # Retrieve exit code. `wait "$pid"` returns immediately since the
+            # process has exited. IMPORTANT: a bare `wait "$pid"` under
+            # `set -e` would abort the daemon on non-zero exits (the crash
+            # this code replaces), so the status is captured via `|| rc=$?`.
+            local rc=0
+            wait "$pid" 2>/dev/null || rc=$?
             local out_file="${_CMD_OUT[$pid]}"
             local msg_id="${_CMD_MSG[$pid]}"
             local quiet="${_CMD_QUIET[$pid]}"
@@ -831,11 +861,15 @@ run_daemon() {
     fi
     sync_bot_commands || true
 
-    local offset=0
-    log "listener running (chat ${TELEGRAM_CHAT_ID}, owner ${TELEGRAM_OWNER_ID:-unset}) — Ctrl+C to stop"
-    # SIGCHLD: reap finished children and store their exit codes so
-    # reap_commands can retrieve them without blocking.
-    trap 'local _p; while _p=$(wait -n 2>/dev/null); do _EXIT_CODES[$_p]=$?; done' CHLD
+    # Resume from the last persisted update offset so unconfirmed updates are
+    # not re-delivered in a burst after a crash/restart (systemd Restart=always
+    # used to restart from 0 and re-run duplicate commands).
+    local offset
+    offset="$(load_offset)"
+    log "listener running (chat ${TELEGRAM_CHAT_ID}, owner ${TELEGRAM_OWNER_ID:-unset}, offset ${offset}) — Ctrl+C to stop"
+    # No SIGCHLD reaper here: `wait -n` inside a CHLD trap is unreliable on
+    # bash 5.2 (see the note near the _CMD_* arrays). reap_commands handles
+    # finished children after each polling cycle.
     trap 'kill $(jobs -p) 2>/dev/null; rm -f /tmp/pos-cmd.* 2>/dev/null; wait 2>/dev/null; exit 0' TERM INT
     while true; do
         local resp n i
@@ -857,6 +891,7 @@ run_daemon() {
             msg_id="$(printf '%s' "$resp" | jq -r ".result[$i].message.message_id // empty")"
             reply_text="$(printf '%s' "$resp" | jq -r ".result[$i].message.reply_to_message.text // .result[$i].message.reply_to_message.caption // empty")"
             offset=$((u + 1))
+            save_offset "$offset"
             [ -n "$text" ] || continue
             if [ -z "${TELEGRAM_OWNER_ID:-}" ]; then
                 warn "TELEGRAM_OWNER_ID unset — ignoring command (set it with 'pos config telegram')"
