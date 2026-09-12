@@ -464,4 +464,190 @@ SCRIPT
     check_rc "pos system bank run multiline exits 0" 0 "$TR_RC"
     check_contains "pos system bank run multiline output line 1" "round 1: ok" "$TR_OUT"
     check_contains "pos system bank run multiline output line 2" "round 2: ok" "$TR_OUT"
+
+    # ═══════════════════════════════════════════════════════════════
+    # Part B2: pos system bank alias — managed ~/.bashrc block
+    # ═══════════════════════════════════════════════════════════════
+
+    local A_START='# >>> pos bank aliases (managed by pos system bank — do not hand-edit) <<<'
+    local A_END='# <<< pos bank aliases (managed by pos system bank) <<<'
+
+    # B17: alias create writes the managed block with the exact line format
+    : > "$sandbox/b17.bank.env"
+    : > "$sandbox/b17.bashrc"
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b17.bashrc" "$pos_bank" add "backup" "Backup" "rsync -a src/ dst/"
+    check_rc "pos system bank add for alias exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b17.bashrc" "$pos_bank" alias "backup" "bk"
+    check_rc "pos system bank alias create exits 0" 0 "$TR_RC"
+    check_contains "pos system bank alias create confirms" "Alias 'bk'" "$TR_OUT"
+    check_contains "pos system bank alias create hints source" "source $sandbox/b17.bashrc" "$TR_OUT"
+    if grep -qF "alias bk='pos system bank run backup'" "$sandbox/b17.bashrc" \
+        && grep -qF "$A_START" "$sandbox/b17.bashrc" \
+        && grep -qF "$A_END" "$sandbox/b17.bashrc"; then
+        printf '  PASS  alias create writes managed block with exact line\n'
+    else
+        printf '  FAIL  alias create writes managed block with exact line\n'
+    fi
+
+    # B18: alias create is idempotent — same alias name stays a single line
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b17.bashrc" "$pos_bank" alias "backup" "bk"
+    check_rc "pos system bank alias create idempotent exits 0" 0 "$TR_RC"
+    local cnt18
+    cnt18="$(grep -c '^alias bk=' "$sandbox/b17.bashrc" || true)"
+    [ "$cnt18" -eq 1 ] && printf '  PASS  alias create stays a single line when repeated\n' \
+        || printf '  FAIL  alias create stays a single line when repeated (count=%s)\n' "$cnt18"
+
+    # B19: alias list — shows the header and the alias row
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b17.bashrc" "$pos_bank" alias list
+    check_rc "pos system bank alias list exits 0" 0 "$TR_RC"
+    check_contains "pos system bank alias list shows header" "BANK ALIASES" "$TR_OUT"
+    check_contains "pos system bank alias list shows bk row" "bk" "$TR_OUT"
+    check_contains "pos system bank alias list shows target" "pos system bank run backup" "$TR_OUT"
+
+    # B20: alias list without a block errors
+    : > "$sandbox/b20.bashrc"
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b20.bashrc" "$pos_bank" alias list
+    check_not_contains "pos system bank alias list no-block exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias list no-block message" "No alias block" "$TR_OUT"
+
+    # B21: alias for an unknown bank command errors
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b17.bashrc" "$pos_bank" alias "ghost"
+    check_not_contains "pos system bank alias unknown bank exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias unknown bank message" "Command not found" "$TR_OUT"
+
+    # B22: invalid alias name errors
+    test_run env BANK_FILE="$sandbox/b17.bank.env" BASH_RC_FILE="$sandbox/b17.bashrc" "$pos_bank" alias "backup" "1bad"
+    check_not_contains "pos system bank alias invalid name exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias invalid name message" "Invalid alias name" "$TR_OUT"
+
+    # B23: PATH-shadowed alias warns (non-blocking)
+    : > "$sandbox/b23.bank.env"
+    : > "$sandbox/b23.bashrc"
+    test_run env BANK_FILE="$sandbox/b23.bank.env" BASH_RC_FILE="$sandbox/b23.bashrc" "$pos_bank" add "cat" "Cat" "cat file"
+    check_rc "pos system bank add path-shadow cmd exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b23.bank.env" BASH_RC_FILE="$sandbox/b23.bashrc" "$pos_bank" alias "cat"
+    check_rc "pos system bank alias path-shadow still exits 0" 0 "$TR_RC"
+    check_contains "pos system bank alias path-shadow warns" "also a command on PATH" "$TR_OUT"
+
+    # B24: alias colliding with an outer (unmanaged) alias is refused, file untouched
+    : > "$sandbox/b24.bank.env"
+    printf '%s\n' "alias ls='ls --color=auto'" "# my config" > "$sandbox/b24.bashrc"
+    test_run env BANK_FILE="$sandbox/b24.bank.env" BASH_RC_FILE="$sandbox/b24.bashrc" "$pos_bank" add "ls" "Ls" "ls -la"
+    check_rc "pos system bank add for collision exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b24.bank.env" BASH_RC_FILE="$sandbox/b24.bashrc" "$pos_bank" alias "ls"
+    check_not_contains "pos system bank alias collision exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias collision message" "already defined outside the managed block" "$TR_OUT"
+    if grep -qF "alias ls='ls --color=auto'" "$sandbox/b24.bashrc" \
+        && ! grep -qF "$A_START" "$sandbox/b24.bashrc"; then
+        printf '  PASS  alias collision leaves bashrc untouched\n'
+    else
+        printf '  FAIL  alias collision leaves bashrc untouched\n'
+    fi
+
+    # B25: retarget + multiple aliases — alias name is the key; alias <name> [alias_name]
+    : > "$sandbox/b25.bank.env"
+    : > "$sandbox/b25.bashrc"
+    test_run env BANK_FILE="$sandbox/b25.bank.env" BASH_RC_FILE="$sandbox/b25.bashrc" "$pos_bank" add "backup" "Backup" "rsync"
+    test_run env BANK_FILE="$sandbox/b25.bank.env" BASH_RC_FILE="$sandbox/b25.bashrc" "$pos_bank" add "df-x" "Df" "df -h"
+    test_run env BANK_FILE="$sandbox/b25.bank.env" BASH_RC_FILE="$sandbox/b25.bashrc" "$pos_bank" alias "backup" "bk"
+    check_rc "pos system bank alias first exits 0" 0 "$TR_RC"
+    # retarget: same alias name bk now points at df-x via a different bank name
+    test_run env BANK_FILE="$sandbox/b25.bank.env" BASH_RC_FILE="$sandbox/b25.bashrc" "$pos_bank" alias "df-x" "bk"
+    check_rc "pos system bank alias retarget exits 0" 0 "$TR_RC"
+    if grep -qF "alias bk='pos system bank run df-x'" "$sandbox/b25.bashrc" \
+        && ! grep -qF "alias bk='pos system bank run backup'" "$sandbox/b25.bashrc"; then
+        printf '  PASS  alias with same alias name retargets the existing line\n'
+    else
+        printf '  FAIL  alias with same alias name retargets the existing line\n'
+    fi
+    # a second distinct alias for the same bank command is allowed
+    test_run env BANK_FILE="$sandbox/b25.bank.env" BASH_RC_FILE="$sandbox/b25.bashrc" "$pos_bank" alias "backup" "bku"
+    check_rc "pos system bank alias second name exits 0" 0 "$TR_RC"
+    local cnt25
+    cnt25="$(grep -c '^alias ' "$sandbox/b25.bashrc" || true)"
+    [ "$cnt25" -eq 2 ] && printf '  PASS  two aliases coexist (2 lines)\n' \
+        || printf '  FAIL  two aliases coexist (lines=%s)\n' "$cnt25"
+
+    # B26: alias remove keeps the block when other aliases remain
+    test_run env BANK_FILE="$sandbox/b25.bank.env" BASH_RC_FILE="$sandbox/b25.bashrc" "$pos_bank" alias remove "bk"
+    check_rc "pos system bank alias remove exits 0" 0 "$TR_RC"
+    check_contains "pos system bank alias remove confirms" "Removed alias 'bk'" "$TR_OUT"
+    if grep -qF "$A_START" "$sandbox/b25.bashrc" && grep -qF "$A_END" "$sandbox/b25.bashrc" \
+        && ! grep -qF "alias bk=" "$sandbox/b25.bashrc" \
+        && grep -qF "alias bku=" "$sandbox/b25.bashrc"; then
+        printf '  PASS  alias remove keeps block with remaining aliases\n'
+    else
+        printf '  FAIL  alias remove keeps block with remaining aliases\n'
+    fi
+
+    # B27: removing the last alias cleans the block from the file entirely
+    : > "$sandbox/b27.bank.env"
+    : > "$sandbox/b27.bashrc"
+    test_run env BANK_FILE="$sandbox/b27.bank.env" BASH_RC_FILE="$sandbox/b27.bashrc" "$pos_bank" add "deploy" "Deploy" "deploy.sh"
+    test_run env BANK_FILE="$sandbox/b27.bank.env" BASH_RC_FILE="$sandbox/b27.bashrc" "$pos_bank" alias "deploy" "d"
+    test_run env BANK_FILE="$sandbox/b27.bank.env" BASH_RC_FILE="$sandbox/b27.bashrc" "$pos_bank" alias remove "d"
+    check_rc "pos system bank alias remove last exits 0" 0 "$TR_RC"
+    if ! grep -qF "$A_START" "$sandbox/b27.bashrc" && [ ! -s "$sandbox/b27.bashrc" ]; then
+        printf '  PASS  removing last alias cleans block and empties file\n'
+    else
+        printf '  FAIL  removing last alias cleans block and empties file\n'
+    fi
+
+    # B28: removing a missing alias errors (block present)
+    : > "$sandbox/b28.bank.env"
+    : > "$sandbox/b28.bashrc"
+    test_run env BANK_FILE="$sandbox/b28.bank.env" BASH_RC_FILE="$sandbox/b28.bashrc" "$pos_bank" add "deploy" "Deploy" "deploy.sh"
+    test_run env BANK_FILE="$sandbox/b28.bank.env" BASH_RC_FILE="$sandbox/b28.bashrc" "$pos_bank" alias "deploy" "d"
+    test_run env BANK_FILE="$sandbox/b28.bank.env" BASH_RC_FILE="$sandbox/b28.bashrc" "$pos_bank" alias remove "nope"
+    check_not_contains "pos system bank alias remove missing exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias remove missing message" "not found" "$TR_OUT"
+
+    # B29: bank remove also drops aliases pointing at the removed command
+    : > "$sandbox/b29.bank.env"
+    : > "$sandbox/b29.bashrc"
+    test_run env BANK_FILE="$sandbox/b29.bank.env" BASH_RC_FILE="$sandbox/b29.bashrc" "$pos_bank" add "foo" "Foo" "echo foo"
+    test_run env BANK_FILE="$sandbox/b29.bank.env" BASH_RC_FILE="$sandbox/b29.bashrc" "$pos_bank" alias "foo" "f"
+    test_run env BANK_FILE="$sandbox/b29.bank.env" BASH_RC_FILE="$sandbox/b29.bashrc" "$pos_bank" remove "foo"
+    check_rc "pos system bank remove with alias exits 0" 0 "$TR_RC"
+    check_contains "pos system bank remove mentions alias cleanup" "Removed alias pointing to 'foo'" "$TR_OUT"
+    check_contains "pos system bank remove confirms" "Removed: foo" "$TR_OUT"
+    if ! grep -qF "alias f=" "$sandbox/b29.bashrc" && ! grep -qF "$A_START" "$sandbox/b29.bashrc"; then
+        printf '  PASS  bank remove drops alias and cleans block\n'
+    else
+        printf '  FAIL  bank remove drops alias and cleans block\n'
+    fi
+
+    # B30: unrelated bashrc content survives an alias add+remove round-trip byte-identically
+    : > "$sandbox/b30.bank.env"
+    printf '%s\n' "# user config" "export EDITOR=vim" "PATH=/custom:\$PATH" > "$sandbox/b30.orig"
+    cp "$sandbox/b30.orig" "$sandbox/b30.bashrc"
+    test_run env BANK_FILE="$sandbox/b30.bank.env" BASH_RC_FILE="$sandbox/b30.bashrc" "$pos_bank" add "tool" "Tool" "tool-cmd"
+    test_run env BANK_FILE="$sandbox/b30.bank.env" BASH_RC_FILE="$sandbox/b30.bashrc" "$pos_bank" alias "tool" "tl"
+    check_rc "pos system bank alias on custom bashrc exits 0" 0 "$TR_RC"
+    test_run env BANK_FILE="$sandbox/b30.bank.env" BASH_RC_FILE="$sandbox/b30.bashrc" "$pos_bank" alias remove "tl"
+    check_rc "pos system bank alias remove on custom bashrc exits 0" 0 "$TR_RC"
+    if cmp -s "$sandbox/b30.orig" "$sandbox/b30.bashrc"; then
+        printf '  PASS  unrelated bashrc content preserved byte-identically\n'
+    else
+        printf '  FAIL  unrelated bashrc content preserved byte-identically\n'
+    fi
+
+    # B31: malformed block (start marker without end) errors instead of rewriting
+    printf '%s\n' "$A_START" "alias broken='pos system bank run junk'" > "$sandbox/b31.bashrc"
+    : > "$sandbox/b31.bank.env"
+    test_run env BANK_FILE="$sandbox/b31.bank.env" BASH_RC_FILE="$sandbox/b31.bashrc" "$pos_bank" alias list
+    check_not_contains "pos system bank alias malformed block exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias malformed block message" "malformed" "$TR_OUT"
+
+    # B32: empty block lists cleanly
+    printf '%s\n' "$A_START" "$A_END" > "$sandbox/b32.bashrc"
+    : > "$sandbox/b32.bank.env"
+    test_run env BANK_FILE="$sandbox/b32.bank.env" BASH_RC_FILE="$sandbox/b32.bashrc" "$pos_bank" alias list
+    check_rc "pos system bank alias empty block exits 0" 0 "$TR_RC"
+    check_contains "pos system bank alias empty block message" "No aliases" "$TR_OUT"
+
+    # B33: alias remove without a name on a non-tty errors with usage
+    test_run env BANK_FILE="$sandbox/b27.bank.env" BASH_RC_FILE="$sandbox/b27.bashrc" "$pos_bank" alias remove
+    check_not_contains "pos system bank alias remove no-arg exits non-zero" "0" "$TR_RC"
+    check_contains "pos system bank alias remove no-arg usage" "pos system bank alias remove" "$TR_OUT"
 }

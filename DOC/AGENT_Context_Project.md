@@ -643,7 +643,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-communication-matrix-listener` | 582 | Matrix listener: map /command → bash, run them on room messages |
 | `bin/pos-communication-matrix-sender` | 215 | Send messages to a Matrix room via the client-server API (send, test, login) |
 | `bin/pos-communication-scrcpy` | 245 | Mirror/control an Android device via scrcpy+adb (mirror, devices, record, tcpip, connect, push, pull, screenshot, info) |
-| `bin/pos-communication-telegram-listener` | 889 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
+| `bin/pos-communication-telegram-listener` | 924 | Telegram bot listener: map /command → bash and <prefix> → app, run them on chat messages |
 | `bin/pos-communication-telegram-sender` | 212 | Send Telegram messages/files/links/stickers via Bot API (send, test) |
 | `bin/pos-docker-compose` | 487 | Docker Compose service manager (ls/up/down/restart/logs/update/config) |
 | `bin/pos-docker-health` | 107 | One-glance container health dashboard (exits 1 if unhealthy) |
@@ -678,7 +678,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 301 | Encrypted (AES-256) folder snapshots (tar + gpg) |
-| `bin/pos-system-bank` | 311 | Persistent command bank for saving and running shell commands |
+| `bin/pos-system-bank` | 647 | Persistent command bank for saving and running shell commands |
 | `bin/pos-system-firewall` | 325 | Interactive UFW management |
 | `bin/pos-system-health` | 209 | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL |
 | `bin/pos-system-schedule` | 151 | Scheduled jobs: run a command on a timer; notify on threshold/change/error/always or silently |

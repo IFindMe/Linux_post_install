@@ -1,7 +1,8 @@
 # How-To: `pos system`
 
-Host care: encrypted backups, firewall, health dashboard, and uninstall. Tools:
-`backup`, `firewall`, `health`, `uninstall`.
+Host care: encrypted backups, firewall, health dashboard, uninstall, and the
+persistent command bank. Tools: `backup`, `firewall`, `health`, `uninstall`,
+`bank`.
 
 | Tool | What it does |
 |------|--------------|
@@ -9,6 +10,7 @@ Host care: encrypted backups, firewall, health dashboard, and uninstall. Tools:
 | `pos system backup` | gpg-encrypted (AES-256) folder snapshots |
 | `pos system firewall` | Interactive UFW ("UFW POWER") management |
 | `pos system uninstall` | Safe, interactive uninstaller for the pos toolkit |
+| `pos system bank` | Persistent command bank — save, run, and alias shell commands |
 
 ---
 
@@ -232,6 +234,39 @@ confirmation. The git repo is **never** removed — delete it manually if desire
 **Troubleshooting:**
 - "Nothing to remove" → pos toolkit is not installed (or already removed)
 - After uninstall, run `source ~/.bashrc` or restart your shell
+
+## `pos system bank` — persistent command bank + bash aliases
+
+```bash
+pos system bank add convert "Convert video" "ffmpeg -i {input} -crf {quality} {output}"
+pos system bank list
+pos system bank run convert input=clip.mp4 quality=23 output=clip.mkv
+pos system bank alias convert conv    # bash alias: conv='pos system bank run convert'
+pos system bank alias list
+```
+
+The bank is a persistent store of shell commands in
+`~/.config/linux_post_install/bank.env` (pipe-delimited, chmod 600, managed by
+the tool). `{param}` placeholders are substituted at run time; on a TTY with no
+arguments the tool opens an interactive menu.
+
+**Bash aliases** are written to `~/.bashrc` inside a managed block
+(`# >>> pos bank aliases … <<<`), one line per alias:
+`alias <alias_name>='pos system bank run <name>'`. Details:
+
+- Default alias name is the bank name; pass a second argument for a shorter one:
+  `pos system bank alias convert conv`.
+- Reusing an alias name **retargets** it to the new bank command; removing the
+  last alias removes the whole managed block.
+- An alias name already defined elsewhere in `~/.bashrc` is **refused** (shown
+  with its line) so the managed block never shadows your own config. Aliasing a
+  command that also exists on `PATH` prints a non-blocking notice that it will
+  shadow the real command in interactive shells.
+- `pos system bank remove <name>` also drops aliases pointing at the removed
+  command.
+
+After adding/removing an alias, run `source ~/.bashrc` (or open a new shell)
+for it to take effect.
 
 ---
 

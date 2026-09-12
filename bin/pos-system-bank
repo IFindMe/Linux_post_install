@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # POS: system bank — Persistent command bank for saving and running shell commands
-# POS_SUBCMDS: list add show run edit remove
+# POS_SUBCMDS: list add show run edit remove alias
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
@@ -20,6 +20,9 @@ Subcommands:
   run <name> [key=val ...] Run a command (interactive for missing params)
   edit <name>           Edit an existing command
   remove <name>         Remove a command
+  alias <name> [alias_name]  Create/update a bash alias for a bank command
+  alias list            List bash aliases in ~/.bashrc
+  alias remove <alias_name>  Remove a bash alias
 
 Interactive menu:
   pos system bank              (no args on a terminal)
@@ -258,7 +261,337 @@ cmd_remove() {
         confirm "Remove '$name'?" n || { log "Cancelled"; return 0; }
     fi
     bank_remove "$name"
+    # Drop bash aliases pointing at the removed command (best-effort upkeep;
+    # a malformed block is a warning, never a remove blocker).
+    if [ -f "$BASH_RC_FILE" ] && grep -qF "$ALIAS_START" "$BASH_RC_FILE"; then
+        if alias_block_parse; then
+            local -a keep=() i
+            local removed_alias=0
+            for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+                if [[ "${ALIAS_TARGETS[${ALIAS_NAMES[$i]}]:-}" == "$name" ]]; then
+                    removed_alias=1
+                else
+                    keep+=("${ALIAS_NAMES[$i]}")
+                fi
+            done
+            if [ "$removed_alias" -eq 1 ]; then
+                ALIAS_NAMES=("${keep[@]}")
+                alias_block_write
+                log "Removed alias pointing to '$name' from $BASH_RC_FILE"
+            fi
+        else
+            local rc=$?
+            [ "$rc" -eq 2 ] && warn "Alias block in $BASH_RC_FILE is malformed — left untouched"
+        fi
+    fi
     ok "Removed: $name"
+}
+
+# ── Alias management ─────────────────────────────────────────────
+# Bash aliases for bank commands live in a single managed block inside
+# $BASH_RC_FILE (~/.bashrc by default), so they survive rebuilds and are easy
+# to see/undo by hand. Every line has the exact shape:
+#   alias <alias_name>='pos system bank run <bank_name>'
+# The block is written atomically (tmp + mv, preserving file permissions).
+ALIAS_START='# >>> pos bank aliases (managed by pos system bank — do not hand-edit) <<<'
+ALIAS_END='# <<< pos bank aliases (managed by pos system bank) <<<'
+BASH_RC_FILE="${BASH_RC_FILE:-$HOME/.bashrc}"
+
+# Valid bash alias names we manage: letters/digits/_/- (same rule as bank names).
+alias_valid_name() {
+    [[ "$1" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]
+}
+
+# Parse the managed block from $BASH_RC_FILE into:
+#   ALIAS_NAMES   — ordered array of alias names (file order, unique)
+#   ALIAS_TARGETS — assoc: alias_name → bank command name
+# Returns: 0 = healthy block present, 1 = no block, 2 = malformed block.
+alias_block_parse() {
+    declare -g -a ALIAS_NAMES
+    declare -g -A ALIAS_TARGETS
+    ALIAS_NAMES=()
+    ALIAS_TARGETS=()
+    [ -f "$BASH_RC_FILE" ] || return 1
+    local line in_block=0 starts=0 ends=0 rc=0
+    while IFS= read -r line; do
+        if [ "$in_block" -eq 0 ]; then
+            if [[ "$line" == "$ALIAS_START" ]]; then
+                in_block=1
+                starts=$((starts + 1))
+                [ "$starts" -gt 1 ] && rc=2
+            elif [[ "$line" == "$ALIAS_END" ]]; then
+                rc=2
+            fi
+        elif [[ "$line" == "$ALIAS_END" ]]; then
+            in_block=0
+            ends=$((ends + 1))
+        elif [[ "$line" =~ ^alias[[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)= ]]; then
+            # NOTE: no `'` inside the =~ regex (bash treats quotes there as
+            # quoting operators and would literalize the ( ) groups) — the
+            # quoted payload is matched with a glob `case` instead.
+            local a="${BASH_REMATCH[1]}"
+            local payload="${line#*=}"
+            case "$payload" in
+                "'pos system bank run "[a-zA-Z][a-zA-Z0-9_-]*"'")
+                    local t="${payload%\'}"
+                    t="${t#\'pos system bank run }"
+                    if [[ " ${ALIAS_NAMES[*]:-} " == *" $a "* ]]; then
+                        rc=2
+                        continue
+                    fi
+                    ALIAS_NAMES+=("$a")
+                    ALIAS_TARGETS["$a"]="$t"
+                    ;;
+                *) rc=2 ;;
+            esac
+        else
+            rc=2
+        fi
+    done < "$BASH_RC_FILE"
+    [ "$in_block" -eq 1 ] && rc=2
+    [ "$rc" -eq 0 ] && [ "$starts" -eq 0 ] && return 1
+    return "$rc"
+}
+
+# Require a healthy managed block (alias commands err on missing/malformed).
+alias_block_require() {
+    local rc
+    if alias_block_parse; then
+        return 0
+    else
+        rc=$?
+    fi
+    if [ "$rc" -eq 1 ]; then
+        err "No alias block in $BASH_RC_FILE — add one with: pos system bank alias <name>"
+    fi
+    err "Alias block in $BASH_RC_FILE is malformed (markers or lines were hand-edited) — fix it manually, then retry"
+}
+
+# Scan for an alias NAME defined OUTSIDE the managed block (a collision we
+# refuse to overwrite). Prints the offending line; rc 0 = found, 1 = clean.
+alias_collision() {
+    local name="$1"
+    [ -f "$BASH_RC_FILE" ] || return 1
+    local line in_block=0
+    while IFS= read -r line; do
+        if [ "$in_block" -eq 0 ] && [[ "$line" == "$ALIAS_START" ]]; then
+            in_block=1
+            continue
+        fi
+        if [ "$in_block" -eq 1 ] && [[ "$line" == "$ALIAS_END" ]]; then
+            in_block=0
+            continue
+        fi
+        if [ "$in_block" -eq 0 ] && [[ "$line" =~ ^[[:space:]]*alias[[:space:]]+$name= ]]; then
+            printf '%s\n' "$line"
+            return 0
+        fi
+    done < "$BASH_RC_FILE"
+    return 1
+}
+
+# Rewrite $BASH_RC_FILE from ALIAS_NAMES + ALIAS_TARGETS. Callers guarantee the
+# file is absent or has at most one healthy block. Removes the block entirely
+# when ALIAS_NAMES is empty; appends a fresh block when none exists yet.
+alias_block_write() {
+    local content="" start_line=0 end_line=0 n=0 line
+    local pre="" post="" dir perms tmp new_content=""
+    if [ -f "$BASH_RC_FILE" ]; then
+        content="$(< "$BASH_RC_FILE")"
+        perms="$(stat -c %a "$BASH_RC_FILE" 2>/dev/null || printf '600')"
+        while IFS= read -r line; do
+            n=$((n + 1))
+            if [ "$start_line" -eq 0 ] && [[ "$line" == "$ALIAS_START" ]]; then
+                start_line=$n
+            elif [ "$start_line" -gt 0 ] && [ "$end_line" -eq 0 ] && [[ "$line" == "$ALIAS_END" ]]; then
+                end_line=$n
+            fi
+        done <<< "$content"
+        if [ "$start_line" -gt 0 ] && [ "$end_line" -eq 0 ]; then
+            err "Alias block in $BASH_RC_FILE has no end marker — fix it manually, then retry"
+        fi
+    else
+        perms=600
+    fi
+    # No block and nothing to manage → never touch the file (nor create it).
+    if [ "$start_line" -eq 0 ] && [ "${#ALIAS_NAMES[@]}" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$start_line" -gt 0 ]; then
+        # NOTE: sed "1,0p" is NOT empty in GNU sed (0 is a last-line sentinel,
+        # it prints line 1) — guard the ranges so edge blocks rewrite cleanly.
+        if [ "$start_line" -gt 1 ]; then
+            pre="$(printf '%s\n' "$content" | sed -n "1,$((start_line - 1))p")"
+        fi
+        if [ "$end_line" -lt "$n" ]; then
+            post="$(printf '%s\n' "$content" | sed -n "$((end_line + 1)),\$p")"
+        fi
+    else
+        pre="$(printf '%s\n' "$content")"
+    fi
+    if [ -n "$pre" ]; then
+        new_content+="$pre"
+        case "$new_content" in
+            *$'\n') ;;
+            *) new_content+=$'\n' ;;
+        esac
+    fi
+    if [ "${#ALIAS_NAMES[@]}" -gt 0 ]; then
+        new_content+="$ALIAS_START"$'\n'
+        local i
+        for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+            new_content+="alias ${ALIAS_NAMES[$i]}='pos system bank run ${ALIAS_TARGETS[${ALIAS_NAMES[$i]}]:-}'"$'\n'
+        done
+        new_content+="$ALIAS_END"$'\n'
+    fi
+    if [ -n "$post" ]; then
+        new_content+="$post"
+        case "$new_content" in
+            *$'\n') ;;
+            *) new_content+=$'\n' ;;
+        esac
+    fi
+    dir="$(dirname "$BASH_RC_FILE")"
+    mkdir -p "$dir" || err "Cannot create directory: $dir"
+    tmp="$(mktemp "${dir}/.pos-bank-aliases.XXXXXX")" || err "Cannot create temp file in $dir"
+    printf '%s' "$new_content" > "$tmp"
+    chmod "$perms" "$tmp"
+    mv "$tmp" "$BASH_RC_FILE"
+}
+
+# ── cmd_alias ────────────────────────────────────────────────────
+cmd_alias() {
+    case "${1:-}" in
+        list)   shift; cmd_alias_list "$@" ;;
+        remove) shift; cmd_alias_remove "$@" ;;
+        "")     err "Usage: pos system bank alias <name> [alias_name] | list | remove <alias_name>" ;;
+        *)      cmd_alias_add "$@" ;;
+    esac
+}
+
+cmd_alias_add() {
+    local name="${1:-}" alias_name="${2:-$1}"
+    [ -n "$name" ] || err "Usage: pos system bank alias <name> [alias_name]"
+    bank_valid_name "$name" || err "Invalid command name: $name"
+    alias_valid_name "$alias_name" || err "Invalid alias name: $alias_name (use letters, numbers, hyphens, underscores)"
+    bank_load
+    bank_find "$name" >/dev/null 2>&1 || err "Command not found: $name"
+    local rc
+    if alias_block_parse; then
+        rc=0
+    else
+        rc=$?
+    fi
+    [ "$rc" -eq 2 ] && err "Alias block in $BASH_RC_FILE is malformed (hand-edited?) — fix it manually, then retry"
+    if [ -f "$BASH_RC_FILE" ] && hit="$(alias_collision "$alias_name")"; then
+        err "Alias '$alias_name' is already defined outside the managed block in $BASH_RC_FILE: $hit"
+    fi
+    if command -v "$alias_name" >/dev/null 2>&1; then
+        warn "Note: '$alias_name' is also a command on PATH — the alias will shadow it in interactive shells"
+    fi
+    local found=0 i
+    for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+        [[ "${ALIAS_NAMES[$i]}" == "$alias_name" ]] && found=1
+    done
+    [ "$found" -eq 0 ] && ALIAS_NAMES+=("$alias_name")
+    ALIAS_TARGETS["$alias_name"]="$name"
+    alias_block_write
+    ok "Alias '$alias_name' → pos system bank run $name (in $BASH_RC_FILE)"
+    log "Run: source $BASH_RC_FILE  (or open a new shell)"
+}
+
+cmd_alias_list() {
+    alias_block_require
+    if [ "${#ALIAS_NAMES[@]}" -eq 0 ]; then
+        log "No aliases in $BASH_RC_FILE — add one with: pos system bank alias <name>"
+        return 0
+    fi
+    echo
+    echo "BANK ALIASES (in $BASH_RC_FILE)"
+    echo
+    local i
+    for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+        printf '  %-25s → pos system bank run %s\n' "${ALIAS_NAMES[$i]}" "${ALIAS_TARGETS[${ALIAS_NAMES[$i]}]:-}"
+    done
+    echo
+}
+
+# ── Interactive alias picker ─────────────────────────────────────
+_pick_alias() {
+    local rc
+    if alias_block_parse; then
+        rc=0
+    else
+        rc=$?
+    fi
+    [ "$rc" -eq 2 ] && err "Alias block in $BASH_RC_FILE is malformed — fix it manually"
+    [ "$rc" -eq 1 ] && err "No alias block in $BASH_RC_FILE — add one with: pos system bank alias <name>"
+    if [ "${#ALIAS_NAMES[@]}" -eq 0 ]; then
+        warn "No aliases yet — add one first"
+        return 1
+    fi
+    local -a items=()
+    local i
+    for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+        items+=("${ALIAS_NAMES[$i]} → pos system bank run ${ALIAS_TARGETS[${ALIAS_NAMES[$i]}]:-}")
+    done
+    local choice
+    choice="$(menu_pick "Pick alias" "${items[@]}")" || return 1
+    echo "${ALIAS_NAMES[$((choice - 1))]}"
+}
+
+cmd_alias_remove() {
+    local alias_name="${1:-}"
+    if [ -z "$alias_name" ]; then
+        if [ -t 0 ]; then
+            alias_name="$(_pick_alias)" || return 0
+        else
+            err "Usage: pos system bank alias remove <alias_name>"
+        fi
+    fi
+    alias_block_require
+    local found=0 i
+    for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+        [[ "${ALIAS_NAMES[$i]}" == "$alias_name" ]] && found=1
+    done
+    [ "$found" -eq 1 ] || err "Alias '$alias_name' not found (see: pos system bank alias list)"
+    if [ -t 0 ]; then
+        confirm "Remove alias '$alias_name'?" n || { log "Cancelled"; return 0; }
+    fi
+    local -a keep=()
+    for ((i = 0; i < ${#ALIAS_NAMES[@]}; i++)); do
+        [[ "${ALIAS_NAMES[$i]}" != "$alias_name" ]] && keep+=("${ALIAS_NAMES[$i]}")
+    done
+    ALIAS_NAMES=("${keep[@]}")
+    unset "ALIAS_TARGETS[$alias_name]"
+    alias_block_write
+    ok "Removed alias '$alias_name' from $BASH_RC_FILE"
+    log "Run: source $BASH_RC_FILE  (or open a new shell)"
+}
+
+alias_menu() {
+    while true; do
+        local choice
+        choice="$(menu_run "Bank Aliases" \
+            "List aliases" \
+            "Add alias" \
+            "Remove alias")" || return 0
+        case "$choice" in
+            1) cmd_alias_list ;;
+            2)
+                local name alias_name
+                name="$(_pick_command)" || return 0
+                alias_name="$(menu_ask_value "Alias name" "$name")" || return 0
+                [ -z "$alias_name" ] && alias_name="$name"
+                cmd_alias_add "$name" "$alias_name"
+                ;;
+            3)
+                local alias_name
+                alias_name="$(_pick_alias)" || return 0
+                cmd_alias_remove "$alias_name"
+                ;;
+        esac
+    done
 }
 
 # ── Interactive menu ─────────────────────────────────────────────
@@ -271,13 +604,15 @@ run_menu() {
             "Add command" \
             "Run command" \
             "Edit command" \
-            "Remove command")" || return 0
+            "Remove command" \
+            "Manage aliases")" || return 0
         case "$choice" in
             1) cmd_list ;;
             2) cmd_add ;;
             3) cmd_run ;;
             4) cmd_edit ;;
             5) cmd_remove ;;
+            6) alias_menu ;;
         esac
     done
 }
@@ -306,6 +641,7 @@ case "${1:-}" in
     run)    shift; cmd_run "$@" ;;
     edit)   shift; cmd_edit "$@" ;;
     remove) shift; cmd_remove "$@" ;;
+    alias)  shift; cmd_alias "$@" ;;
     "")     usage ;;
     *)      err "Unknown subcommand: $1 (see --help)" ;;
 esac
