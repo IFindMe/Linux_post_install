@@ -202,7 +202,7 @@ make lint                     # convention gate (scripts/lint-conventions.sh) �
 
 Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
 
-Stub harnesses are **throwaway by design**: no `tests/` dir in this repo — build them outside the project (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count), run them, then leave them in `/tmp`. Only the *pattern* above is worth keeping in the repo. (CI — `.gitea/workflows/lint.yml`, live act_runner — runs the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on every push/PR; it does not run behaviour suites.)
+The committed suite lives in `tests/`: `tests/t-*.sh` files (each defines `run_test()`), run by `tests/run-tests.sh` — discovery of `t-*.sh` in sorted order, one isolated subshell per file, `$TEST_TMP` sandbox auto-cleaned (`make test` is just that runner; single file via `./tests/run-tests.sh t-<name>.sh`) — asserting with the helpers in `tests/test-lib.sh` (`check*`, `test_run`/`test_run_env`, `mksandbox`, …; `tests/README.md` lists them all). Zero-dependency by contract: no network, no sudo, no system changes — stub every external dep and run against sandbox temp dirs, and keep the whole suite under 90s. Throwaway `/tmp` harnesses (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count) are still the right tool for early iteration — exploring a tool's failure paths before the shape of the test is clear. Promote a throwaway into `tests/t-<name>.sh` once it proves something: move the stubs/seams onto `$TEST_TMP` + `test-lib.sh` helpers, route infeasible cases through `skip_case` (never fake a pass — a file with zero checks and zero skips FAILs as "no assertions"), and add a row to the `tests/README.md` suite table. (CI — `.gitea/workflows/lint.yml`, Gitea Actions runner — runs only the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on every push/PR; it does not run `make test`.)
 
 **Stub-harness gotchas (session-learned, `pos system backup` USB-detection suite).** Each red check means exactly one assumption — in the tool *or* the harness — is wrong; keep the diagnosis cheap by copying the run's `out.log` to a per-test file and asserting on artifacts (`fake_state`, `.gpg` on disk, `sends.log`, exit code), then deciding which side lied:
 
@@ -404,8 +404,8 @@ Actions.
   with plain git — `scripts/ci-status.sh [--wait] [<sha>]` (reads the tags via
   `git ls-remote`, exit 0/1/2 = green/red/pending). No SSH to the runner, no API
   tokens.
-- **Limits** — CI proves the *static* gates only; it never runs behaviour suites
-  (stub harnesses stay throwaway in `/tmp`).
+- **Limits** — CI proves the *static* gates only; it never runs `make test`
+  (the behaviour suite in `tests/` stays local).
 
 ---
 
