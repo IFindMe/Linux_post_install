@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–217 |
-| ## 3. Installation Flow | 218–276 |
-| ## 4. The `pos` CLI System | 277–365 |
-| ## 5. Shared Library — `lib/common.sh` | 366–397 |
-| ## 6. Docker Compose / ScaleTail | 398–440 |
-| ## 7. Optional Apps (`apps/`) | 441–470 |
-| ## 8. Entertainment Module | 471–484 |
-| ## 9. Systemd Services | 485–496 |
-| ## 10. Configuration Files | 497–523 |
-| ## 11. Coding Conventions | 524–556 |
-| ## 12. Development Workflow | 557–609 |
-| ## 13. Key File Quick Reference | 610–694 |
-| ## 14. Common Tasks for Agents | 695–728 |
+| ## 2. Directory Structure | 44–219 |
+| ## 3. Installation Flow | 220–278 |
+| ## 4. The `pos` CLI System | 279–368 |
+| ## 5. Shared Library — `lib/common.sh` | 369–400 |
+| ## 6. Docker Compose / ScaleTail | 401–443 |
+| ## 7. Optional Apps (`apps/`) | 444–473 |
+| ## 8. Entertainment Module | 474–487 |
+| ## 9. Systemd Services | 488–499 |
+| ## 10. Configuration Files | 500–526 |
+| ## 11. Coding Conventions | 527–559 |
+| ## 12. Development Workflow | 560–612 |
+| ## 13. Key File Quick Reference | 613–698 |
+| ## 14. Common Tasks for Agents | 699–732 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -108,6 +108,8 @@ Linux_post_install/
 │   ├── pos-share-smb-client                # Mount SMB/CIFS shares (ephemeral or persistent systemd mount units)
 │   ├── pos-share-smb-server                # Manage the Samba server (status, share/unshare exports, users, enable/disable)
 │   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
+│   ├── pos-share-webdav                    # Serve folders over WebDAV via rclone (status, share/unshare, enable/disable)
+│   │   [deps: rclone]
 │   ├── pos-ssh-load-keys                   # Load all SSH keys into the agent
 │   ├── pos-system-backup                   # Encrypted (AES-256) folder snapshots (tar + gpg)
 │   │   [deps: tar]
@@ -335,6 +337,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | share | smb-client | `pos-share-smb-client` | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |  |  |
 | share | smb-server | `pos-share-smb-server` | Manage the Samba server (status, share/unshare exports, users, enable/disable) |  |  |
 | share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |  |  |
+| share | webdav | `pos-share-webdav` | Serve folders over WebDAV via rclone (status, share/unshare, enable/disable) | rclone |  |
 | ssh | load-keys | `pos-ssh-load-keys` | Load all SSH keys into the agent |  |  |
 | system | backup | `pos-system-backup` | Encrypted (AES-256) folder snapshots (tar + gpg) | tar |  |
 | system | bank | `pos-system-bank` | Persistent command bank for saving and running shell commands |  |  |
@@ -676,6 +679,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-smb-client` | 773 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
+| `bin/pos-share-webdav` | 841 | Serve folders over WebDAV via rclone (status, share/unshare, enable/disable) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 301 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-bank` | 647 | Persistent command bank for saving and running shell commands |
@@ -686,7 +690,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 330 | Dynamic bash completion |
+| `completions/pos.bash` | 331 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

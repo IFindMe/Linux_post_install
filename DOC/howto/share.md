@@ -1,7 +1,8 @@
 # How-To: `pos share`
 
 Share files and devices over the network: USB devices via the USB Redirector
-server, filesystems via NFS and SMB/Samba. Tools: `usb`, `nfs`, `smb`.
+server, filesystems via NFS and SMB/Samba, folders over WebDAV via rclone.
+Tools: `usb`, `nfs`, `smb`, `webdav`.
 
 | Tool | What it does |
 |------|--------------|
@@ -10,6 +11,7 @@ server, filesystems via NFS and SMB/Samba. Tools: `usb`, `nfs`, `smb`.
 | `pos share nfs client` | Mount NFS shares (ephemeral or persistent systemd units) |
 | `pos share smb server` | Manage the Samba server (shares, users, enable/disable) |
 | `pos share smb client` | Mount SMB/CIFS shares (ephemeral or persistent systemd units) |
+| `pos share webdav` | Serve folders over WebDAV via rclone (ephemeral or persistent user units) |
 
 ---
 
@@ -231,7 +233,7 @@ guest / valid-users confirms; a UFW conflict is offered as a one-key fix.
 - Windows can't connect → check the client is in `--users` / has a Samba
   password (`adduser`), and that `smbd` is running (`status`)
 - `NT_STATUS_ACCESS_DENIED` → two causes, `share` warns about both at share
-  time: the user is not in the Samba passdb (`pos share smb-server adduser <user>`),
+  time: the user is not in the Samba passdb (`pos share smb server adduser <user>`),
   or a parent dir of the share path lacks `other:+x` traversal (`chmod o+x <dir>`
   — typical for `700` home dirs)
 - `valid users` users can't log in → their Samba password differs from the
@@ -301,6 +303,83 @@ pick too.
 Unmount lists the active CIFS mounts as `<mountpoint> ← <source>` picks and
 asks for confirmation before unmounting (typed fallback when nothing is
 mounted).
+
+---
+
+## `pos share webdav` — WebDAV via rclone
+
+Requires `rclone` (in `preinstall.sh` PACKAGES). Serves a local folder over
+WebDAV via `rclone serve webdav`: a single Basic-auth user, no config file, no
+user database. Mutating commands announce via `notify_send`.
+
+```bash
+pos share webdav status                              # serves + persistent units + firewall
+pos share webdav share /mnt/hdd --user bob           # serve now (prompts for the password)
+pos share webdav share /mnt/hdd --port 8080 --read-only
+pos share webdav list                                # active WebDAV serves
+pos share webdav unshare /mnt/hdd                    # stop serving (idempotent)
+pos share webdav enable /srv/media --user bob        # persistent user systemd unit
+pos share webdav disable /srv/media                  # remove one persistent serve
+pos share webdav disable                             # remove ALL persistent serves
+```
+
+Auth is mandatory by default and resolves flags > environment > `webdav.env`
+(`~/.config/linux_post_install/webdav.env`, chmod 600, values masked in all
+output): `--user` names the user, the password comes from `WEBDAV_PASS` (env or
+file) or a TTY prompt — there is no `--pass` flag, the password is never passed
+on argv, and a missing password errors out non-interactively instead of guessing.
+`--no-auth` serves WITHOUT authentication and warns (ANY network client can read
+and write the folder — the WebDAV equivalent of the NFS open export);
+`--read-only` restricts a share to reads.
+
+Plain HTTP is documented-OK only for clients on the Tailscale range
+`100.64.0.0/10`; serving an address reachable beyond it without `--cert`/`--key`
+warns — serve over TLS (`--cert <file> --key <file>`) there. There is deliberately
+no `reload` command (`rclone serve webdav` reads no config file): re-run `share`
+(it restarts the serve when already serving the same path) or `enable` to apply
+changed settings.
+
+**Recipes:**
+- **Share the media drive to the tailnet (authenticated):**
+  ```bash
+  pos share webdav share /mnt/hdd --user bob --addr 100.70.1.2:8080
+  pos share webdav list
+  ```
+  then point any WebDAV client at `http://100.70.1.2:8080/`.
+- **Keep a read-only share across reboots:**
+  ```bash
+  pos share webdav enable /srv/media --user bob --read-only
+  pos share webdav status
+  ```
+  (`enable` writes a user systemd unit ordered after `network-online.target`;
+  auth is persisted to `webdav.env` and referenced from the unit, never stored
+  in it.)
+
+**Interactive menu:** run `pos share webdav` with no args for a menu
+(status / share / unshare / list / enable / disable). The share/enable flows pick
+a folder from mounted candidates, then a scope preset (Tailscale-first — plain
+HTTP is OK there; all-interfaces warns toward TLS; localhost for this machine
+only), then auth (user prompt or an explicit no-auth confirm) plus an optional
+read-only confirm; a UFW conflict is offered as a one-key fix.
+
+**Troubleshooting:**
+- "rclone not found" → `rclone` isn't installed; `sudo apt install rclone`
+  (it is in `preinstall.sh` PACKAGES, so managed boxes already have it).
+- "no WebDAV password … or run on a TTY" → set `WEBDAV_PASS` (env or
+  `webdav.env`), or run interactively so the password can be prompted; empty
+  passwords are refused.
+- "WebDAV auth needs a user" → pass `--user <name>` (or set
+  `WEBDAV_USER`/`webdav.env`).
+- Client can't reach the share → check the listen address with
+  `pos share webdav status` and allow the port in `pos system firewall`
+  (or `ufw allow <port>/tcp`); a Tailscale bind serves the tailnet only, by design.
+- "plain HTTP … reachable beyond Tailscale" warning → add
+  `--cert <file> --key <file>` to serve over TLS, or bind a Tailscale address instead.
+- A stopped serve comes back after login → a persistent unit still exists
+  (`unshare` tells you when this is the case); remove it with
+  `pos share webdav disable <path>`.
+- Persistent serve doesn't survive logout → enable linger:
+  `sudo loginctl enable-linger <user>` (the tool warns about this after `enable`).
 
 ---
 

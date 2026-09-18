@@ -16,7 +16,7 @@ authoritative one-line reference (every command + flag), see
 | `pos system` | Backups, firewall, health dashboard | [system](howto/system.md) |
 | `pos system schedule` | Scheduled jobs: run a command on a timer, notify on threshold/change/error or silently | [schedule](howto/schedule.md) |
 | `pos ssh` | Load keys into the agent | [ssh](howto/ssh.md) |
-| `pos share` | Share USB devices & filesystems over the network (USB, NFS, SMB) | [share](howto/share.md) |
+| `pos share` | Share USB devices & filesystems over the network (USB, NFS, SMB, WebDAV) | [share](howto/share.md) |
 | `pos communication` | Send Telegram/Matrix messages & alerts, /command listeners, Android mirroring (scrcpy) | [communication](howto/communication.md) |
 | `pos entertainment` | Scheduled auto-messages from public APIs | [entertainment](howto/entertainment.md) |
 

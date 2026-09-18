@@ -1,0 +1,841 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# POS: share webdav — Serve folders over WebDAV via rclone (status, share/unshare, enable/disable)
+# POS_SUBCMDS: status share unshare list enable disable menu
+# POS_DEPS: rclone
+
+source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
+source "$(dirname "$0")/../lib/share-lib.sh" 2>/dev/null || source "$(dirname "$0")/share-lib.sh"
+source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"
+
+command -v rclone &>/dev/null || err "rclone not found (install rclone)"
+
+# Runtime auth defaults: flags > environment > webdav.env > TTY prompt.
+load_env_file webdav.env
+
+# Env seams (testable): every persisted/touched path resolves through one of
+# these — override any of them to redirect the tool at sandbox temp dirs.
+WEBDAV_PORT="${WEBDAV_PORT:-8080}"
+WEBDAV_ADDR="${WEBDAV_ADDR:-:${WEBDAV_PORT}}"
+WEBDAV_USER="${WEBDAV_USER:-}"
+WEBDAV_PASS="${WEBDAV_PASS:-}"
+WEBDAV_CERT="${WEBDAV_CERT:-}"
+WEBDAV_KEY="${WEBDAV_KEY:-}"
+USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
+
+webdav_env_file() { # stdout: runtime auth file (XDG-aware, CONFIG_DIR seam)
+    printf '%s' "${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}/webdav.env"
+}
+
+usage() {
+    cat <<EOF
+Usage: pos share webdav <command> [args]
+
+Serve a local folder over WebDAV via 'rclone serve webdav' (single
+Basic-auth user, no config file, no user database).
+
+Commands:
+  status              Show running serves + persistent units (addresses shown,
+                      passwords masked) + firewall advisory
+  share <path> [opts] Serve a folder now in the background (restarts the
+                      serve when already serving the same path)
+  unshare <path>      Stop serving a folder (idempotent: rc 0 when nothing
+                      is serving it)
+  list                Show active WebDAV serves
+  enable <path> [opts]  Persistent serve via a user systemd unit (ordered
+                      after network-online.target)
+  disable [path]      Stop + remove the persistent unit for <path> (no path:
+                      all WebDAV units; idempotent: rc 0 when none exist)
+  menu                Interactive browser (folder → scope → auth)
+
+Run without arguments to open the interactive menu.
+
+Options for share/enable:
+  --port <n>          Listen port (default: WEBDAV_PORT, 8080)
+  --addr <addr>       Listen address, e.g. :8080 or 100.70.1.2:8080
+                      (default: WEBDAV_ADDR, :<port>)
+  --user <name>       Basic-auth user (default: WEBDAV_USER or webdav.env)
+  --no-auth           Serve WITHOUT authentication — ANY network client can
+                      read and write the folder (warns, like the NFS
+                      ANY-client export)
+  --read-only         Only allow read-only access
+  --cert <file> --key <file>  Serve over TLS (HTTPS)
+
+Auth is mandatory by default. The user/password resolve flags > environment
+> webdav.env; a missing password prompts on a TTY (never passed on argv)
+and errors out non-interactively. webdav.env lives next to the other tool
+configs (~/.config/linux_post_install/webdav.env, chmod 600) and auth values
+are masked in all output.
+
+Notes:
+  There is deliberately NO 'reload' command: 'rclone serve webdav' reads no
+  config file, so there is nothing to validate or reload — re-run 'share'
+  (or 'enable') to apply changed settings.
+  Plain HTTP is documented-OK only for clients on the Tailscale range
+  100.64.0.0/10; serving an address reachable beyond it without --cert/--key
+  warns.
+
+Examples:
+  pos share webdav share /mnt/hdd --user bob
+  pos share webdav share /mnt/hdd --port 8080 --read-only
+  pos share webdav enable /srv/media --user bob
+  pos share webdav list
+  pos share webdav unshare /mnt/hdd
+EOF
+    exit 0
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    -h|--help) usage ;;
+    ""|menu|status|share|unshare|list|enable|disable) ;;
+    *) err "Unknown command '$cmd' (see --help)" ;;
+esac
+
+require_root_dir() {
+    local path="$1"
+    case "$path" in
+        /*) ;;
+        *) err "Path must be absolute: $path" ;;
+    esac
+    [ -d "$path" ] || err "Path not found: $path"
+}
+
+# ── Serve-flag parsing (share/enable) ────────────────────────────
+# Sets SERVE_ADDR_CLI SERVE_PORT_CLI SERVE_USER_CLI SERVE_NOAUTH SERVE_RO
+# SERVE_CERT SERVE_KEY. Cert/key default from the WEBDAV_CERT/WEBDAV_KEY seams.
+parse_serve_flags() {
+    SERVE_ADDR_CLI=""
+    SERVE_PORT_CLI=""
+    SERVE_USER_CLI=""
+    SERVE_NOAUTH=0
+    SERVE_RO=0
+    SERVE_CERT="${WEBDAV_CERT:-}"
+    SERVE_KEY="${WEBDAV_KEY:-}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --port) [ $# -ge 2 ] || err "--port needs a value"; SERVE_PORT_CLI="$2"; shift 2 ;;
+            --addr) [ $# -ge 2 ] || err "--addr needs a value"; SERVE_ADDR_CLI="$2"; shift 2 ;;
+            --user) [ $# -ge 2 ] || err "--user needs a value"; SERVE_USER_CLI="$2"; shift 2 ;;
+            --no-auth) SERVE_NOAUTH=1; shift ;;
+            --read-only) SERVE_RO=1; shift ;;
+            --cert) [ $# -ge 2 ] || err "--cert needs a value"; SERVE_CERT="$2"; shift 2 ;;
+            --key) [ $# -ge 2 ] || err "--key needs a value"; SERVE_KEY="$2"; shift 2 ;;
+            -*) err "unknown option '$1' (see --help)" ;;
+            *) err "unexpected argument '$1' (see --help)" ;;
+        esac
+    done
+    if [ -n "$SERVE_PORT_CLI" ]; then
+        case "$SERVE_PORT_CLI" in
+            *[!0-9]*) err "--port must be numeric: $SERVE_PORT_CLI" ;;
+        esac
+    fi
+    if [ -n "$SERVE_CERT" ] || [ -n "$SERVE_KEY" ]; then
+        [ -n "$SERVE_CERT" ] && [ -n "$SERVE_KEY" ] || err "--cert and --key must be given together"
+        [ -f "$SERVE_CERT" ] || err "cert not found: $SERVE_CERT"
+        [ -f "$SERVE_KEY" ] || err "key not found: $SERVE_KEY"
+    fi
+}
+
+# Effective listen address: --addr > --port-derived > WEBDAV_ADDR seam.
+effective_addr() {
+    if [ -n "$SERVE_ADDR_CLI" ]; then
+        printf '%s' "$SERVE_ADDR_CLI"
+        return 0
+    fi
+    local port="${SERVE_PORT_CLI:-${WEBDAV_PORT:-8080}}"
+    if [ -n "$SERVE_PORT_CLI" ]; then
+        printf ':%s' "$port"
+        return 0
+    fi
+    printf '%s' "${WEBDAV_ADDR:-:${port}}"
+}
+
+port_of_addr() { # <addr> — stdout: trailing port
+    printf '%s' "${1##*:}"
+}
+
+is_tailscale_ip() { # <ip> — rc 0 inside 100.64.0.0/10
+    local o1 o2
+    IFS=. read -r o1 o2 _ <<<"$1"
+    [ "${o1:-}" = "100" ] || return 1
+    case "${o2:-}" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$o2" -ge 64 ] && [ "$o2" -le 127 ]
+}
+
+# Warn when plain HTTP is reachable beyond Tailscale/loopback.
+tls_advisory() { # <addr>
+    local addr="$1" host="${addr%:*}"
+    [ -n "${SERVE_CERT:-}" ] && return 0
+    case "$host" in
+        ""|"[::]"|"0.0.0.0"|"*") ;;
+        127.*|localhost|"[::1]") return 0 ;;
+        *) is_tailscale_ip "$host" && return 0 ;;
+    esac
+    warn "plain HTTP on $addr is reachable beyond Tailscale (100.64.0.0/10) — logins and files travel unencrypted. Serve over TLS: --cert <file> --key <file>"
+}
+
+# rc 0 = ufw active but no rule for the port → clients can't reach it.
+ufw_blocks_webdav() { # <port>
+    local port="$1"
+    share_ufw_blocks_ports "(^|[^0-9])${port}([^0-9]|\$)"
+}
+
+# ── Auth resolution ──────────────────────────────────────────────
+# Sets AUTH_USER AUTH_PASS AUTH_NOAUTH CRED_PROMPTED. Password source order:
+# WEBDAV_PASS (env or webdav.env — see LOADED_ENV_KEYS) > TTY prompt > err.
+resolve_auth() {
+    AUTH_USER=""
+    AUTH_PASS=""
+    AUTH_NOAUTH="$SERVE_NOAUTH"
+    CRED_PROMPTED=0
+    if [ "$AUTH_NOAUTH" -eq 1 ]; then
+        return 0
+    fi
+    AUTH_USER="${SERVE_USER_CLI:-${WEBDAV_USER:-}}"
+    if [ -z "$AUTH_USER" ]; then
+        if [ -t 0 ]; then
+            AUTH_USER="$(share_ask_value "WebDAV user")" || true
+        fi
+        [ -n "$AUTH_USER" ] || err "WebDAV auth needs a user (--user, WEBDAV_USER, or webdav.env)"
+        CRED_PROMPTED=1
+    fi
+    if [ -n "${WEBDAV_PASS:-}" ]; then
+        AUTH_PASS="$WEBDAV_PASS"
+    else
+        if [ -t 0 ]; then
+            read -rsp "WebDAV password for $AUTH_USER: " AUTH_PASS || { echo >&2; err "password entry failed"; }
+            echo >&2
+        else
+            err "no WebDAV password (set WEBDAV_PASS or webdav.env, or run on a TTY)"
+        fi
+        CRED_PROMPTED=1
+    fi
+    [ -n "${AUTH_PASS//[[:space:]]/}" ] || err "empty WebDAV password — refusing to serve with a blank password"
+}
+
+auth_origin() { # <key> — stdout: environment | webdav.env (for status display)
+    local want="$1" seen
+    for seen in ${LOADED_ENV_KEYS[@]+"${LOADED_ENV_KEYS[@]}"}; do
+        if [ "$seen" = "$want" ]; then
+            echo "webdav.env"
+            return 0
+        fi
+    done
+    echo "environment"
+}
+
+warn_no_auth() { # <path>
+    warn "Serving $1 with --no-auth — ANY network client can read and write it."
+    echo "  Prefer auth: pos share webdav share $1 --user <name>"
+    echo
+}
+
+# ── Running-serve discovery (no config file: the process table is state) ──
+webdav_pids_all() { # stdout: pids of 'rclone serve webdav'
+    command -v pgrep >/dev/null 2>&1 || return 0
+    pgrep -f "rclone serve webdav" 2>/dev/null || true
+}
+
+serve_cmdline() { # <pid> — stdout: space-joined cmdline (rc 1 when unreadable)
+    tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null || return 1
+}
+
+serve_arg() { # <pid> <flag> — stdout: value of '--flag value' in cmdline
+    local pid="$1" flag="$2" line prev=""
+    line="$(serve_cmdline "$pid")" || return 1
+    local w
+    for w in $line; do
+        if [ "$prev" = "$flag" ]; then
+            printf '%s' "$w"
+            return 0
+        fi
+        prev="$w"
+    done
+    return 1
+}
+
+serve_has_flag() { # <pid> <flag> — rc 0 when the bare flag is present
+    local pid="$1" flag="$2" line w
+    line="$(serve_cmdline "$pid")" || return 1
+    for w in $line; do
+        [ "$w" = "$flag" ] && return 0
+    done
+    return 1
+}
+
+serve_remote() { # <pid> — stdout: served path (first non-flag arg after webdav)
+    local pid="$1" line w seen=0
+    line="$(serve_cmdline "$pid")" || return 1
+    for w in $line; do
+        if [ "$seen" -eq 0 ]; then
+            [ "$w" = "webdav" ] && seen=1
+            continue
+        fi
+        case "$w" in
+            -*|"") continue ;;
+            *) printf '%s' "$w"; return 0 ;;
+        esac
+    done
+    return 1
+}
+
+webdav_pids_for() { # <path> — stdout: pids serving exactly this path
+    # Exact argv-element match: tr joins argv with single spaces (one per
+    # NUL), so " $want " matches the whole element even with spaces inside.
+    # Two orderings: path-first (" serve webdav $want ", the tool's own
+    # daemon argv) and flags-first (" serve webdav "*" $want ").
+    local want="$1" pid line
+    for pid in $(webdav_pids_all); do
+        [ -n "$pid" ] || continue
+        line="$(serve_cmdline "$pid")" || continue
+        case "$line" in
+            *" serve webdav $want "*|*" serve webdav "*" $want "*) echo "$pid" ;;
+        esac
+    done
+    return 0
+}
+
+stop_pids_for() { # <path> — SIGTERM each serve of path, wait, SIGKILL stragglers
+    local want="$1" pid tries left=0
+    for pid in $(webdav_pids_for "$want"); do
+        kill "$pid" 2>/dev/null || true
+    done
+    for tries in 1 2 3 4 5; do
+        left=0
+        for pid in $(webdav_pids_for "$want"); do
+            left=1
+            kill -0 "$pid" 2>/dev/null || continue
+        done
+        [ "$left" -eq 0 ] && return 0
+        sleep 1
+    done
+    for pid in $(webdav_pids_for "$want"); do
+        kill -9 "$pid" 2>/dev/null || true
+    done
+    return 0
+}
+
+# ── Persistent-unit naming (pure-bash escape: no systemd-escape dep) ──
+unit_for_path() { # <path> — stdout: unit name
+    local esc="${1#/}"
+    esc="${esc//\//-}"
+    esc="$(printf '%s' "$esc" | tr -c 'A-Za-z0-9._-' '_')"
+    printf 'pos-share-webdav-%s.service' "$esc"
+}
+
+unit_remote() { # <unit-file> — stdout: served path from ExecStart (best effort)
+    local line w seen=0
+    line="$(grep -m1 '^ExecStart=' "$1" 2>/dev/null)" || return 1
+    line="${line#ExecStart=}"
+    for w in $line; do
+        if [ "$seen" -eq 0 ]; then
+            [ "$w" = "webdav" ] && seen=1
+            continue
+        fi
+        case "$w" in
+            -*|"") continue ;;
+            *) w="${w#\"}"; w="${w%\"}"; printf '%s' "$w"; return 0 ;;
+        esac
+    done
+    return 1
+}
+
+webdav_units() { # stdout: unit names present in USER_SYSTEMD_DIR
+    local uf
+    for uf in "$USER_SYSTEMD_DIR"/pos-share-webdav-*.service; do
+        [ -f "$uf" ] || continue
+        basename "$uf"
+    done
+    return 0
+}
+
+systemd_quote() { # <arg> — stdout: double-quoted for ExecStart
+    local a="${1//\\/\\\\}"
+    a="${a//\"/\\\"}"
+    printf '"%s"' "$a"
+}
+
+# ── Commands ─────────────────────────────────────────────────────
+cmd_list() {
+    local pid remote addr user auth extra found=0
+    for pid in $(webdav_pids_all); do
+        remote="$(serve_remote "$pid")" || continue
+        addr="$(serve_arg "$pid" --addr)" || addr=":8080"
+        user="$(serve_arg "$pid" --user)" || user=""
+        extra=""
+        if serve_has_flag "$pid" --read-only; then
+            extra="${extra} ro"
+        fi
+        if serve_arg "$pid" --cert >/dev/null; then
+            extra="${extra} tls"
+        fi
+        if [ -n "$user" ]; then
+            auth="user=$user pass=(set, masked)"
+        else
+            auth="auth=NONE (--no-auth)"
+        fi
+        printf '  pid %s  %s  %s  %s%s\n' "$pid" "$remote" "$addr" "$auth" "$extra"
+        found=1
+    done
+    [ "$found" -eq 1 ] || echo "No WebDAV serves"
+}
+
+cmd_status() {
+    section "Serves"
+    cmd_list
+    echo
+    section "Persistent units ($USER_SYSTEMD_DIR)"
+    local unit uf remote state enabled found=0
+    for unit in $(webdav_units); do
+        uf="$USER_SYSTEMD_DIR/$unit"
+        remote="$(unit_remote "$uf" 2>/dev/null)" || remote="(unparsable ExecStart)"
+        if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+            state="active"
+        else
+            state="inactive"
+        fi
+        if systemctl --user is-enabled --quiet "$unit" 2>/dev/null; then
+            enabled="enabled"
+        else
+            enabled="disabled"
+        fi
+        printf '  %s  %s  %s/%s\n' "$unit" "$remote" "$state" "$enabled"
+        found=1
+    done
+    [ "$found" -eq 1 ] || echo " (none — persist one with 'pos share webdav enable <path>')"
+    echo
+    section "Defaults (passwords masked)"
+    printf '  addr: %s\n' "${WEBDAV_ADDR:-:${WEBDAV_PORT:-8080}}"
+    if [ -n "${WEBDAV_USER:-}" ]; then
+        printf '  user: %s (%s)\n' "$WEBDAV_USER" "$(auth_origin WEBDAV_USER)"
+    else
+        echo "  user: (not set — prompts on a TTY)"
+    fi
+    if [ -n "${WEBDAV_PASS:-}" ]; then
+        printf '  pass: (set via %s, masked)\n' "$(auth_origin WEBDAV_PASS)"
+    else
+        echo "  pass: (not set)"
+    fi
+    if [ -n "${WEBDAV_CERT:-}" ]; then
+        echo "  tls:  cert configured"
+    else
+        echo "  tls:  plain HTTP (OK only on Tailscale 100.64.0.0/10)"
+    fi
+    echo
+    section "Firewall"
+    local port
+    port="$(port_of_addr "${WEBDAV_ADDR:-:${WEBDAV_PORT:-8080}}")"
+    if ufw_blocks_webdav "$port"; then
+        warn "ufw is active but has no rule for port $port — clients will be blocked."
+        share_offer_fix "Allow WebDAV through ufw" sudo ufw allow "$port"/tcp
+    else
+        ok "firewall: no active ufw blocking port $port"
+    fi
+}
+
+cmd_share() {
+    local path="$1"
+    shift
+    require_root_dir "$path"
+    parse_serve_flags "$@"
+    local addr
+    addr="$(effective_addr)"
+    resolve_auth
+    if [ "$AUTH_NOAUTH" -eq 1 ]; then
+        warn_no_auth "$path"
+    fi
+    tls_advisory "$addr"
+
+    if [ -n "$(webdav_pids_for "$path")" ]; then
+        log "Already serving $path — restarting with the new settings"
+        stop_pids_for "$path"
+    fi
+
+    # Assemble the daemon argv (password travels on argv to rclone; it is
+    # masked in every status/list/menu display this tool prints).
+    local rclone_bin logfile esc
+    rclone_bin="$(command -v rclone)"
+    esc="${path#/}"
+    esc="${esc//\//-}"
+    esc="$(printf '%s' "$esc" | tr -c 'A-Za-z0-9._-' '_')"
+    logfile="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}/webdav-${esc}.log"
+    local -a args=(serve webdav "$path" --addr "$addr")
+    [ "$AUTH_NOAUTH" -eq 0 ] && args+=(--user "$AUTH_USER" --pass "$AUTH_PASS")
+    [ "$SERVE_RO" -eq 1 ] && args+=(--read-only)
+    [ -n "$SERVE_CERT" ] && args+=(--cert "$SERVE_CERT" --key "$SERVE_KEY")
+
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) would serve $path on $addr (log: $logfile)"
+    else
+        mkdir -p "$(dirname "$logfile")"
+        setsid nohup "$rclone_bin" "${args[@]}" >>"$logfile" 2>&1 < /dev/null &
+        local tries=0
+        while [ -z "$(webdav_pids_for "$path")" ] && [ "$tries" -lt 5 ]; do
+            sleep 1
+            tries=$((tries + 1))
+        done
+        if [ -z "$(webdav_pids_for "$path")" ]; then
+            err "serve failed to appear — see $logfile"
+        fi
+    fi
+    if [ "$AUTH_NOAUTH" -eq 1 ]; then
+        log "Serving (no auth): $path on $addr"
+    else
+        log "Serving: $path on $addr (user=$AUTH_USER, password masked)"
+    fi
+    notify_send "WebDAV share added: $path on $addr"
+
+    # Advisory post-checks (never abort the share operation).
+    local port
+    port="$(port_of_addr "$addr")"
+    if ufw_blocks_webdav "$port"; then
+        warn "ufw is active but has no rule for port $port — clients will be blocked."
+        share_offer_fix "Allow WebDAV through ufw" sudo ufw allow "$port"/tcp
+    fi
+}
+
+cmd_unshare() {
+    local path="$1"
+    require_root_dir "$path"
+    if [ -z "$(webdav_pids_for "$path")" ]; then
+        warn "Nothing serving $path"
+        exit 0
+    fi
+    stop_pids_for "$path"
+    log "Stopped serving: $path"
+    notify_send "WebDAV share removed: $path"
+    local unit
+    unit="$(unit_for_path "$path")"
+    if [ -f "$USER_SYSTEMD_DIR/$unit" ]; then
+        warn "A persistent unit still exists ($unit) — it will serve $path again on next login. Remove it: pos share webdav disable $path"
+    fi
+}
+
+cmd_enable() {
+    local path="$1"
+    shift
+    require_root_dir "$path"
+    parse_serve_flags "$@"
+    local addr unit unit_file envfile rclone_bin
+    addr="$(effective_addr)"
+    resolve_auth
+    if [ "$AUTH_NOAUTH" -eq 1 ]; then
+        warn_no_auth "$path"
+    fi
+    tls_advisory "$addr"
+    unit="$(unit_for_path "$path")"
+    unit_file="$USER_SYSTEMD_DIR/$unit"
+    rclone_bin="$(command -v rclone)"
+
+    if [ -f "$unit_file" ]; then
+        if [ -t 0 ]; then
+            confirm "Unit $unit already exists — overwrite?" n ||
+                { warn "Aborted — $unit_file left untouched"; return 1; }
+        else
+            warn "Overwriting existing unit $unit"
+        fi
+    fi
+
+    # The unit must survive reboots without ambient env: persist auth into
+    # webdav.env (chmod 600, masked everywhere) and reference it from the
+    # unit via EnvironmentFile + $VAR expansion (secret stays out of the
+    # world-readable unit file).
+    if [ "$AUTH_NOAUTH" -eq 0 ]; then
+        envfile="$(webdav_env_file)"
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) would save auth to $envfile (chmod 600)"
+        else
+            cfg_write "$envfile" WEBDAV_USER "$AUTH_USER"
+            cfg_write "$envfile" WEBDAV_PASS "$AUTH_PASS"
+            log "auth saved to $envfile (chmod 600)"
+        fi
+    fi
+
+    local exec_start
+    exec_start="ExecStart=${rclone_bin} serve webdav $(systemd_quote "$path") --addr ${addr}"
+    if [ "$AUTH_NOAUTH" -eq 0 ]; then
+        exec_start="${exec_start} --user \${WEBDAV_USER} --pass \${WEBDAV_PASS}"
+    fi
+    [ "$SERVE_RO" -eq 1 ] && exec_start="${exec_start} --read-only"
+    if [ -n "$SERVE_CERT" ]; then
+        exec_start="${exec_start} --cert $(systemd_quote "$SERVE_CERT") --key $(systemd_quote "$SERVE_KEY")"
+    fi
+
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) would install unit $unit_file:"
+        if [ "$AUTH_NOAUTH" -eq 0 ]; then
+            echo "EnvironmentFile=$(webdav_env_file)"
+        fi
+        echo "$exec_start"
+    else
+        # User-bus pre-flight BEFORE writing the unit — abort with
+        # remediation (no orphaned unit) when the bus is unreachable.
+        ensure_user_bus
+        mkdir -p "$USER_SYSTEMD_DIR"
+        {
+            echo "[Unit]"
+            echo "Description=pos WebDAV share of ${path} (rclone serve webdav)"
+            echo "After=network-online.target"
+            echo "Wants=network-online.target"
+            echo
+            echo "[Service]"
+            echo "Type=simple"
+            if [ "$AUTH_NOAUTH" -eq 0 ]; then
+                echo "EnvironmentFile=$(webdav_env_file)"
+            fi
+            echo "$exec_start"
+            echo "Restart=on-failure"
+            echo "RestartSec=2"
+            echo
+            echo "[Install]"
+            echo "WantedBy=default.target"
+        } > "$unit_file"
+        chmod 644 "$unit_file"
+        systemctl --user daemon-reload
+        # An ephemeral serve of the same path would hold the port — the
+        # persistent unit takes over.
+        if [ -n "$(webdav_pids_for "$path")" ]; then
+            log "Stopping the ephemeral serve of $path (unit takes over)"
+            stop_pids_for "$path"
+        fi
+        systemctl --user enable --now "$unit"
+        sleep 1
+    fi
+    log "WebDAV persistent serve: $path on $addr ($unit)"
+    notify_send "WebDAV serve enabled: $path on $addr"
+    if command -v loginctl >/dev/null 2>&1; then
+        if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q '^Linger=yes'; then
+            warn "enable linger so the serve survives logout: sudo loginctl enable-linger $(id -un)"
+        fi
+    fi
+}
+
+cmd_disable() { # [path] — no path removes every WebDAV unit
+    local path="${1:-}" unit unit_file found=0
+    if [ -n "$path" ]; then
+        unit="$(unit_for_path "$path")"
+        unit_file="$USER_SYSTEMD_DIR/$unit"
+        if [ ! -f "$unit_file" ]; then
+            warn "No persistent WebDAV unit for $path ($unit)"
+            return 0
+        fi
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) systemctl --user disable --now $unit; remove unit"
+        else
+            systemctl --user disable --now "$unit" 2>/dev/null || true
+            rm -f "$unit_file"
+            systemctl --user daemon-reload
+        fi
+        log "Removed persistent WebDAV serve: $path"
+        notify_send "WebDAV serve disabled: $path"
+        return 0
+    fi
+    for unit in $(webdav_units); do
+        found=1
+        unit_file="$USER_SYSTEMD_DIR/$unit"
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) systemctl --user disable --now $unit; remove unit"
+        else
+            systemctl --user disable --now "$unit" 2>/dev/null || true
+            rm -f "$unit_file"
+        fi
+        log "Removed persistent WebDAV serve: $unit"
+    done
+    if [ "$found" -eq 0 ]; then
+        warn "No persistent WebDAV units in $USER_SYSTEMD_DIR"
+        return 0
+    fi
+    if [ "${DRY_RUN:-0}" -eq 0 ]; then
+        systemctl --user daemon-reload
+    fi
+    notify_send "WebDAV serves disabled"
+}
+
+# ── Interactive menu flows ─────────────────────────────────────
+menu_pick_folder() { # stdout: folder path · rc 1 cancelled
+    local idx dir cand
+    local -a cands=()
+    if mapfile -t cands < <(share_folder_candidates) && [ "${#cands[@]}" -gt 0 ]; then
+        if idx="$(share_pick "Share which folder?" "${cands[@]}")"; then
+            cand="${cands[$((idx - 1))]}"
+            dir="${cand%% (*}"          # strip "(mounted fstype)" annotation
+            [ -d "$dir" ] || { warn "Folder vanished: $dir"; return 1; }
+            echo "$dir"
+            return 0
+        fi
+        return 1
+    fi
+    dir="$(share_ask_value "Folder to share (absolute path)")" || return 1
+    [ -n "$dir" ] || { warn "No folder given"; return 1; }
+    echo "$dir"
+}
+
+tailscale_ip() { # stdout: first Tailscale IPv4 · rc 1 when absent
+    command -v ip >/dev/null 2>&1 || return 1
+    ip -o -4 addr show tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1
+}
+
+menu_pick_scope() { # [port] — stdout: --addr value · rc 1 cancelled
+    local port="${1:-${WEBDAV_PORT:-8080}}" idx tsip
+    local -a scopes=()
+    if tsip="$(tailscale_ip)" && [ -n "$tsip" ]; then
+        scopes+=("Tailscale ${tsip}:${port} — plain HTTP OK on 100.64.0.0/10")
+    fi
+    scopes+=("All interfaces :${port} — reachable beyond Tailscale (TLS recommended)")
+    scopes+=("Localhost 127.0.0.1:${port} — this machine only")
+    idx="$(share_pick "Serve scope (bind address)" "${scopes[@]}")" || return 1
+    case "${scopes[$((idx - 1))]}" in
+        Tailscale*) echo "${tsip}:${port}" ;;
+        All*) echo ":${port}" ;;
+        Localhost*) echo "127.0.0.1:${port}" ;;
+    esac
+}
+
+menu_auth_flags() { # stdout: auth flag lines (user / no-auth choice) · rc 1 cancelled
+    local user noauth=0
+    if confirm "Serve WITHOUT authentication (ANY network client)?" n; then
+        echo "--no-auth"
+        return 0
+    fi
+    user="$(share_ask_value "WebDAV user" "${WEBDAV_USER:-}")" || return 1
+    [ -n "$user" ] || { warn "No user given"; return 1; }
+    printf '%s\n' "--user"
+    printf '%s\n' "$user"
+    return 0
+}
+
+menu_share() {
+    local dir port addr
+    local -a args=() auth=()
+    dir="$(menu_pick_folder)" || return 1
+    port="$(share_ask_value "Listen port" "${WEBDAV_PORT:-8080}")" || return 1
+    [ -n "$port" ] || port="${WEBDAV_PORT:-8080}"
+    case "$port" in
+        *[!0-9]*) warn "Port must be numeric: $port"; return 1 ;;
+    esac
+    addr="$(menu_pick_scope "$port")" || return 1
+    args+=(--addr "$addr")
+    mapfile -t auth < <(menu_auth_flags) || return 1
+    if [ "${auth[0]:-}" = "--no-auth" ]; then
+        args+=(--no-auth)
+    else
+        args+=(--user "${auth[1]}")
+    fi
+    if confirm "Read-only share?" n; then
+        args+=(--read-only)
+    fi
+    cmd_share "$dir" "${args[@]}"
+}
+
+menu_unshare() {
+    local idx path
+    local -a paths=() items=()
+    for pid in $(webdav_pids_all); do
+        path="$(serve_remote "$pid" 2>/dev/null)" || continue
+        [ -n "$path" ] || continue
+        paths+=("$path")
+    done
+    if [ "${#paths[@]}" -gt 0 ]; then
+        mapfile -t items < <(printf '%s\n' "${paths[@]}" | LC_ALL=C sort -u)
+        idx="$(share_pick "Stop serving which folder?" "${items[@]}")" || return 1
+        path="${items[$((idx - 1))]}"
+    else
+        path="$(share_ask_value "Served path to stop")" || return 1
+        [ -n "$path" ] || return 1
+    fi
+    cmd_unshare "$path"
+}
+
+menu_enable() {
+    local dir port addr
+    local -a args=() auth=()
+    dir="$(menu_pick_folder)" || return 1
+    port="$(share_ask_value "Listen port" "${WEBDAV_PORT:-8080}")" || return 1
+    [ -n "$port" ] || port="${WEBDAV_PORT:-8080}"
+    case "$port" in
+        *[!0-9]*) warn "Port must be numeric: $port"; return 1 ;;
+    esac
+    addr="$(menu_pick_scope "$port")" || return 1
+    args+=(--addr "$addr")
+    mapfile -t auth < <(menu_auth_flags) || return 1
+    if [ "${auth[0]:-}" = "--no-auth" ]; then
+        args+=(--no-auth)
+    else
+        args+=(--user "${auth[1]}")
+    fi
+    if confirm "Read-only share?" n; then
+        args+=(--read-only)
+    fi
+    cmd_enable "$dir" "${args[@]}"
+}
+
+menu_disable() {
+    local idx unit path
+    local -a units=() items=()
+    mapfile -t units < <(webdav_units)
+    if [ "${#units[@]}" -gt 0 ]; then
+        for unit in "${units[@]}"; do
+            path="$(unit_remote "$USER_SYSTEMD_DIR/$unit" 2>/dev/null)" || path="(unknown path)"
+            items+=("$unit  ← $path")
+        done
+        items+=("ALL WebDAV units")
+        idx="$(share_pick "Remove which persistent serve?" "${items[@]}")" || return 1
+        if [ "$idx" -le "${#units[@]}" ]; then
+            unit="${units[$((idx - 1))]}"
+            path="$(unit_remote "$USER_SYSTEMD_DIR/$unit" 2>/dev/null)" || { warn "Cannot parse $unit — remove it by hand: $USER_SYSTEMD_DIR/$unit"; return 1; }
+            confirm "Remove persistent serve $unit ($path)?" n || { log "Cancelled"; return 1; }
+            cmd_disable "$path"
+            return 0
+        fi
+        confirm "Remove ALL persistent WebDAV serves?" n || { log "Cancelled"; return 1; }
+        cmd_disable
+    else
+        warn "No persistent WebDAV units in $USER_SYSTEMD_DIR"
+    fi
+}
+
+run_menu() {
+    share_menu_guard || exit 1
+    while true; do
+        local choice
+        choice="$(share_menu_run "WebDAV share (rclone)" \
+            "Show status (serves/units/firewall)" \
+            "Share a folder now" \
+            "Stop serving a folder" \
+            "List active serves" \
+            "Enable persistent serve on boot" \
+            "Disable persistent serve")" || return 0
+        case "$choice" in
+            1) cmd_status ;;
+            2) menu_share || true ;;
+            3) menu_unshare || true ;;
+            4) cmd_list || true ;;
+            5) menu_enable || true ;;
+            6) menu_disable || true ;;
+        esac
+    done
+}
+
+case "$cmd" in
+    ""|menu)
+        run_menu
+        exit 0
+        ;;
+    status)  cmd_status ;;
+    share)
+        [ $# -ge 2 ] || err "Usage: pos share webdav share <path> [--port N] [--addr A] [--user U] [--no-auth] [--read-only] [--cert C --key K]"
+        cmd_share "$2" "${@:3}"
+        ;;
+    unshare)
+        [ $# -ge 2 ] || err "Usage: pos share webdav unshare <path>"
+        cmd_unshare "$2"
+        ;;
+    list)    cmd_list ;;
+    enable)
+        [ $# -ge 2 ] || err "Usage: pos share webdav enable <path> [same options as share]"
+        cmd_enable "$2" "${@:3}"
+        ;;
+    disable) cmd_disable "${2:-}" ;;
+esac
