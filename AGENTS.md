@@ -1,27 +1,46 @@
 # Linux_post_install — Agent Instructions
 
-Personal bootstrap & homelab toolkit for Debian/Ubuntu (Bash). `install.sh` bootstraps a machine; `bin/pos` is the unified CLI.
+Personal bootstrap & homelab toolkit for Debian/Ubuntu (Bash). `install.sh` bootstraps a machine; `bin/pos` dispatches `bin/pos-<cat>-<cmd>` by longest-prefix match. `pos tree` is the authoritative command list — never trust a stale category list in docs.
 
-## External File Loading
+## Read first (lazy-load only what the task needs)
 
-CRITICAL: real guidance lives in DOC/. When you encounter a reference below, use your Read tool to load it on a need-to-know basis — do NOT preemptively load all of them. Once loaded, treat the content as mandatory instructions.
+- `DOC/AGENT_Context_Project.md` — overview, dispatch, structure (Document Map at top for jumping).
+- `DOC/DEV.md` — adding Tool/App/Plugin checklists + test-seam patterns. Wins on detail.
+- `DOC/POS.md` — hand-written CLI reference; update its table + detail block when behavior changes.
+- New files start from templates: `cp templates/pos-tool.sh bin/pos-<cat>-<cmd>` (likewise `app.sh` → `apps/`, `feature.sh` → `features/`). Never hand-roll. Category-less `bin/pos-<cmd>` is only for dispatcher/dev-level commands (`pos-config`, `pos-tree`).
 
-- @DOC/AGENT_Context_Project.md — project overview, directory structure, `pos` dispatch table, "How to modify" table. Read FIRST for any non-trivial task. It opens with a **Document Map** (auto-generated line ranges for every section) — use it to jump straight to the relevant section.
-- @DOC/DEV.md — conventions, verification, and the "Adding a new Feature/App/Tool" checklists. Read before creating or changing code/docs.
-- @DOC/POS.md — `pos` CLI reference (dispatcher + every command). Read when working on `bin/pos*` scripts or their docs.
-- @DOC/README.md — index of all docs. Read to find the right doc.
-- @DOC/HOWTO.md — hands-on per-category guides (ai, network, docker, media, system, ssh, share, communication, entertainment). Read when a task is about *using* `pos` day-to-day rather than extending it.
+## Definition of done
 
-## Quick facts
+After touching `bin/pos-*` (or anything structural):
 
-- **Tool model:** `bin/pos-<category>-<command>`, or **category-less** `bin/pos-<cmd>` for dispatcher/dev-level commands that fit no category (`pos-config`, `pos-tree`) — they dispatch like any tool and show with an empty category in the generated tables. `bin/pos` dispatches by longest-prefix arg matching. New tools are auto-discovered but must be executable (`100755`) and carry a `# POS: <cat> <cmd> — <desc>` header right after the shebang; `make gen` only uses the text after the first `— ` (the leading words are convention-only), so keep the one-line description concise. `# POS_FLAGS:` / `# POS_SUBCMDS:` / `# POS_CONFIG:` headers feed tab-completion and the `pos config` scope registry; optional `# POS_DEPS: <binary…>` declares space-separated runtime binaries the tool hard-requires via `command -v` guards, and optional `# POS_EXAMPLES: <command> | <description>` adds curated usage examples, one per line. `lib/registry.sh` is the shared query API over all `POS_*` headers — consumers source it (`reg_scan` + `reg_list`/`reg_lookup`/…) instead of re-implementing sed/grep header parsing; new consumers should prefer it. A missing `# POS:` header hard-fails `make gen`. Legacy `bin/wr-*`, `mp3`, `mp4`, `vbox`, `ssh-load-all` are thin forwarders to `pos` — keep them that way.
-- **Categories:** `ai`, `communication`, `docker`, `entertainment`, `media`, `network`, `share` (usb, nfs, smb), `ssh`, `system`, plus category-less `config`/`tree`. `pos tree` (bin/pos-tree) is the authoritative structure — it derives the hierarchy from `bin/pos-*` filenames + `# POS:`/`# POS_SUBCMDS:` headers, reads the metadata through `lib/registry.sh`, and annotates each command's declared `# POS_DEPS:`.
-- **Generated code:** blocks between `GEN:START`/`GEN:END` markers in `DOC/AGENT_Context_Project.md` (tree, dispatch, selfcontained, filetable, docmap) and `completions/pos.bash` (flags, subcmds, config scopes) are `make gen` output — never hand-edit them. Generators must be **byte-order deterministic** (sort with `LC_ALL=C`, as `scripts/gen-docs.sh` does) or CI's `git diff --exit-code` trips on a locale that collates differently. After touching `bin/pos-*`, run `make gen`, then `make check`, then `make lint` (definition of done: check green + lint ends `0 FAIL, 0 WARN`). `make check` (`scripts/check-sync.sh`) is the self-consistency gate — bash -n + exec-bit check + doc-sync + dispatch smoke; `make lint` (`scripts/lint-conventions.sh`) is the convention gate — it enforces every rule in this file (shebang/strict-mode, exec bits, `# POS:` headers, `-h|--help` present and after deps guards, stdin-readers in `INTERACTIVE_CMDS`, POS.md coverage, plugin/app/unit/wrapper/secrets/env-seam classes — see `DOC/DEV.md → Convention Lint Gate`). Hand-maintained, not gen-checked: `DOC/POS.md`, the line-count rows above the filetable marker in `DOC/AGENT_Context_Project.md` (the non-`pos-*` files — `install.sh`, `preinstall.sh`, `postinstall.sh`, `lib/*`, `features/*`; bump a row's count only when that file's length changes), `bin/pos` usage() EXAMPLES, root README. CI (`.gitea/workflows/lint.yml`, job `gates`) runs the same four commands on every push to main and PR, then records the result as a git tag on the commit: `ci-ok/<sha>` or `ci-fail/<sha>` (pushes only — query with `scripts/ci-status.sh [--wait] [<sha>]`; exit 0 green / 1 red / 2 pending). A red run means gen drift or a gate failure and is a merge-blocker; still run the gates locally too (lint isn't in the pre-commit hook).
-- **Stdin gotcha:** any tool that reads stdin must be added to `INTERACTIVE_CMDS` in `bin/pos` — otherwise the logging `tee` pipe hangs on (or swallows) the prompt.
-- **Deps:** apt packages → `PACKAGES` array in `preinstall.sh`; non-apt/manual installers (e.g. `usbsrv`) → `command -v <bin> || err "…"` guard inside the tool, never in PACKAGES. Hotspot binaries (`create_ap`, `wihotspot*`) are prebuilt in `x64_bin/` (or `arm64_bin/`) and copied by `install.sh` — not apt packages.
-- **Secrets:** never commit keys/tokens. `config/authorized_keys` and `config/rclone.conf` are gitignored; runtime tool config is `~/.config/linux_post_install/<tool>.env` (chmod 600, env-var precedence). Mask tokens in `config` output.
-- **entertainment plugins:** standalone scripts in `entertainment/` that must NOT source `lib/common.sh` — stdout is the message that gets sent to Telegram (helper chatter would leak into it). Markers: `# POS_PLUGIN: <name>` + `# POS_KEYS:` declarations. They aren't `pos-*` tools, so `make gen` skips them (no headers/doc tables) — verify with `bash -n` + a live `pos entertainment send <name> --print`.
-- **ScaleTail templates** are a git submodule (`compose/scale-tail`), absent on fresh clones — run `git submodule update --init` first (only needed for `pos docker compose *`).
-- **Doc conflicts:** resolve by the authority order in `MAINTENANCE.md → Phase 0`: `templates/*.sh` are the codified current convention and the required starting point for new work (`cp templates/pos-tool.sh bin/pos-<cat>-<cmd>`, likewise `app.sh` / `feature.sh`); then DEV.md wins on detail, AGENTS.md on process facts; code + `# POS:` headers are ground truth for behavior and all `GEN:` blocks; drift in POS/HOWTO/README/SCRIPTS/SYSTEMD/APPS is a doc bug — fix the doc.
-- **Conventions:** `set -euo pipefail`, `-h|--help` via case, idempotent writes, use `run`/`spawn` helpers (respect `$DRY_RUN`), `make hook` installs the opt-in pre-commit gate. `command -v` deps guards sit **before** the `-h|--help` dispatch — help also errors on a box missing the dependency (matches all existing deps-gated tools). Tools must run standalone from `/usr/local/bin` after install (source `lib/common.sh` via the `$(dirname "$0")/../lib/common.sh` fallback chain). Commits use conventional prefixes (`feat:`/`fix:`/`docs:`/`chore:`/`refactor:`).
-- Maintain `AGENT_TODO.md` (Now / Next / Later / Done): when you finish a task, move it to **Done** (dated) in the same commit.
+```bash
+make gen && make gen                  # 2nd run must be byte-identical (generators sort with LC_ALL=C)
+make check                            # bash -n + exec bits + gen-drift + dispatch smoke
+make lint                             # must end 0 FAIL, 0 WARN
+make test                             # full zero-dep suite: no network, no sudo, no system changes
+./tests/run-tests.sh t-<name>.sh      # single test file
+bash -n <file> && git diff --check    # new/edited scripts
+```
+
+CI (`.gitea/workflows/lint.yml`, job `gates`) runs `make gen` + `git diff --exit-code` + `make check` + `make lint` on push to main and PRs, then tags `ci-ok/<sha>` or `ci-fail/<sha>`; check with `scripts/ci-status.sh [<sha>]`. Red is a merge-blocker. `make hook` installs the opt-in pre-commit hook (runs `make check` only — always run `make lint` yourself).
+
+## Tool rules (lint-enforced — agents guess these wrong)
+
+- Executable `100755` + `#!/usr/bin/env bash` + `set -euo pipefail` + `# POS: <cat> <cmd> — <desc>` right after the shebang (missing header hard-fails `make gen`). `POS_FLAGS`/`POS_SUBCMDS` only for that style; `POS_DEPS`/`POS_EXAMPLES`/`POS_CONFIG` optional. Only the text after `— ` is rendered; the words before it are convention-only. Query headers via `lib/registry.sh`, never re-parse with sed/grep.
+- `command -v <bin> || err "…"` deps guards sit **before** the `-h|--help` case — help must also fail without the dep (graceful `if command -v` probes are exempt). Apt packages → `PACKAGES` in `preinstall.sh`; manual installers → guard inside the tool, never in `PACKAGES`.
+- Stdin readers → add to `INTERACTIVE_CMDS` in `bin/pos`, or the logging `tee` pipe hangs/swallows prompts (per-script granularity: the whole script then skips logging).
+- System-path writes need a test seam: `VAR="${VAR:-/real/path}"`, never a bare `/etc/…`/`$HOME/…` write (prove with `VAR=/tmp/x …` + real path untouched). Use `run`/`spawn` helpers (respect `$DRY_RUN`); keep writes idempotent.
+- Tools must run standalone from `/usr/local/bin`: source libs via the `$(dirname "$0")/../lib/common.sh` fallback chain. Legacy `wr-*`, `mp3`, `mp4`, `vbox`, `ssh-load-all` are thin forwarders to `pos` — keep them thin.
+
+## Module quirks
+
+- `entertainment/<name>.sh` plugins: `# POS_PLUGIN:` + `# POS_KEYS:` markers, never source `lib/common.sh` (stdout becomes the Telegram message). Verify with `bash -n` + `pos entertainment send <name> --print`; `make gen` skips them.
+- Secrets are never committed (`config/authorized_keys`, `config/rclone.conf` are gitignored). Runtime config is `~/.config/linux_post_install/<tool>.env` (chmod 600, env-var precedence); mask tokens in output.
+- `compose/scale-tail` is a git submodule — `git submodule update --init` before any `pos docker compose` work.
+- Tests live in `tests/t-*.sh` (`run_test()` + `test-lib.sh` helpers; `$TEST_TMP` sandbox auto-cleaned). Infeasible cases call `skip_case` — never fake a pass. Add a row to `tests/README.md` for new files; keep the suite under 90s.
+
+## Docs & process
+
+- Never hand-edit between `GEN:START`/`GEN:END` markers (`DOC/AGENT_Context_Project.md`, `completions/pos.bash`) — always `make gen`.
+- Authority on conflict: `templates/*.sh` > `DEV.md` (detail) > `AGENTS.md` (process) > code + `# POS:` headers (behavior truth) > hand-written docs (drift = doc bug, fix the doc).
+- Commits use `feat:`/`fix:`/`docs:`/`chore:`/`refactor:`, one logical change per commit. Move finished work to **Done** (dated) in `AGENT_TODO.md` in the same commit.
