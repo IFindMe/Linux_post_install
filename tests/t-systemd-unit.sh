@@ -48,8 +48,14 @@ STUB
     local server="$ROOT/bin/pos-ai-server"
     local model="$models/my model file.gguf"
 
+    # Hermetic config seam (isolation): live ~/.config/.../ai.env pins
+    # LLAMACPP_HOST/PORT via flags>env>file precedence; sandbox CONFIG_FILE
+    # keeps the 8088/127.0.0.1 unit asserts hermetic.
+    local empty_env="$sandbox/empty.env"
+    : > "$empty_env"
+
     # REAL run: writes the unit to USER_SYSTEMD_DIR, waits ~2s for health.
-    test_run_env PATH="$stubs:/usr/bin:/bin" USER_SYSTEMD_DIR="$unitdir" -- \
+    test_run_env -u LLAMACPP_PORT -u LLAMACPP_HOST PATH="$stubs:/usr/bin:/bin" CONFIG_FILE="$empty_env" USER_SYSTEMD_DIR="$unitdir" -- \
         timeout 60 "$server" start "$model"
     check_rc "real start writes unit and exits 0" 0 "$TR_RC"
     check_file_exists "unit file created" "$unitdir/pos-ai-server.service"

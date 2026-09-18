@@ -12,13 +12,14 @@ run_test() {
     require_cmd jq "telegram auth" || return 0
     require_cmd timeout "telegram auth" || return 0
 
-    local sandbox stubs cfg marker curl_log
+    local sandbox stubs cfg marker curl_log runtime
     sandbox="$(mksandbox telegram-auth)"
     stubs="$sandbox/stubs"
     cfg="$sandbox/cfg"
     marker="$sandbox/executed.ping"
     curl_log="$sandbox/curl.log"
-    mkdir -p "$stubs" "$cfg"
+    runtime="$sandbox/runtime"
+    mkdir -p "$stubs" "$cfg" "$runtime"
     : > "$curl_log"
 
     # ── stub curl: log argv; serve one getUpdates batch then empty; answer
@@ -58,7 +59,11 @@ STUB
     local listener="$ROOT/bin/pos-communication-telegram-listener"
 
     # ── run 1: all 4 authorization cases in one batch ──
+    # XDG_RUNTIME_DIR sandbox (isolation): the listener's flock singleton
+    # ($XDG_RUNTIME_DIR/pos-telegram-listener.lock) would otherwise collide
+    # with the live daemon's lock and exit instantly with "already running".
     local common=(PATH="$stubs:/usr/bin:/bin" CONFIG_DIR="$cfg"
+        XDG_RUNTIME_DIR="$runtime"
         TELEGRAM_BOT_TOKEN=testbot TELEGRAM_CHAT_ID=456 TELEGRAM_OWNER_ID=123)
     rm -f "$sandbox/served.once" "$marker"; : > "$curl_log"
     test_run_env "${common[@]}" -- timeout 5 "$listener" --run
@@ -71,6 +76,7 @@ STUB
     # ── run 2: owner id unset → fail-closed, nothing runs, no sends ──
     rm -f "$sandbox/served.once" "$marker"; : > "$curl_log"
     test_run_env PATH="$stubs:/usr/bin:/bin" CONFIG_DIR="$cfg" \
+        XDG_RUNTIME_DIR="$runtime" \
         TELEGRAM_BOT_TOKEN=testbot TELEGRAM_CHAT_ID=456 -- \
         timeout 5 "$listener" --run
     check_contains "owner-unset fail-closed warning" "TELEGRAM_OWNER_ID unset — ignoring command" "$TR_OUT"

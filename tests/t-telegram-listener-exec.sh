@@ -13,14 +13,15 @@ run_test() {
     require_cmd jq "telegram exec" || return 0
     require_cmd timeout "telegram exec" || return 0
 
-    local sandbox stubs cfg curl_log marker listener batch
+    local sandbox stubs cfg curl_log marker listener batch runtime
     sandbox="$(mksandbox telegram-exec)"
     stubs="$sandbox/stubs"
     cfg="$sandbox/cfg"
     curl_log="$sandbox/curl.log"
     marker="$sandbox/executed.log"
     listener="$ROOT/bin/pos-communication-telegram-listener"
-    mkdir -p "$stubs" "$cfg"
+    runtime="$sandbox/runtime"
+    mkdir -p "$stubs" "$cfg" "$runtime"
     : > "$curl_log"
     : > "$marker"
 
@@ -78,7 +79,11 @@ STUB
     printf '#!/usr/bin/env bash\nexit 1\n' > "$stubs/systemctl"
     chmod +x "$stubs/systemctl"
 
+    # XDG_RUNTIME_DIR sandbox (isolation): the listener's flock singleton
+    # ($XDG_RUNTIME_DIR/pos-telegram-listener.lock) would otherwise collide
+    # with the live daemon's lock and exit instantly with "already running".
     local common=(PATH="$stubs:/usr/bin:/bin" CONFIG_DIR="$cfg"
+        XDG_RUNTIME_DIR="$runtime"
         TELEGRAM_BOT_TOKEN=testbot TELEGRAM_CHAT_ID=456 TELEGRAM_OWNER_ID=123)
 
     # ── run the listener ──
@@ -116,6 +121,10 @@ STUB
     check_contains "/no_output reply" "text=OK" "$curl_content"
 
     # ── /quiet_test → NO sendMessage with "hello_quiet" ──
+    # Non-vacuous guard: the daemon must have actually dispatched /quiet_test
+    # (an "already running" startup failure leaves an empty curl log, which
+    # would otherwise pass the zero-count check without executing anything).
+    check_contains "listener processed /quiet_test" "exec: /quiet_test" "$TR_OUT"
     # The setMyCommands call may contain "hello_quiet" in the description,
     # so we check that no sendMessage line contains it.
     local quiet_send_count

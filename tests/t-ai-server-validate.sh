@@ -217,10 +217,21 @@ STUB
     touch "$models/my-model.gguf"
     printf '#!/usr/bin/env bash\nexit 1\n' > "$stubs/nvidia-smi"
     printf '#!/usr/bin/env bash\nexit 0\n' > "$stubs/systemctl"
-    chmod +x "$stubs/nvidia-smi" "$stubs/systemctl"
+    # curl stub: fail-fast probe so a future config leak can't stall the suite
+    # (~20s per real probe to a filtered IP). Returns healthy JSON.
+    printf '#!/usr/bin/env bash\nprintf "%%s" '"'"'{"status":"ok"}'"'"'\n' > "$stubs/curl"
+    chmod +x "$stubs/nvidia-smi" "$stubs/systemctl" "$stubs/curl"
+
+    # Hermetic config seam (isolation): live ~/.config/.../ai.env pins
+    # LLAMACPP_HOST/PORT via flags>env>file precedence; sandbox CONFIG_FILE
+    # keeps the 8088/127.0.0.1 default asserts hermetic.
+    local empty_env="$sandbox/empty.env"
+    : > "$empty_env"
 
     local server="$ROOT/bin/pos-ai-server"
-    local base_env=(PATH="$havebin:$stubs:/usr/bin:/bin" DRY_RUN=1
+    local base_env=(-u LLAMACPP_PORT -u LLAMACPP_HOST
+        PATH="$havebin:$stubs:/usr/bin:/bin" DRY_RUN=1
+        CONFIG_FILE="$empty_env"
         USER_SYSTEMD_DIR="$sandbox/userunits")
     test_run_env "${base_env[@]}" -- "$server" start "$models/my-model.gguf"
     check_rc "F6 DRY_RUN start exits 0" 0 "$TR_RC"
@@ -234,7 +245,8 @@ STUB
 
     # Version via the same b10822-shaped stub: status shows 0.4.0, never
     # "unknown" (F1 proven through the real CLI on a real-shaped build).
-    test_run_env "${base_env[@]}" -- "$server" status
+    # timeout: fail-fast guard so a future leak stalls seconds, not minutes.
+    test_run_env "${base_env[@]}" -- timeout 10 "$server" status
     check_rc "F1 CLI status exits 0" 0 "$TR_RC"
     check_contains "F1 CLI status resolves version 0.4.0" "version:   0.4.0" "$TR_OUT"
     check_not_contains "F1 CLI status version is NOT unknown" "version:   unknown" "$TR_OUT"

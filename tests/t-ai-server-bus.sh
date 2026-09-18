@@ -66,13 +66,24 @@ STUB
     printf '#!/usr/bin/env bash\nprintf "Linger=no\\n"\n' > "$stubs/loginctl"
     chmod +x "$stubs/llama-server" "$stubs/systemctl" "$stubs/nvidia-smi" "$stubs/curl" "$stubs/loginctl"
 
+    # ── Hermetic config seam (isolation): live ~/.config/.../ai.env pins
+    # LLAMACPP_HOST/PORT (100.100.3.6:30000) via flags>env>file precedence;
+    # point CONFIG_FILE at an empty sandbox file so defaults (8088/127.0.0.1)
+    # hold. The -u guards cover exported LLAMACPP_* env if ever present.
+    local empty_env="$sandbox/empty.env"
+    : > "$empty_env"
+
     local server="$ROOT/bin/pos-ai-server"
     local nobus_env=(-u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS
+        -u LLAMACPP_PORT -u LLAMACPP_HOST
         PATH="$stubs:/usr/bin:/bin" HF_DOWNLOAD_DIR="$models"
+        CONFIG_FILE="$empty_env"
         USER_SYSTEMD_DIR="$unitdir" NO_UNIT_PIDFILE="$sandbox/pos-ai-server.pid"
         NO_UNIT_LOG="$sandbox/pos-ai-server.log")
     local bus_env=(-u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS
+        -u LLAMACPP_PORT -u LLAMACPP_HOST
         PATH="$stubs:/usr/bin:/bin" HF_DOWNLOAD_DIR="$models"
+        CONFIG_FILE="$empty_env"
         USER_SYSTEMD_DIR="$unitdir" XDG_RUNTIME_DIR="$runtime"
         DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus"
         NO_UNIT_PIDFILE="$sandbox/pos-ai-server.pid" NO_UNIT_LOG="$sandbox/pos-ai-server.log")
