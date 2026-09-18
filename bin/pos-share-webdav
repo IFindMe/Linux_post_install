@@ -62,9 +62,11 @@ Options for share/enable:
   --read-only         Only allow read-only access
   --cert <file> --key <file>  Serve over TLS (HTTPS)
 
-Auth is mandatory by default. The user/password resolve flags > environment
-> webdav.env; a missing password prompts on a TTY (never passed on argv)
-and errors out non-interactively. webdav.env lives next to the other tool
+Auth is mandatory by default. The user/password resolve --user flag >
+environment > webdav.env; a missing password prompts on a TTY (there is no
+--pass flag — the password is never on the pos command line) and errors out
+non-interactively. The spawned rclone daemon argv necessarily carries --pass
+and is visible to local users via ps. webdav.env lives next to the other tool
 configs (~/.config/linux_post_install/webdav.env, chmod 600) and auth values
 are masked in all output.
 
@@ -449,8 +451,12 @@ cmd_share() {
     tls_advisory "$addr"
 
     if [ -n "$(webdav_pids_for "$path")" ]; then
-        log "Already serving $path — restarting with the new settings"
-        stop_pids_for "$path"
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            log "(dry-run) would restart serve of $path with the new settings (live serve left running)"
+        else
+            log "Already serving $path — restarting with the new settings"
+            stop_pids_for "$path"
+        fi
     fi
 
     # Assemble the daemon argv (password travels on argv to rclone; it is
@@ -502,6 +508,10 @@ cmd_unshare() {
     if [ -z "$(webdav_pids_for "$path")" ]; then
         warn "Nothing serving $path"
         exit 0
+    fi
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        log "(dry-run) would stop serving: $path"
+        return 0
     fi
     stop_pids_for "$path"
     log "Stopped serving: $path"

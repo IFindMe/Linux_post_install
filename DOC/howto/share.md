@@ -326,8 +326,10 @@ pos share webdav disable                             # remove ALL persistent ser
 Auth is mandatory by default and resolves flags > environment > `webdav.env`
 (`~/.config/linux_post_install/webdav.env`, chmod 600, values masked in all
 output): `--user` names the user, the password comes from `WEBDAV_PASS` (env or
-file) or a TTY prompt — there is no `--pass` flag, the password is never passed
-on argv, and a missing password errors out non-interactively instead of guessing.
+file) or a TTY prompt — there is no `--pass` flag, the password is never on
+the `pos` command line, and a missing password errors out non-interactively
+instead of guessing. The spawned rclone daemon argv necessarily carries
+`--pass` and is visible to local users via `ps`.
 `--no-auth` serves WITHOUT authentication and warns (ANY network client can read
 and write the folder — the WebDAV equivalent of the NFS open export);
 `--read-only` restricts a share to reads.

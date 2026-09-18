@@ -679,7 +679,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-share-smb-client` | 773 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
-| `bin/pos-share-webdav` | 841 | Serve folders over WebDAV via rclone (status, share/unshare, enable/disable) |
+| `bin/pos-share-webdav` | 851 | Serve folders over WebDAV via rclone (status, share/unshare, enable/disable) |
 | `bin/pos-ssh-load-keys` | 31 | Load all SSH keys into the agent |
 | `bin/pos-system-backup` | 301 | Encrypted (AES-256) folder snapshots (tar + gpg) |
 | `bin/pos-system-bank` | 647 | Persistent command bank for saving and running shell commands |

@@ -43,6 +43,7 @@ templates (without overwriting an existing file):
 | `compose.env` | `pos docker compose` | `TS_AUTHKEY`, `TZ`, `DNS_SERVER`, `SERVICES_BASE` |
 | `entertainment.env` | `pos entertainment *` | plugin keys (`WEATHER_LAT`…), `ENABLED` |
 | `ai.env` | `pos ai` | `AI_PROVIDER`, `AI_MODEL`, `AI_SYSTEM_PROMPT`, `AI_MAX_TOKENS`, `AI_SESSION_TURNS`, provider keys `AI_GEMINI_API_KEY` / `OPENROUTER_API_KEY` (+ legacy `AI_API_KEY` fallback) |
+| `webdav.env` | `pos share webdav` | `WEBDAV_USER`, `WEBDAV_PASS`, `WEBDAV_PORT`, `WEBDAV_ADDR`, `WEBDAV_CERT`, `WEBDAV_KEY` |
 | `schedule.d/` | `pos system schedule` | one `<name>.env` per job: `INTERVAL`, `NOTIFY`, `MSG`, `RULE`, `COMMAND` |
 
 ```bash

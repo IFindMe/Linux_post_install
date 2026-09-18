@@ -23,7 +23,8 @@ set -euo pipefail
 #   live daemon (real pgrep + /proc, fake sleeping rclone): spawn proof +
 #     masked list + re-share restart (single daemon, no duplicate) +
 #     unshare-stop (daemon reaped) — regression cover for WEBDAV-01
-#     (webdav_pids_for path-first argv match; see retest report)
+#     (webdav_pids_for path-first argv match; see retest report) +
+#     DRY_RUN kill-paths (F3: dry-run re-share/unshare simulate, daemon alive)
 #   negative controls: sentinel secret absent from EVERY captured output +
 #     the tripwire is proven live against a planted leak; fail-closed guards
 #     asserted present in the tool source.
@@ -497,6 +498,58 @@ STUB
         done
         check_eq "live daemons reaped" "" \
             "$(pgrep -f "serve webda[v] $livedir" 2>/dev/null || true)"
+        # F3 DRY_RUN kill-path regression (Builder 2026-09-19 F3a/F3b):
+        # dry-run must never kill. Fresh serving path; dry-run re-share and
+        # dry-run unshare both leave the daemon alive (old code killed it:
+        # re-share reaped without respawning under DRY_RUN, unshare stopped
+        # it — so the count/pid/message assertions below fail on old code).
+        local drydir="$sandbox/drylivedata"
+        mkdir -p "$drydir"
+        local -a drylive=(PATH="$stubs:/usr/bin:/bin" CONFIG_DIR="$cfg"
+            USER_SYSTEMD_DIR="$units" DRY_RUN=0 NOTIFY_PLATFORM=none
+            WEBDAV_USER=bob "WEBDAV_PASS=$SECRET" FAKE_RCLONE_SLEEP=25)
+        test_run_env "${drylive[@]}" -- "$tool" share "$drydir" --port 18081 </dev/null
+        check_rc "dry-run setup share → rc 0" 0 "$TR_RC"
+        check_eq "dry-run setup has a single daemon" 1 \
+            "$(pgrep -f "serve webda[v] $drydir" 2>/dev/null | wc -l | tr -d ' ')"
+        local dry_before=""
+        dry_before="$(pgrep -f "serve webda[v] $drydir" 2>/dev/null || true)"
+        # F3a: DRY_RUN=1 re-share simulates the restart, kills nothing.
+        test_run_env "${drylive[@]}" DRY_RUN=1 -- "$tool" share "$drydir" --port 18081 </dev/null
+        check_rc "dry-run re-share → rc 0" 0 "$TR_RC"
+        check_contains "dry-run re-share simulates restart" \
+            "(dry-run) would restart serve of $drydir with the new settings (live serve left running)" "$TR_OUT"
+        check_not_contains "dry-run re-share takes no live restart path" "Already serving" "$TR_OUT"
+        check_not_contains "dry-run re-share leaks no secret" "$SECRET" "$TR_OUT"
+        check_eq "dry-run re-share leaves daemon count unchanged" 1 \
+            "$(pgrep -f "serve webda[v] $drydir" 2>/dev/null | wc -l | tr -d ' ')"
+        check_eq "dry-run re-share keeps the same daemon pid" "$dry_before" \
+            "$(pgrep -f "serve webda[v] $drydir" 2>/dev/null || true)"
+        # F3b: DRY_RUN=1 unshare simulates the stop, kills nothing.
+        test_run_env "${drylive[@]}" DRY_RUN=1 -- "$tool" unshare "$drydir" </dev/null
+        check_rc "dry-run unshare → rc 0" 0 "$TR_RC"
+        check_contains "dry-run unshare simulates stop" \
+            "(dry-run) would stop serving: $drydir" "$TR_OUT"
+        check_not_contains "dry-run unshare takes no live stop path" "Stopped serving:" "$TR_OUT"
+        check_not_contains "dry-run unshare leaks no secret" "$SECRET" "$TR_OUT"
+        check_eq "dry-run unshare kills nothing (daemon still listed)" 1 \
+            "$(pgrep -f "serve webda[v] $drydir" 2>/dev/null | wc -l | tr -d ' ')"
+        check_eq "dry-run unshare keeps the same daemon pid" "$dry_before" \
+            "$(pgrep -f "serve webda[v] $drydir" 2>/dev/null || true)"
+        # Real cleanup: live unshare stops the F3 daemon, then reap + prove gone.
+        test_run_env "${drylive[@]}" -- "$tool" unshare "$drydir" </dev/null
+        check_rc "F3 cleanup unshare → rc 0" 0 "$TR_RC"
+        check_contains "F3 cleanup unshare stops" "Stopped serving:" "$TR_OUT"
+        local drystray
+        for drystray in $(pgrep -f "serve webda[v] $drydir" 2>/dev/null || true); do
+            kill "$drystray" 2>/dev/null || true
+        done
+        sleep 1
+        for drystray in $(pgrep -f "serve webda[v] $drydir" 2>/dev/null || true); do
+            kill -9 "$drystray" 2>/dev/null || true
+        done
+        check_eq "F3 daemons reaped" "" \
+            "$(pgrep -f "serve webda[v] $drydir" 2>/dev/null || true)"
     else
         skip_case "live daemon share/list" "pgrep or setsid not available"
     fi
