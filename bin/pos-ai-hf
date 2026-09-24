@@ -842,23 +842,23 @@ cmd_info() {
     local likes
     likes="$(printf '%s' "$info_json" | jq -r '.likes // 0')"
     local tags
-    tags="$(printf '%s' "$info_json" | jq -r '.tags // [] | join(\", \")')"
+    tags="$(printf '%s' "$info_json" | jq -r '.tags // [] | join(", ")')"
     local description
-    description="$(printf '%s' "$info_json" | jq -r '.description // \"No description\"')"
+    description="$(printf '%s' "$info_json" | jq -r '.description // "No description"')"
     local author
-    author="$(printf '%s' "$info_json" | jq -r '.author // \"Unknown\"')"
+    author="$(printf '%s' "$info_json" | jq -r '.author // "Unknown"')"
     local created
-    created="$(printf '%s' "$info_json" | jq -r '.createdAt // \"Unknown\"')"
+    created="$(printf '%s' "$info_json" | jq -r '.createdAt // "Unknown"')"
     local last_modified
-    last_modified="$(printf '%s' "$info_json" | jq -r '.lastModified // \"Unknown\"')"
+    last_modified="$(printf '%s' "$info_json" | jq -r '.lastModified // "Unknown"')"
     local card_data
     card_data="$(printf '%s' "$info_json" | jq -r '.cardData // {}')"
     local pipeline_tag
-    pipeline_tag="$(printf '%s' "$info_json" | jq -r '.pipeline_tag // \"Unknown\"')"
+    pipeline_tag="$(printf '%s' "$info_json" | jq -r '.pipeline_tag // "Unknown"')"
     local model_type
-    model_type="$(printf '%s' "$info_json" | jq -r '.modelType // \"Unknown\"')"
+    model_type="$(printf '%s' "$info_json" | jq -r '.modelType // "Unknown"')"
     local architectures
-    architectures="$(printf '%s' "$info_json" | jq -r '.architectures // [] | join(\", \")')"
+    architectures="$(printf '%s' "$info_json" | jq -r '.architectures // [] | join(", ")')"
 
     printf "Repository: %s\n" "$model_name"
     printf "Author: %s\n" "$author"
