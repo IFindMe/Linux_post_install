@@ -22,7 +22,7 @@ make test                             # full zero-dep suite: no network, no sudo
 bash -n <file> && git diff --check    # new/edited scripts
 ```
 
-CI (`.gitea/workflows/lint.yml`, job `gates`) runs `make gen` + `git diff --exit-code` + `make check` + `make lint` on push to main and PRs, then tags `ci-ok/<sha>` or `ci-fail/<sha>`; check with `scripts/ci-status.sh [<sha>]`. Red is a merge-blocker. `make hook` installs the opt-in pre-commit hook (runs `make check` only — always run `make lint` yourself).
+CI (`.gitea/workflows/lint.yml`, job `gates`) runs `make gen` + `git diff --exit-code` + `make check` + `make lint` on push to main and PRs — never `make test` (behavior suite stays local, so run it yourself before pushing), then tags `ci-ok/<sha>` or `ci-fail/<sha>`; check with `scripts/ci-status.sh [<sha>]`. Red is a merge-blocker. `make hook` installs the opt-in pre-commit hook (runs `make check` only — always run `make lint` yourself).
 
 ## Tool rules (lint-enforced — agents guess these wrong)
 
@@ -35,7 +35,7 @@ CI (`.gitea/workflows/lint.yml`, job `gates`) runs `make gen` + `git diff --exit
 ## Module quirks
 
 - `entertainment/<name>.sh` plugins: `# POS_PLUGIN:` + `# POS_KEYS:` markers, never source `lib/common.sh` (stdout becomes the Telegram message). Verify with `bash -n` + `pos entertainment send <name> --print`; `make gen` skips them.
-- Secrets are never committed (`config/authorized_keys`, `config/rclone.conf` are gitignored). Runtime config is `~/.config/linux_post_install/<tool>.env` (chmod 600, env-var precedence); mask tokens in output.
+- Secrets are never committed (`config/authorized_keys`, `config/rclone.conf` are gitignored). Runtime config is `~/.config/linux_post_install/<tool>.env` (chmod 600, env-var precedence); mask tokens in output. Declare keys via `# POS_CONFIG:` so `pos config <scope>` picks them up; new tools load with `load_env_file` from `lib/config-ui.sh`, never a hand-rolled parser.
 - `compose/scale-tail` is a git submodule — `git submodule update --init` before any `pos docker compose` work.
 - Tests live in `tests/t-*.sh` (`run_test()` + `test-lib.sh` helpers; `$TEST_TMP` sandbox auto-cleaned). Infeasible cases call `skip_case` — never fake a pass. Add a row to `tests/README.md` for new files; keep the suite under 90s.
 
