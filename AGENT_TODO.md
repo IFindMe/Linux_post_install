@@ -18,6 +18,8 @@ summary (newest last).
 
 ## Next
 
+- **BLOCKED (2026-09-24):** suite runtime budget effort terminally stopped after the final disposable iteration failed the mandatory SIGINT cleanup/status contract; no further repair loop or Builder implementation is authorized. Evidence: `AgentsReport/architect/2026-09-24_suite-runtime-budget-final-disposable-iteration-review.md`.
+
 - - Wire alerting into more tools as they are added (default: source
   `lib/notify.sh`, call `notify_send` on success/failure).
 
@@ -41,6 +43,10 @@ summary (newest last).
   if it grows.
 
 ## Done
+
+- **2026-09-24** — `pos share rclone` v1 (Explorer→Architect→Designer→Builder→Tester→Reviewer): paste-model rclone INI import/export with `remotes/show/status/ls/check/copy/import/export`, native-default config convergence, no-clobber, masked `show`, chmod-600/temp-rename writes, menu/docs/completion wiring, and 92 hermetic checks. Full gates pass (`make gen` ×2, `make check`, `make lint`, `make test`: 27 files / 962 checks / 0 fail / 1 skip). Suite runtime is 130s, so the pre-existing sub-90s budget follow-up remains open.
+
+- **2026-09-24** — `pos ai hf info` jq quoting fix (Detective→Builder→Reviewer): corrected eight over-escaped jq filters in `cmd_info`; mutation and stubbed JSON proofs pass, `t-ai-hf-download.sh` is green, and the durable quoting lesson is recorded in `memory/lessons/lesson_jq_shell_quoting.md`.
 
 - **`pos system bank alias`** — bash aliases for bank commands (Architect→Builder): `alias <name> [alias_name]`, `alias list`, `alias remove <alias_name>`, menu option 6 "Manage aliases", subcommand shown in `pos tree`/completion via `# POS_SUBCMDS`. Writes `alias <alias_name>='pos system bank run <name>'` lines into `~/.bashrc` inside a managed `# >>> pos bank aliases … <<<` block (`BASH_RC_FILE` seam); same alias name retargets the line, removing the last alias removes the whole block; outer-alias collision refused (line shown), PATH-shadow non-blocking warn, `bank remove` drops aliases pointing at the removed command. Fixed during build: undeclared `declare -g -A` alias map → `unbound variable`; `[[ =~ ]]` literalizes `'` → payload matched via glob `case`; **GNU sed `1,0p` prints line 1** (0 = last-line sentinel) → guarded extraction ranges so edge blocks rewrite cleanly. New `tests/t-bank.sh` Part B2 (49 alias checks). Docs: POS.md system category + detail block, howto/system.md new bank section. Verified: `bash -n`, t-bank 120 checks, `make gen` byte-idempotent, `make check`, `make lint` 0 FAIL / 0 WARN. Done 2026-09-12.
 
