@@ -1,8 +1,9 @@
 # How-To: `pos share`
 
 Share files and devices over the network: USB devices via the USB Redirector
-server, filesystems via NFS and SMB/Samba, folders over WebDAV via rclone.
-Tools: `usb`, `nfs`, `smb`, `webdav`.
+server, filesystems via NFS and SMB/Samba, folders over WebDAV via rclone,
+and pasted rclone remotes (config file) with safe file ops.
+Tools: `usb`, `nfs`, `smb`, `webdav`, `rclone`.
 
 | Tool | What it does |
 |------|--------------|
@@ -12,6 +13,7 @@ Tools: `usb`, `nfs`, `smb`, `webdav`.
 | `pos share smb server` | Manage the Samba server (shares, users, enable/disable) |
 | `pos share smb client` | Mount SMB/CIFS shares (ephemeral or persistent systemd units) |
 | `pos share webdav` | Serve folders over WebDAV via rclone (ephemeral or persistent user units) |
+| `pos share rclone` | Manage pasted rclone remotes (import/show/status) and run safe file ops (ls/check/copy) |
 
 ---
 
@@ -382,6 +384,72 @@ read-only confirm; a UFW conflict is offered as a one-key fix.
   `pos share webdav disable <path>`.
 - Persistent serve doesn't survive logout → enable linger:
   `sudo loginctl enable-linger <user>` (the tool warns about this after `enable`).
+
+---
+
+## `pos share rclone` — pasted rclone remotes (paste-and-use)
+
+Requires `rclone` (in `preinstall.sh` PACKAGES). Manages the rclone-native
+config file (`~/.config/rclone/rclone.conf`, chmod 600) that bare `rclone`
+also reads — paste your existing remote INI once, then use it. No serve, no
+sync, no wizard in v1.
+
+```bash
+cat ~/old-rclone.conf | pos share rclone import   # paste via stdin (Ctrl+D)
+pos share rclone import --file ~/old-rclone.conf  # or from a file
+pos share rclone remotes                           # is my paste loaded?
+pos share rclone show mydrive                      # masked config (never raw)
+pos share rclone status                            # config path + remote count
+pos share rclone ls mydrive:backups/               # cheapest online check
+pos share rclone check /srv/media mydrive:media    # read-only compare
+pos share rclone copy /srv/media mydrive:media --dry-run   # preview first
+pos share rclone export --file /tmp/rclone.conf.bak  # raw backup (PLAINTEXT)
+```
+
+`import` validates offline (`rclone config show`, no network) and refuses to
+overwrite an existing config without `--force` or an interactive confirm —
+back up with `export` first, then `import --force`. `show` masks secret keys
+(`key = (set, masked)`); `export` is raw by design and warns on stderr.
+`copy` is the only v1 write op and honors `$DRY_RUN`; `ls`/`check` are
+read-only. All commands accept `--config <path>` for one-shots; without it
+the tool relies on native resolution (`--config` flag > `$RCLONE_CONFIG` >
+default) so external `rclone` agrees with pos.
+
+**Recipes:**
+- **Move remotes from an old machine:**
+  ```bash
+  cat ~/old-rclone.conf | pos share rclone import
+  pos share rclone remotes
+  pos share rclone ls mydrive:backups/
+  ```
+- **Back up before replacing:**
+  ```bash
+  pos share rclone export --file /tmp/rclone.conf.bak
+  pos share rclone import --file ~/new-rclone.conf --force
+  pos share rclone status
+  ```
+- **Copy with a preview first:**
+  ```bash
+  pos share rclone copy /srv/media mydrive:media --dry-run
+  pos share rclone copy /srv/media mydrive:media
+  ```
+
+**Interactive menu:** run `pos share rclone` with no args for a menu
+(status / remotes / show / ls / check / copy / import / export). Import
+offers paste-via-stdin or from-file; copy offers a `--dry-run` preview first.
+
+**Troubleshooting:**
+- "rclone not found" → `rclone` isn't installed; `sudo apt install rclone`
+  (it is in `preinstall.sh` PACKAGES, so managed boxes already have it).
+- "No remotes configured (empty config …)" → nothing pasted yet; add one
+  with `pos share rclone import`.
+- "Config already exists … not overwriting" → back up (`export --file`),
+  then retry with `import --force`.
+- "Unknown remote '<name>'" → list names with `pos share rclone remotes`.
+- "Empty paste/file — nothing imported" → the input had no `[name]`
+  sections; paste the full INI (with `[remote]` + `type = …` lines), then Ctrl+D.
+- "Invalid rclone config (rclone config show failed)" → the pasted INI
+  didn't parse; check `[name]`/`type` lines or import a working `rclone.conf`.
 
 ---
 

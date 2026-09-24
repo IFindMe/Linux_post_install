@@ -10,19 +10,19 @@
 
 <!-- GEN:START docmap -->
 | ## 1. Project Overview | 28–43 |
-| ## 2. Directory Structure | 44–219 |
-| ## 3. Installation Flow | 220–278 |
-| ## 4. The `pos` CLI System | 279–368 |
-| ## 5. Shared Library — `lib/common.sh` | 369–400 |
-| ## 6. Docker Compose / ScaleTail | 401–443 |
-| ## 7. Optional Apps (`apps/`) | 444–473 |
-| ## 8. Entertainment Module | 474–487 |
-| ## 9. Systemd Services | 488–499 |
-| ## 10. Configuration Files | 500–526 |
-| ## 11. Coding Conventions | 527–559 |
-| ## 12. Development Workflow | 560–612 |
-| ## 13. Key File Quick Reference | 613–698 |
-| ## 14. Common Tasks for Agents | 699–732 |
+| ## 2. Directory Structure | 44–221 |
+| ## 3. Installation Flow | 222–280 |
+| ## 4. The `pos` CLI System | 281–371 |
+| ## 5. Shared Library — `lib/common.sh` | 372–403 |
+| ## 6. Docker Compose / ScaleTail | 404–446 |
+| ## 7. Optional Apps (`apps/`) | 447–476 |
+| ## 8. Entertainment Module | 477–490 |
+| ## 9. Systemd Services | 491–502 |
+| ## 10. Configuration Files | 503–529 |
+| ## 11. Coding Conventions | 530–562 |
+| ## 12. Development Workflow | 563–615 |
+| ## 13. Key File Quick Reference | 616–702 |
+| ## 14. Common Tasks for Agents | 703–736 |
 <!-- GEN:END docmap -->
 
 ## 1. Project Overview
@@ -105,6 +105,8 @@ Linux_post_install/
 │   ├── pos-network-scan                    # Parallel ping sweep of CIDR
 │   ├── pos-share-nfs-client                # Mount NFS shares (ephemeral or persistent systemd mount units)
 │   ├── pos-share-nfs-server                # Manage the NFS kernel server (status, share/unshare exports, enable/disable)
+│   ├── pos-share-rclone                    # Manage pasted rclone remotes (config file) and run safe file ops
+│   │   [deps: rclone]
 │   ├── pos-share-smb-client                # Mount SMB/CIFS shares (ephemeral or persistent systemd mount units)
 │   ├── pos-share-smb-server                # Manage the Samba server (status, share/unshare exports, users, enable/disable)
 │   ├── pos-share-usb-server                # USB Redirector server control (--ls, --share; prompts when args omitted)
@@ -334,6 +336,7 @@ All non-interactive `pos` commands log output to `~/.local/share/linux_post_inst
 | network | scan | `pos-network-scan` | Parallel ping sweep of CIDR |  |  |
 | share | nfs-client | `pos-share-nfs-client` | Mount NFS shares (ephemeral or persistent systemd mount units) |  |  |
 | share | nfs-server | `pos-share-nfs-server` | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |  |  |
+| share | rclone | `pos-share-rclone` | Manage pasted rclone remotes (config file) and run safe file ops | rclone |  |
 | share | smb-client | `pos-share-smb-client` | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |  |  |
 | share | smb-server | `pos-share-smb-server` | Manage the Samba server (status, share/unshare exports, users, enable/disable) |  |  |
 | share | usb-server | `pos-share-usb-server` | USB Redirector server control (--ls, --share; prompts when args omitted) |  |  |
@@ -676,6 +679,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-network-scan` | 272 | Parallel ping sweep of CIDR |
 | `bin/pos-share-nfs-client` | 511 | Mount NFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-nfs-server` | 245 | Manage the NFS kernel server (status, share/unshare exports, enable/disable) |
+| `bin/pos-share-rclone` | 778 | Manage pasted rclone remotes (config file) and run safe file ops |
 | `bin/pos-share-smb-client` | 773 | Mount SMB/CIFS shares (ephemeral or persistent systemd mount units) |
 | `bin/pos-share-smb-server` | 441 | Manage the Samba server (status, share/unshare exports, users, enable/disable) |
 | `bin/pos-share-usb-server` | 362 | USB Redirector server control (--ls, --share; prompts when args omitted) |
@@ -690,7 +694,7 @@ Use conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
 | `bin/pos-ai` | 714 | AI assistant: ask, chat, sessions, capture, models, providers |
 | `bin/pos-config` | 80 | Interactive editor for the tools' runtime config (reads # POS_CONFIG: registry) |
 | `bin/pos-tree` | 118 | Show the pos CLI command tree: categories, commands, and subcommands |
-| `completions/pos.bash` | 331 | Dynamic bash completion |
+| `completions/pos.bash` | 332 | Dynamic bash completion |
 <!-- GEN:END filetable -->
 | `apps/install.sh` | 171 | App install/uninstall picker/orchestrator |
 

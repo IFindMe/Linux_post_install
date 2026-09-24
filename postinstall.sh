@@ -7,11 +7,16 @@ log "Running post-install..."
 
 # ── rclone config ──────────────────────────────────────────────
 # Place your rclone.conf in config/ (gitignored) and this will install it.
+# Kept when the user already has one (no clobber — same as entertainment.env).
 if [ -f config/rclone.conf ]; then
     run mkdir -p "$HOME/.config/rclone"
-    run cp config/rclone.conf "$HOME/.config/rclone/rclone.conf"
-    run chmod 600 "$HOME/.config/rclone/rclone.conf"
-    log "Installed rclone.conf"
+    if [ -f "$HOME/.config/rclone/rclone.conf" ]; then
+        log "rclone.conf already exists, keeping it"
+    else
+        run cp config/rclone.conf "$HOME/.config/rclone/rclone.conf"
+        run chmod 600 "$HOME/.config/rclone/rclone.conf"
+        log "Installed rclone.conf"
+    fi
 else
     warn "config/rclone.conf not found, skipping"
 fi
