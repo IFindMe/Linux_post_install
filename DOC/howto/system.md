@@ -6,7 +6,7 @@ persistent command bank. Tools: `backup`, `firewall`, `health`, `uninstall`,
 
 | Tool | What it does |
 |------|--------------|
-| `pos system health` | Host health dashboard (disk, RAM, services, backup age, fail2ban, docker) |
+| `pos system health` | Host health dashboard (disk, RAM, backup age, fail2ban, docker) |
 | `pos system backup` | gpg-encrypted (AES-256) folder snapshots |
 | `pos system firewall` | Interactive UFW ("UFW POWER") management |
 | `pos system uninstall` | Safe, interactive uninstaller for the pos toolkit |
@@ -20,11 +20,13 @@ persistent command bank. Tools: `backup`, `firewall`, `health`, `uninstall`,
 pos system health                 # console report; exits 1 if any check FAILs
 ```
 
-Checks: disk per mount (>90% = FAIL), RAM/swap, failed systemd units, backup
-age, fail2ban, docker containers. Header shows hostname, uptime, load, public IP.
+Checks: disk per mount (>90% = FAIL), RAM/swap, backup age, fail2ban, docker
+containers. Header shows hostname, uptime, load, public IP.
 
 Health is a **console-only reporter — it never sends notifications**; deliver
-its output with a wrapper or a scheduled job (below). `--help` prints the
+its output with a wrapper of your own or from your own cron/timer (e.g. redirect
+it to a log file).
+`--help` prints the
 **effective** config values (env > `system.env` > default), e.g.:
 
 ```
@@ -38,43 +40,38 @@ Environment (effective values):
 ### Configuration
 
 ```bash
-# ~/.config/linux_post_install/system.env   (comment-only defaults — uncomment to override)
+# ~/.config/linux_post_install/system.env   (hand-written; exported env vars win)
 BACKUP_SERVICE_ROOTS=/srv $HOME/srv    # roots for backup-age check + backup --service
 BACKUP_USB_ROOT=/mnt/usb               # optional: copy finished backups to <root>/backups/ (auto-detects a mounted USB when unset)
 HEALTH_BACKUP_MAX_AGE_DAYS=3           # WARN if newest backup older (default 2)
 ```
 
-### Daily digest (automated)
+### Running it on a timer (your own)
 
-Run the health report on a timer with a scheduled job (no systemd unit needed):
-
-```bash
-pos system schedule config        # add a job: INTERVAL=daily, NOTIFY=always,
-                                  #   COMMAND=pos system health
-systemctl --user list-timers | grep pos-schedule
-pos system schedule run <name>    # run once now
-```
-
-The `NOTIFY=always` policy sends the job's full output — i.e. the dashboard —
-as the alert. The old `pos-health.{service,timer}` systemd units are gone — a
-legacy install may still have them failed/leftover; disable and remove them:
+pos ships no scheduler — to get the dashboard regularly, use your own
+scheduling: a cron entry or a timer in your service manager, e.g.
 
 ```bash
-sudo systemctl disable --now pos-health.timer pos-health.service 2>/dev/null
-sudo rm -f /etc/systemd/system/pos-health.{service,timer} && sudo systemctl daemon-reload
+crontab -e
+# every morning at 08:00, write the report to a log file:
+0 8 * * * pos system health >> ~/health.log 2>&1
 ```
+
+A legacy install may still carry old `pos-health.{service,timer}` units —
+`pos system uninstall` sweeps leftover pos-managed units; you can also delete
+the old files under `/etc/systemd/system/` by hand.
 
 **Recipes:**
-- Watch the backup age without email: add the daily digest job; if the backup
-  check turns WARN you'll see it in the morning report.
-- Exit code in a cron/scheduled check:
-  `pos system health >/dev/null 2>&1 || notify_send "health FAIL"`.
+- Watch the backup age without email: run the report each morning from your
+  own cron; if the backup check turns WARN you'll see it in that morning's
+  report.
+- Exit code in a cron check:
+  `pos system health >/dev/null 2>&1 || echo "health FAIL" >&2`.
 
 **Troubleshooting:**
 - `[WARN] fail2ban installed but not running` → expected unless you have it
-  active; start it (`sudo systemctl enable --now fail2ban`) or ignore.
-- `[FAIL] services: nbd-server.service …` → a failed unit; inspect with
-  `systemctl status <unit>`.
+  active; start it with your service manager (e.g. `sudo service fail2ban start`)
+  or ignore.
 
 ---
 
@@ -87,8 +84,7 @@ pos system backup --service                     # pick a folder from /srv + ~/sr
 ```
 
 Uses `sudo tar` + gpg AES-256. The password is prompted **twice and never
-stored**; the artifact is `chmod 600`. On success (and on failure, via ERR
-trap) a `notify_send` alert is sent.
+stored**; the artifact is `chmod 600`.
 
 **Skip encryption** with `--no-encrypt` (or `BACKUP_ENCRYPT=0` in
 `system.env`): the archive stays a plain `.tar.gz`, no password is prompted,
@@ -106,7 +102,7 @@ After the archive verifies, connected USB storage is **detected** (so a stick
 plugged in while the backup was running is found — if none is mounted you get
 one chance to plug one in and re-check) and you're asked whether to copy the
 backup there. The copy lands in `<usb>/backups/` and is **verified 100%**
-(sha256 source vs copy) before any success is announced:
+(sha256 source vs copy) before it is reported as verified:
 
 ```bash
 pos system backup ~/Documents
@@ -156,11 +152,11 @@ the backup stays local — it never blocks.
   cd ~/backups && pos system backup --service
   pos system health          # "backup: 0d old" turns OK
   ```
-- **Cron it and get alerted:**
+- **Cron it:**
   ```bash
   30 3 * * * cd ~/backups && pos system backup --service >> ~/backups/backup.log 2>&1
   ```
-  Success/failure are sent to Telegram automatically.
+  Use `--no-encrypt` (or `BACKUP_ENCRYPT=0`) for a non-interactive run.
 
 **Troubleshooting:**
 - "Root not found: …" → the default roots don't exist; set `BACKUP_SERVICE_ROOTS`
@@ -190,9 +186,7 @@ and an executed-command history. Supports `--dry-run`:
 sudo pos system firewall --dry-run
 ```
 
-Every command is **previewed and confirmed** before execution. Executed
-mutating changes are announced via `notify_send` (read-only `ufw status` is
-not).
+Every command is **previewed and confirmed** before execution.
 
 ### Recipes
 - Open SSH + a service:
@@ -201,8 +195,7 @@ not).
 - `--dry-run` to rehearse a rule batch safely.
 
 **Troubleshooting:**
-- "Please run as root" → you need `sudo pos system firewall` (the notify config
-  still uses your user's `$HOME`, so alerts keep working).
+- "Please run as root" → you need `sudo pos system firewall`.
 - Accidentally locked yourself out of SSH → console into the host,
   `sudo ufw allow 22/tcp`, then `sudo ufw reload`.
 - `ufw reset` requires typing `RESET` — deliberate.
@@ -219,9 +212,9 @@ Scans the system for installed pos components and removes them in three tiers:
 
 | Tier | What it removes | How to include |
 |------|----------------|----------------|
-| **Tier 1** | Binaries (`/usr/local/bin/pos*`, libs, entertainment plugins, prebuilt, features), systemd services (disable+remove), shell integration (`~/.bashrc` PATH/completion/pos-ai-hook entries), completion file | Always (default) |
-| **Tier 2** | Config files (`~/.config/linux_post_install/` — `.env` files, `schedule.d/`, `authorized_keys`, `rclone.conf`) | `--config` flag |
-| **Tier 3** | Session/log data (`~/.local/share/linux_post_install/` — AI sessions, logs, captured output) | `--data` flag |
+| **Tier 1** | Binaries (`/usr/local/bin/pos*`, libs, prebuilt binaries), leftover units from older installs (pos ships none itself), flag store under `/usr/local/share/linux_post_install/`, shell integration (`~/.bashrc` PATH/completion), completion file | Always (default) |
+| **Tier 2** | Config files (`~/.config/linux_post_install/` — `.env` files, `authorized_keys`) | `--config` flag |
+| **Tier 3** | Log/capture data (`~/.local/share/linux_post_install/` — logs, captured output) | `--data` flag |
 
 The default mode is interactive: it shows what will be removed and asks for
 confirmation. The git repo is **never** removed — delete it manually if desired.
@@ -273,5 +266,4 @@ for it to take effect.
 ## Related
 
 - Reference: [DOC/POS.md → system](../POS.md)
-- Notify platform config: [communication.md](communication.md)
-- Backup roots shared with health: `system.env` ([DOC/POS.md](../POS.md))
+- Backup roots shared with health: hand-written `system.env` ([DOC/POS.md](../POS.md))

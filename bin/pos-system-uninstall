@@ -12,9 +12,11 @@ Remove the pos toolkit from this machine. Scans for installed components
 and removes them interactively (or non-interactively with --yes).
 
 Tiers:
-  Tier 1 (always):  binaries, entertainment plugins, systemd services, shell integration
+  Tier 1 (always):  binaries, shell integration, plus any leftover
+                    pos-managed systemd units from older installs
+                    (none are shipped or created anymore)
   Tier 2 (--config): config files in ~/.config/linux_post_install/
-  Tier 3 (--data):   session/log/capture data in ~/.local/share/linux_post_install/
+  Tier 3 (--data):   log/capture data in ~/.local/share/linux_post_install/
 
 Flags:
   --yes     Skip confirmation prompts (removes defaults only; combine with --config/--data for more)
@@ -54,26 +56,10 @@ done
 
 # ── pos-owned installed files (single source of truth, mirrors install.sh) ──
 # lib/*.sh list shipped by install.sh phase 2 to /usr/local/bin.
-POS_LIBS=(common.sh flags.sh notify.sh entertainment-lib.sh scheduler-lib.sh config-ui.sh \
-    user-timers-lib.sh entertainment-plugin-lib.sh usb-lib.sh share-lib.sh menu-lib.sh registry.sh \
-    yt-lib.sh bank-lib.sh)
+POS_LIBS=(common.sh flags.sh usb-lib.sh menu-lib.sh registry.sh bank-lib.sh)
 # Exact lines postinstall.sh appends to ~/.bashrc.
 PATH_LINE='export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin:$PATH"'
 COMPLETION_LINE='source /usr/local/share/bash-completion/completions/pos.bash 2>/dev/null || true'
-# Pos-ai-hook source lines are not written by the installer (user/legacy-added),
-# so they are matched by an anchored source-pattern, never a bare substring.
-HOOK_PATTERN='^[[:space:]]*source[[:space:]].*pos-ai-hook\.sh'
-
-# Entertainment plugins installed by install.sh — discovered by POS_PLUGIN marker
-# so future plugins are removed without touching this file.
-installed_plugins() {
-    local ep
-    for ep in /usr/local/bin/*.sh; do
-        [ -f "$ep" ] || continue
-        grep -q '^# POS_PLUGIN:' "$ep" 2>/dev/null && echo "$ep"
-    done | sort
-}
-
 # ── Scan functions ──────────────────────────────────────────────
 scan_tier1() {
     local found=()
@@ -92,14 +78,6 @@ scan_tier1() {
     for f in "${POS_LIBS[@]}"; do
         [ -f "/usr/local/bin/$f" ] && found+=("/usr/local/bin/$f")
     done
-
-    # AI providers subdirectory
-    [ -d /usr/local/bin/ai-providers ] && found+=("/usr/local/bin/ai-providers/")
-
-    # Entertainment plugins installed by install.sh (discovered by POS_PLUGIN marker)
-    while IFS= read -r f; do
-        [ -n "$f" ] && found+=("$f")
-    done < <(installed_plugins)
 
     # Legacy forwarders
     for f in wr-* mp3 mp4 vbox ssh-load-all; do
@@ -120,18 +98,6 @@ scan_tier1() {
         [ -f "/usr/local/bin/$f" ] && found+=("/usr/local/bin/$f")
     done
 
-    # User-local binaries
-    [ -f "$HOME/.local/bin/pos-ai-hook.sh" ] && found+=("$HOME/.local/bin/pos-ai-hook.sh")
-
-    # pos ai alias wrapper scripts (marker-managed)
-    if [ -d "$HOME/.local/bin" ]; then
-        local awf
-        for awf in "$HOME/.local/bin"/*; do
-            [ -f "$awf" ] || continue
-            grep -q 'Managed by pos ai alias' "$awf" 2>/dev/null && found+=("$awf")
-        done
-    fi
-
     # Completion file
     [ -f /usr/local/share/bash-completion/completions/pos.bash ] && found+=("/usr/local/share/bash-completion/completions/pos.bash")
 
@@ -142,28 +108,14 @@ scan_tier1() {
         done < <(grep -nE '^[[:space:]]*source[[:space:]].*pos\.bash' "$HOME/.bash_completion" 2>/dev/null || true)
     fi
 
-    # ── Systemd services ──
-    for svc in autostart.service ssh-agent.service usb-automount.service; do
-        if systemctl is-enabled "$svc" &>/dev/null 2>&1; then
-            found+=("service: $svc")
-        elif [ -f "/etc/systemd/system/$svc" ]; then
-            found+=("service: $svc")
-        fi
-    done
-    # Catch any other linux_post_install-related services
+    # ── Leftover pos-managed system units (older installs; nothing new is shipped) ──
     while IFS= read -r line; do
         local svc_name
         svc_name=$(echo "$line" | awk '{print $1}')
-        # Skip already-listed services
-        local already=0
-        for listed in autostart.service ssh-agent.service usb-automount.service; do
-            [ "$svc_name" = "$listed" ] && already=1 && break
-        done
-        [ "$already" -eq 0 ] && found+=("service: $svc_name")
+        [ -n "$svc_name" ] && found+=("service: $svc_name")
     done < <(systemctl list-unit-files --type=service 2>/dev/null | grep -i 'linux_post_install\|pos-' || true)
 
-    # ── ScaleTail templates + feature-flag store (install.sh phase 2/4) ──
-    [ -d /usr/local/share/linux_post_install/scale-tail ] && found+=("/usr/local/share/linux_post_install/scale-tail/")
+    # ── Feature-flag store (install.sh phase 2) ──
     [ -d /usr/local/share/linux_post_install/flags ] && found+=("/usr/local/share/linux_post_install/flags/")
 
     # ── Runtime-created user units (pos-* in ~/.config/systemd/user) ──
@@ -175,11 +127,11 @@ scan_tier1() {
         done < <(find "$user_unit_dir" -maxdepth 1 -name 'pos-*' -type f 2>/dev/null || true)
     fi
 
-    # ── Shell integration (~/.bashrc) — exact installer lines + anchored hook ──
+    # ── Shell integration (~/.bashrc) — exact installer lines only ──
     if [ -f "$HOME/.bashrc" ]; then
         while IFS= read -r line; do
             found+=("~/.bashrc: $(echo "$line" | sed 's/^[[:space:]]*//' | cut -c1-70)")
-        done < <({ grep -nF "$PATH_LINE" "$HOME/.bashrc"; grep -nF "$COMPLETION_LINE" "$HOME/.bashrc"; grep -nE "$HOOK_PATTERN" "$HOME/.bashrc"; } 2>/dev/null | sort -u || true)
+        done < <({ grep -nF "$PATH_LINE" "$HOME/.bashrc"; grep -nF "$COMPLETION_LINE" "$HOME/.bashrc"; } 2>/dev/null | sort -u || true)
     fi
 
     printf '%s\n' "${found[@]}"
@@ -280,16 +232,6 @@ remove_tier1() {
         [ -f "/usr/local/bin/$f" ] && { rm -f "/usr/local/bin/$f" && count=$((count+1)); }
     done
 
-    # AI providers directory
-    if [ -d /usr/local/bin/ai-providers ]; then
-        rm -rf /usr/local/bin/ai-providers && count=$((count+1))
-    fi
-
-    # Entertainment plugins (discovered by POS_PLUGIN marker)
-    while IFS= read -r f; do
-        [ -n "$f" ] && [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
-    done < <(installed_plugins)
-
     # Legacy forwarders
     for pat in 'wr-*' mp3 mp4 vbox ssh-load-all; do
         while IFS= read -r f; do
@@ -307,48 +249,16 @@ remove_tier1() {
         [ -f "$f" ] && { rm -f "$f" && count=$((count+1)); }
     done
 
-    # User-local binaries
-    [ -f "$HOME/.local/bin/pos-ai-hook.sh" ] && { rm -f "$HOME/.local/bin/pos-ai-hook.sh" && count=$((count+1)); }
-
-    # pos ai alias wrapper scripts (marker-managed only — foreign files untouched)
-    if [ -d "$HOME/.local/bin" ]; then
-        local arwf
-        for arwf in "$HOME/.local/bin"/*; do
-            [ -f "$arwf" ] || continue
-            if grep -q 'Managed by pos ai alias' "$arwf" 2>/dev/null; then
-                rm -f "$arwf" && count=$((count+1))
-            fi
-        done
-    fi
-
     # Completion file
     [ -f /usr/local/share/bash-completion/completions/pos.bash ] && { rm -f /usr/local/share/bash-completion/completions/pos.bash && count=$((count+1)); }
 
-    # ── Systemd services ──
-    for svc in autostart.service ssh-agent.service usb-automount.service; do
-        if systemctl is-enabled "$svc" &>/dev/null 2>&1; then
-            systemctl disable --now "$svc" 2>/dev/null || true
-            rm -f "/etc/systemd/system/$svc"
-            count=$((count+1))
-        elif [ -f "/etc/systemd/system/$svc" ]; then
-            rm -f "/etc/systemd/system/$svc"
-            count=$((count+1))
-        fi
-    done
-    # Additional linux_post_install services
+    # ── Leftover pos-managed system units (older installs) ──
     while IFS= read -r svc_file; do
         local svc_name
         svc_name=$(basename "$svc_file" .service)
-        # Skip already-handled services
-        local already=0
-        for listed in autostart ssh-agent usb-automount; do
-            [ "$svc_name" = "$listed" ] && already=1 && break
-        done
-        if [ "$already" -eq 0 ]; then
-            systemctl disable --now "$svc_name.service" 2>/dev/null || true
-            rm -f "$svc_file"
-            count=$((count+1))
-        fi
+        systemctl disable --now "$svc_name.service" 2>/dev/null || true
+        rm -f "$svc_file"
+        count=$((count+1))
     done < <(find /etc/systemd/system/ -name '*linux_post_install*' -o -name 'pos-*' 2>/dev/null || true)
 
     # Reload daemon after service changes
@@ -368,11 +278,6 @@ remove_tier1() {
         systemctl --user daemon-reload 2>/dev/null || true
     fi
 
-    # ── ScaleTail templates (submodule clone — guard existence) ──
-    if [ -d /usr/local/share/linux_post_install/scale-tail ]; then
-        rm -rf /usr/local/share/linux_post_install/scale-tail && count=$((count+1))
-    fi
-
     # ── Feature-flag store ──
     if [ -d /usr/local/share/linux_post_install/flags ]; then
         rm -rf /usr/local/share/linux_post_install/flags && count=$((count+1))
@@ -381,15 +286,14 @@ remove_tier1() {
     # Clean up parent dir if empty
     rmdir /usr/local/share/linux_post_install 2>/dev/null || true
 
-    # ── Shell integration (~/.bashrc) — exact installer lines + anchored hook ──
-    # Only lines postinstall.sh itself added are removed by exact literal match;
-    # pos-ai-hook lines are matched anchored (never a bare substring).
+    # ── Shell integration (~/.bashrc) — exact installer lines only ──
+    # Only lines postinstall.sh itself added are removed, by exact literal match.
     if [ -f "$HOME/.bashrc" ]; then
         local before after removed tmp
         before=$(wc -l < "$HOME/.bashrc")
         tmp="$(mktemp)"
-        awk -v p="$PATH_LINE" -v c="$COMPLETION_LINE" -v h="$HOOK_PATTERN" '
-            $0 == p || $0 == c || $0 ~ h { next }
+        awk -v p="$PATH_LINE" -v c="$COMPLETION_LINE" '
+            $0 == p || $0 == c { next }
             { print }
         ' "$HOME/.bashrc" > "$tmp"
         after=$(wc -l < "$tmp")
@@ -488,7 +392,7 @@ main() {
         if [ "$YES_MODE" -eq 1 ]; then
             log "Removing tier 1 items (--yes)..."
         else
-            confirm "Remove tier 1 items (binaries, services, shell integration)?" || return 0
+            confirm "Remove tier 1 items (binaries, leftover pos units, shell integration)?" || return 0
         fi
         remove_tier1
     fi

@@ -1,6 +1,6 @@
 # Development Guide
 
-How this repo works, how to add features, and what to keep in mind when editing.
+How this repo works, how to add tools, and what to keep in mind when editing.
 
 ---
 
@@ -14,14 +14,14 @@ How this repo works, how to add features, and what to keep in mind when editing.
           ┌───────────┼───────────┐
           ▼           ▼           ▼
     preinstall.sh   bin/*    postinstall.sh
-    (packages)   → /usr/local/bin  (config + services)
+    (packages)   → /usr/local/bin  (config)
 ```
 
 | Phase | Script | Responsibility |
 |-------|--------|----------------|
-| Pre | `preinstall.sh` | System packages, apt repos, global binaries (yt-dlp) |
+| Pre | `preinstall.sh` | System packages and apt repos |
 | Install | `install.sh` | Copies `bin/*` → `/usr/local/bin/` (chmod 755), all `lib/*.sh` → `/usr/local/bin/` (chmod 644) |
-| Post | `postinstall.sh` | User config (SSH keys, PATH, bash completion), systemd services |
+| Post | `postinstall.sh` | User config (SSH keys, PATH, bash completion) |
 
 Each phase is independent and runs only if the corresponding script exists.
 
@@ -29,33 +29,29 @@ Each phase is independent and runs only if the corresponding script exists.
 
 | Directory | Purpose | Installed To |
 |-----------|---------|-------------|
-| `bin/` | Daily-use CLI tools and wrappers | `/usr/local/bin/` |
+| `bin/` | Daily-use CLI tools | `/usr/local/bin/` |
 | `apps/<category>/` | Optional desktop app installers | run on demand |
-| `lib/` | Shared libraries: `common.sh` (helpers), `flags.sh` (feature flags), `notify.sh` (multi-platform alerting), `registry.sh` (shared query API for POS tool metadata headers), `entertainment-lib.sh` (entertainment scheduling + last-run state), `entertainment-plugin-lib.sh` (message-safe plugin helpers), `scheduler-lib.sh` (system scheduler), `user-timers-lib.sh` (shared systemd user timer machinery), `config-ui.sh` (interactive config UI), `menu-lib.sh` (category-neutral menu primitives: guard/looping menu/filter picker/prompt), `share-lib.sh` (share-suite domain probes/listings + compat shims to menu-lib) | sourced at build time |
-| `config/` | Gitignored user config files | `~/.config/<app>/` (via postinstall) |
-| `entertainment/` | Public-API plugins for the entertainment module | `/usr/local/bin` (via install.sh Phase 2) |
-| `compose/` | ScaleTail templates (git submodule) | `/usr/local/share/linux_post_install/scale-tail` |
-| `systemd/` | Systemd unit files | `/etc/systemd/system/` (via postinstall) |
+| `lib/` | Shared libraries: `common.sh` (helpers + `load_env_file`), `flags.sh` (flag store — `installed_version` + misc flags), `registry.sh` (shared query API for POS tool metadata headers), `menu-lib.sh` (category-neutral menu primitives: guard/looping menu/filter picker/prompt), `usb-lib.sh` (USB storage detection/mount/pick for backups), `bank-lib.sh` (command-bank helpers) | sourced at build time |
+| `config/` | Gitignored user secret (`authorized_keys`) | read by `postinstall.sh` |
 
 ### The `pos` CLI
 
 `bin/pos` is a smart dispatcher. It scans its own directory for executable `pos-*` files and uses variable-length argument matching:
 
 ```
-pos docker compose up jellyfin
-  → tries pos-docker-compose-up-jellyfin  (not found)
-  → tries pos-docker-compose-up           (not found)
-  → finds pos-docker-compose              → runs with args "up jellyfin"
+pos system bank alias remove work
+  → tries pos-system-bank-alias-remove  (not found)
+  → finds pos-system-bank-alias         → runs with args "remove work"
 ```
 
 All non-interactive commands log to `~/.local/share/linux_post_install/logs/`.
 
-`pos help <full command>` shows a tool's help, e.g. `pos help communication telegram-sender` (all words joined with dashes → `pos-communication-telegram-sender --help`). `pos <category>` or `pos <category> --help` shows a category's subcommands (derived from the `pos-<category>-*` filenames in `bin/` — no script execution, so it works even for root-only/interactive tools like `system-firewall`).
+`pos help <full command>` shows a tool's help, e.g. `pos help system bank` (all words joined with dashes → `pos-system-bank --help`). `pos <category>` or `pos <category> --help` shows a category's subcommands (derived from the `pos-<category>-*` filenames in `bin/` — no script execution, so it works even for root-only/interactive tools like `system-firewall`).
 
 **When adding a command, `bin/pos` itself has one thing to keep in sync:**
 
 - **The usage text** (`usage()` function) — the CATEGORIES block is **auto-derived** from the `pos-*` filenames in `bin/` (no manual edit, can't drift). The EXAMPLES block is the only hand-maintained part: add a line there only if you want the tool showcased in `pos --help`.
-- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `system-firewall`, `media-mp4`, `system-backup`, `share-usb-server`, `communication-telegram-listener`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`. Trade-off: it's all-or-nothing **per script** — adding a flag-style tool with *any* prompting subcommand (e.g. `share-usb-server --share`) means *every* subcommand of that script skips output logging (e.g. `pos share usb server --ls` loses the `tee` log too).
+- **`INTERACTIVE_CMDS`** (space-separated list above the dispatch loop) — commands that **read stdin** (password prompts, selection menus: `system-firewall`, `system-backup`) must be added here. Everything else is piped through `tee` for logging, which would hang or swallow an interactive prompt. sudo's own password prompt is unaffected — it reads from `/dev/tty`. Trade-off: it's all-or-nothing **per script** — adding a flag-style tool with *any* prompting subcommand means *every* subcommand of that script skips output logging.
 
 ### Shared Library (`lib/common.sh`)
 
@@ -108,7 +104,7 @@ esac
 - Strict mode: `set -euo pipefail`
 - `--help` flag: accept `-h` / `--help` via `case` pattern
 - **Deps guards run before `--help`:** `command -v <bin> &>/dev/null || err "… (install <pkg>)"` lines sit at the top of the script, **before** the `-h|--help` case — so `--help` also errors when a dependency is missing. This matches every existing deps-gated tool; keep it that way.
-  - Exception — tools with **no required deps** (every check degrades gracefully): `pos system health` probes binaries at runtime (`if command -v systemctl; then …`) and needs no guard. The lint (`scripts/lint-conventions.sh`) only enforces guard-before-help for lines that are actual guards (`command -v … ||`, `if ! command -v`, `command -v … \` continuation), never for graceful-degradation probes. If you add a tool like this, keep all checks optional and note it in `usage()`.
+  - Exception — tools with **no required deps** (every check degrades gracefully): `pos system health` probes binaries at runtime (`if command -v docker; then …`, `if command -v fail2ban-client; then …`) and needs no guard. A graceful-degradation probe (`if command -v …; then …`) is not a required-deps guard, so it does not need to precede `--help`. If you add a tool like this, keep all checks optional and note it in `usage()`.
 - Shared library: always source `common.sh` for colors, logging, spinners
 - Exit codes: `0` success, `1` error
 - No shared lib? Inline fallbacks:
@@ -117,23 +113,23 @@ esac
   warn() { echo "[!] $*"; }
   err()  { echo "ERROR: $*" >&2; exit 1; }
   ```
-  If you skip `common.sh`, `make gen` adds the tool to the "Scripts that do NOT source common.sh" list in `DOC/AGENT_Context_Project.md` automatically.
+  If you skip `common.sh`, add the tool to the "Scripts that do NOT source common.sh" list in `DOC/AGENT_Context_Project.md` by hand.
 
 ### 2. Make it discoverable
 
 - The dispatcher auto-discovers executable `bin/pos-*` files — no registration needed. The file **must be executable** (`chmod +x`, committed as mode `100755`); the dispatcher and `install.sh` skip non-executables.
 - `pos <category> --help` (and bare `pos <category>`) is derived from the `pos-<category>-*` filenames too — a new tool appears in its category's help automatically, with no registration (see [The `pos` CLI](#the-pos-cli)).
-- **Add the `# POS:` header** (single source of truth for the docs) right after the shebang/strict-mode lines:
+- **Add the `# POS:` header** (single source of truth for tool metadata) right after the shebang/strict-mode lines:
   ```bash
-  # POS: <category> <command> — one-line description rendered by `make gen`
+  # POS: <category> <command> — one-line description
   # POS_FLAGS: --flag1 --flag2      # ONLY for flag-style tools
   # POS_SUBCMDS: sub1 sub2          # ONLY for multi-command tools
   # POS_DEPS: binary1 binary2       # Optional: runtime deps (space-separated binary names)
   # POS_EXAMPLES: pos <tool> <args> | Description  # Optional: usage examples
   ```
-  The description feeds the dispatch table, bin tree and file table in `DOC/AGENT_Context_Project.md`; `POS_FLAGS` feeds flag completion and `POS_SUBCMDS` feeds subcommand completion in `completions/pos.bash` (both update via `make gen`). `POS_DEPS` lists runtime binary names that `command -v` would check — use when the tool requires specific binaries beyond what `preinstall.sh` installs. `POS_EXAMPLES` provides curated usage examples (one per line, pipe-delimited `command | description`) shown in `pos tree` and future help views. Both are optional and degrade gracefully when absent. `make gen` only reads the text after the first `— ` — the `<category> <command>` words before it are convention-only (for nested tools, keep the full path there, e.g. `# POS: communication telegram-listener — …`).
-- **Category-less vs categorized:** most tools are `bin/pos-<category>-<command>`. Use category-less `bin/pos-<cmd>` (e.g. `pos-config`, `pos-tree`) only for dispatcher/dev-level commands that fit no category — they dispatch and document like any tool but show with an empty category in the generated tables.
-- Nested tools (e.g. `bin/pos-communication-telegram-listener`) are auto-detected from filenames: the trailing segment (`listener`) is offered as a subcommand of the parent tool (`communication-telegram`) in `pos <category> --help` and tab-completion, instead of appearing as a flat sibling (`telegram-listener`). The flat dash-form (`pos communication telegram-listener`) still dispatches.
+  These headers are read at runtime by `lib/registry.sh` (the shared query API) — notably by `bin/pos tree` and by `pos <category> --help` in `bin/pos`. `POS_FLAGS` and `POS_SUBCMDS` carry flag/subcommand metadata; `POS_DEPS` lists runtime binary names that `command -v` would check (use when the tool needs binaries beyond what `preinstall.sh` installs, shown as `[deps: …]` in `pos tree`); `POS_EXAMPLES` holds curated usage examples (one per line, pipe-delimited `command | description`) shown in `pos tree`. The optional headers degrade gracefully when absent. Only the text after the first `— ` is used as the description — the `<category> <command>` words before it are convention-only (for nested tools, keep the full path there).
+- **Category-less vs categorized:** most tools are `bin/pos-<category>-<command>`. The only category-less tool is `bin/pos-tree` (dispatcher/dev-level) — it documents like any other tool but shows with an empty category in `pos tree`.
+- Nested tools are auto-detected from filenames: the trailing segment of a `bin/pos-<category>-<x>-<y>` name is offered as a subcommand of the parent tool in `pos <category> --help` and tab-completion, instead of appearing as a flat sibling. The flat dash-form still dispatches.
 - Optionally add an EXAMPLES line in `bin/pos` `usage()` to showcase the tool in `pos --help`.
 - If the command **reads stdin** (prompts/selection), add it to `INTERACTIVE_CMDS` in `bin/pos` — see [The `pos` CLI](#the-pos-cli).
 
@@ -148,17 +144,14 @@ PACKAGES=(
 )
 ```
 
-**Not in apt?** If the dependency ships as a manual installer (no package — e.g. `usbsrv`, the USB Redirector server), do **not** put it in `PACKAGES` (that would break `preinstall.sh`). Instead, add a `command -v <binary> || err "… install from <URL>"` guard in the tool itself and note the manual install in `usage()`/`DOC/POS.md`.
+**Not in apt?** If the dependency ships as a manual installer (no package), do **not** put it in `PACKAGES` (that would break `preinstall.sh`). Instead, add a `command -v <binary> || err "… install from <URL>"` guard in the tool itself and note the manual install in `usage()`/`DOC/POS.md`.
 
-### 4. Config files (if needed)
+### 4. Runtime config (if needed)
 
-Two kinds of config, don't mix them up:
+Tools that need user settings read plain environment variables, with precedence **flags > environment > file**. User-specific values live in a hand-written `~/.config/linux_post_install/<name>.env` (`chmod 600`) — never committed. There is no config UI and no shipped config templates: nothing to register or generate, just document the variable names in `DOC/POS.md`.
 
-- **Machine defaults shipped by the installer:** place the file in `config/` and add copy logic to `postinstall.sh`. If it contains secrets, add to `.gitignore` and document in `DOC/`.
-- **Runtime tool config set by the user:** `~/.config/linux_post_install/<tool>.env` with `chmod 600`. Load it with env-var precedence (flags > environment > file). Patterns: `pos-docker-compose` (`compose.env`), `pos-communication-telegram-sender` (`telegram.env`, edited via `pos config telegram` — token masked), and the shared ones below. Never store tokens in the repo.
-  - **Canonical loader (new tools, D-D):** `load_env_file <file|basename>` in `lib/config-ui.sh` — the one shared KEY=VALUE loader (reads `^[A-Z_]+=` lines, skips blank + `#` comments, strips trailing CR and one pair of quotes, exports a key only when the env var is not already set → env always wins over the file; loaded keys are appended to the global `LOADED_ENV_KEYS`). A bare basename resolves under the XDG-aware `CONFIG_DIR`; a full path is used as-is. Missing/unreadable file = quiet no-op; the loader never creates files and never chmods (chmod-600 stays with `cfg_write`/the tool's own writers). Source it with the standard fallback chain: `source "$(dirname "$0")/../lib/config-ui.sh" 2>/dev/null || source "$(dirname "$0")/config-ui.sh"`. Legacy `load_system_env()` in `lib/common.sh` is functionally identical and stays for its existing three callers (`pos system health`, `pos system backup`, `pos media sync`) — new tools should use `load_env_file`. One deliberate exception: `pos-docker-compose`'s `load_global_config` still `source`s `compose.env`, because that file is shell-executed (variable expansion, file-beats-defaults layering, unquoted `config set` writes) — don't convert it to `load_env_file`.
-  - `system.env` — shared "system" settings loaded via `load_system_env()` in `lib/common.sh` (currently `BACKUP_SERVICE_ROOTS`, `BACKUP_USB_ROOT`, `BACKUP_MOUNT_BASE`, `BACKUP_USB_BYID`, `HEALTH_BACKUP_MAX_AGE_DAYS`, plus `USB_MOUNT_BASE`/`USB_BYID`/`MEDIA_SYNC_SOURCE`/`MEDIA_SYNC_DEST` for `pos media sync`). Env already exported wins over the file.
-  - `notify.env` — alerting platform selection (`NOTIFY_PLATFORM=telegram,matrix`), read by `lib/notify.sh`.
+- **Canonical loader:** `load_env_file <file|basename>` in `lib/common.sh` — the shared KEY=VALUE loader (reads `^[A-Z_]+=` lines, skips blank + `#` comments, strips trailing CR and one pair of quotes, and exports a key only when that env var is not already set → **env always wins over the file**; loaded keys are appended to the global `LOADED_ENV_KEYS`). A bare basename resolves under the XDG-aware `CONFIG_DIR`; a full path is used as-is. A missing/unreadable file is a quiet no-op; the loader never creates files and never chmods. Source it with the standard fallback chain: `source "$(dirname "$0")/../lib/common.sh"`.
+- `system.env` — settings for `pos system backup` / `pos system health` (`BACKUP_SERVICE_ROOTS`, `BACKUP_USB_ROOT`, `HEALTH_BACKUP_MAX_AGE_DAYS`, …), hand-written by the user. Env already exported wins over the file.
 
 ### 5. Add SSH keys (if needed)
 
@@ -166,97 +159,44 @@ Place public keys in `config/authorized_keys` (one per line). `postinstall.sh` r
 
 ### 6. Update the docs
 
-- `DOC/POS.md`: add the command to the section table + a detail block (commands, behavior, configuration). This is the one hand-written doc.
+- `DOC/POS.md`: add the command to the section table + a detail block (commands, behavior, configuration). This is the hand-written CLI reference.
 - `DOC/HOWTO.md` index row + a hands-on section in `DOC/howto/<category>.md` (recipes + troubleshooting) for user-facing tools.
-- `DOC/AGENT_Context_Project.md` generated sections (bin tree, dispatch table, no-common.sh list, line-count table) and the `completions/pos.bash` flags block are produced by `make gen` — do **not** hand-edit between the `GEN:START`/`GEN:END` markers. Hand-maintained, not gen-checked: the line-count rows **above** the filetable marker (non-`pos-*` files only — bump a row's count when that file's length changes) and the "Common Tasks for Agents" table (add a row for the new tool).
+- `DOC/AGENT_Context_Project.md` (bin tree, dispatch table, no-common.sh list, line-count table) and `completions/pos.bash` (flags/subcommand completion) are hand-maintained — update the relevant entries for the new tool. `pos tree` is the authoritative command list, so verify the tree and category help match afterwards.
 - `AGENTS.md` Quick facts: update if a structural fact changed (new category, new convention).
 - Root `README.md`: only if the `pos` category list in the help text changes.
 - Move the finished task to the `Done` section of `AGENT_TODO.md` (dated) in the same commit.
 
-### 7. Test
+### 7. Verify manually
+
+There is no build step, test suite, or CI gate — verification is manual:
 
 ```bash
-chmod +x bin/your-tool
-bash -n bin/your-tool
-shellcheck bin/your-tool
-./bin/your-tool --help
-env-seam review: every path the tool writes must be `VAR="${VAR:-default}"`-guarded —
-  grep for config writes without a `:-` guard: `grep -nE '>\s*(\$HOME|/etc)' bin/your-tool lib/your-lib`
-  (each hit needs the seam; prove it with `VAR=/tmp/x bin/your-tool …` + assert the real path is untouched)
-bin/pos help <full command>   # confirm dispatch works
-bin/pos <category> --help     # confirm category listing includes the new tool (first tool in a new category)
-make gen                      # regenerate doc tables + completion flags
-make check                    # full self-consistency gate (syntax, exec bits, doc/code sync, smoke)
-make lint                     # convention gate (scripts/lint-conventions.sh) — must end 0 FAIL, 0 WARN
+bash -n bin/your-tool                  # syntax
+./bin/your-tool --help                 # help works (deps guards must still fire before it)
+bin/pos help <full command>            # dispatch works
+bin/pos tree                           # tool appears in the command tree
+bin/pos <category> --help              # category listing includes the tool
+bin/pos --help                         # top-level usage still renders
+git diff --check                       # whitespace hygiene — run last, before committing
 ```
 
-`make check` + `make lint` (0 FAIL / 0 WARN) are the definition of done. `make check` is also run as a pre-commit hook once you've run `make hook`; `make lint` is not part of the hook — run it yourself. Pushing to Gitea re-runs all four gates on the live Actions runner (see `CI: Gitea Actions Gate` below) — a red run is a merge-blocker.
+Ensure the file is executable (`chmod +x`, committed as mode `100755`) — see step 2.
 
-### Testing tools that need root / systemd / missing deps
-
-`make check` only proves syntax, exec bits, doc sync and dispatch — not behaviour. For tools that need `sudo`, systemd, or binaries absent from the dev box (samba, usbsrv, …), test them end-to-end with two patterns:
-
-- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), `SMB_CONF` (`bin/pos-share-smb-server`, default `/etc/samba/smb.conf`), `EXPORTS_FILE` (`bin/pos-share-nfs-server`, default `/etc/exports`), `SMB_CREDS_DIR`/`UNIT_DIR` (`bin/pos-share-smb-client`, and `UNIT_DIR` again in `bin/pos-share-nfs-client`), `USER_SYSTEMD_DIR` (`bin/pos-network-download`, `bin/pos-communication-{telegram,matrix}-listener`, `lib/scheduler-lib.sh` — write it as `${USER_SYSTEMD_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}`), the scheduler's `SCHEDULE_DIR`/`SCHEDULE_STATE_DIR`/`SCHEDULE_LOG_DIR`/`SCHED_LEGACY_ENV` (`lib/scheduler-lib.sh`), and the USB layer shared by `pos system backup` + `pos media sync`: `USB_MOUNT_BASE` (default `/media`, keeps `BACKUP_MOUNT_BASE` as an alias) and `USB_BYID` (default `/dev/disk/by-id`, keeps `BACKUP_USB_BYID` as an alias) — both guarded as `VAR="${VAR:-${BACKUP_…:-default}}"` in `lib/usb-lib.sh` so existing config lines keep working. Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing. **Gotcha (session-learned):** a `VAR="${XDG…:-…}"` without the leading `VAR:-` *overrides* the seam — the stub run then silently writes to the real `$HOME` path and every assertion passes while the bug hides. The override must be written first, then tested with `VAR=/tmp/x …` and a check that the real path is untouched.
-- **Stub PATH.** Create a temp dir with fake binaries, then run the tool with `PATH="$stubs:$PATH"`: fake `sudo` → `exec "$@"`; fake `systemctl`/`smbcontrol`/`mount.cifs` → echo their args; fake `testparm` → `cat` the file back (so validation passes); fake `systemd-escape` → print a fixed name. Assert on output **and** exit codes — happy path plus each failure path (`err` sets rc=1).
-- **Interactive prompts** (`read … </dev/tty`): drive them with a PTY — `printf 'answer\n' | script -qec "cmd" /dev/null` — then assert the side effect (e.g. the chmod-600 creds file lands with the right mode).
-
-Example (session-learned): `PATH=/tmp/stubs:$PATH SMB_CONF=/tmp/smb.conf bin/pos-share-smb-server share /tmp/media …`.
-
-The committed suite lives in `tests/`: `tests/t-*.sh` files (each defines `run_test()`), run by `tests/run-tests.sh` — discovery of `t-*.sh` in sorted order, one isolated subshell per file, `$TEST_TMP` sandbox auto-cleaned (`make test` is just that runner; single file via `./tests/run-tests.sh t-<name>.sh`) — asserting with the helpers in `tests/test-lib.sh` (`check*`, `test_run`/`test_run_env`, `mksandbox`, …; `tests/README.md` lists them all). Zero-dependency by contract: no network, no sudo, no system changes — stub every external dep and run against sandbox temp dirs, and keep the whole suite under 90s. Throwaway `/tmp` harnesses (`/tmp/opencode/<tool>-test/`: `stubs/` + `run-tests.sh` with a `check "desc" "expected" "$actual"` helper and a pass/fail count) are still the right tool for early iteration — exploring a tool's failure paths before the shape of the test is clear. Promote a throwaway into `tests/t-<name>.sh` once it proves something: move the stubs/seams onto `$TEST_TMP` + `test-lib.sh` helpers, route infeasible cases through `skip_case` (never fake a pass — a file with zero checks and zero skips FAILs as "no assertions"), and add a row to the `tests/README.md` suite table. (CI — `.gitea/workflows/lint.yml`, Gitea Actions runner — runs only the *static* gates `make gen`+`git diff --exit-code`/`make check`/`make lint` on every push/PR; it does not run `make test`.)
-
-**Stub-harness gotchas (session-learned, `pos system backup` USB-detection suite).** Each red check means exactly one assumption — in the tool *or* the harness — is wrong; keep the diagnosis cheap by copying the run's `out.log` to a per-test file and asserting on artifacts (`fake_state`, `.gpg` on disk, `sends.log`, exit code), then deciding which side lied:
-
-- **Layout: the harness must live *outside* the sandbox it wipes.** If `fresh()` does `rm -rf "$TEST_DIR"`, the runner and the stubs cannot live inside `$TEST_DIR` or they get deleted mid-run. Prefer siblings: `/tmp/opencode/<tool>-run.sh` + `/tmp/opencode/<tool>-stubs/` + `/tmp/opencode/<tool>-test/` (sandbox wiped per test).
-- **Field separators: never `IFS=$'\t'` on JSON-derived data.** `read` treats IFS *whitespace* specially and collapses consecutive delimiters, so an empty JSON field (null `tran`, null `mountpoint`) shifts every following column and detection silently misfires. Emit a non-whitespace separator from jq (`… | join("\u001f")`) and read with `IFS=$'\x1f'`.
-- **`!` is not a command: `check "x" "$@"` with `! grep …` runs `!` as a binary (rc 127).** For "nothing present" prefer `test -z "$(grep … )"` — note `grep -qv` on an *empty* file still exits 1 (zero lines selected), so it fails the "nothing was written" case.
-- **`read -rp` prompts vanish when stdin is a pipe.** Bash suppresses the prompt text when stdin isn't a tty, so never assert on prompt strings in piped runs — assert on the side effect.
-- **Fakes that shell out must call the *real* binary, not the stub on PATH.** A fake `gpg` that ran `cp` picked up the corrupting fake `cp` and broke the tool's encryption step instead of the USB-copy step under test. Resolve the real one: `real() { for d in /usr/bin /bin; do [ -x "$d/$1" ] && { printf '%s' "$d/$1"; return; }; done; }` then `"$(real cp)" …`.
-- **Scope failure-injection fakes, don't make them global.** A "chmod fails" flag hit *every* `chmod` the tool runs (it chmods the archive too) and aborted the run before the section under test. Match the target instead: only fail for args under the seam path (e.g. `[[ "$target" == "$BACKUP_MOUNT_BASE/"* ]]`).
-- **Fixtures must genuinely exercise the branch.** A fixture builder that hardcodes `"tran":"usb"` means the "TRAN empty → cross-check" path never runs and its test passes for the wrong reason. Check the discriminating field actually varies (add a `_notran` builder, a card-reader `sata` fixture, etc.).
-
----
-
-## Adding an Entertainment Plugin
-
-The `entertainment` module routes public-API data to the configured notify platforms via the single runner `pos entertainment send <plugin>` (`bin/pos-entertainment-send`). Auto-triggering is config-driven: `ENABLED` in `entertainment.env` holds `plugin, interval` pairs; the tools `pos entertainment config|enable|disable|status` (`bin/pos-entertainment-*`) reconcile the schedule. Shared logic (ENABLED parsing, plugin lookup, last-run state, scheduler sync) lives in `lib/entertainment-lib.sh` — sourced by the `pos-entertainment-*` tools (never by plugins). The scheduler is **systemd user timers** — the only backend (requires a reachable user systemd manager); the timer machinery itself is shared with the system scheduler via `lib/user-timers-lib.sh`.
-
-### 1. Create the plugin
-
-Drop an executable script in `entertainment/<name>.sh` with a `# POS_PLUGIN: <name>` marker (this is what makes it a plugin — the installed runner lists plugins by this marker, not by `.sh` files, since `/usr/local/bin` is shared with other tooling). Declare every config key the plugin reads with `# POS_KEYS: <KEY> <description> (required|optional)` lines right after it — `pos entertainment config` prints these in its Keys section and uses them to warn/not-warn on `config set`.
-
-Plugins may source `lib/entertainment-plugin-lib.sh` — message-safe helpers (config load, dep guards, JSON fetch with retry) that never write to stdout. Template:
+Also do an env-seam review: every path the tool writes must be `VAR="${VAR:-default}"`-guarded. Grep for config writes without a `:-` guard:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-# POS_PLUGIN: myplugin
-# POS_KEYS: MYPLUGIN_URL <feed url> (required)
-# POS_KEYS: MYPLUGIN_TAG <filter tag> (optional)
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
-    || source "$(dirname "${BASH_SOURCE[0]}")/entertainment-plugin-lib.sh" 2>/dev/null \
-    || source "$(dirname "$0")/../lib/entertainment-plugin-lib.sh" 2>/dev/null \
-    || source "$(dirname "$0")/entertainment-plugin-lib.sh"
-
-plugin_load_config
-plugin_require MYPLUGIN_URL
-tag="${MYPLUGIN_TAG:-}"
-json="$(plugin_http_json --key '.title' "${MYPLUGIN_URL}${tag:+/?tag=$tag}")"
-printf 'Title: %s\n' "$json"
+grep -nE '>\s*(\$HOME|/etc)' bin/your-tool lib/your-lib
 ```
 
-**Contract:** plugins are **self-contained** — do **not** source `lib/common.sh` or `lib/entertainment-lib.sh`. Their `log`/`warn`/`ok` helpers print to **stdout**, and the runner captures stdout as the message to send (helper chatter would be sent to the notify platforms). All stdout is the message; errors go to stderr and exit nonzero. `lib/entertainment-plugin-lib.sh` is the *only* lib plugins may source (it defines just `plugin_*` and writes nothing to stdout). Plugins must be non-interactive (no prompts) — the module is designed for systemd user timers.
+Each hit needs the seam; prove it with `VAR=/tmp/x bin/your-tool …` and assert the real path is untouched. `git diff --check` is the final self-check before committing — there is no hook or CI to fall back on.
 
-### 2. Config (if needed)
+### Testing tools that need root / missing deps
 
-Read runtime values from `~/.config/linux_post_install/entertainment.env` (chmod 600, env precedence) via `plugin_load_config` — same pattern as `telegram.env`. Example: `weather.sh` uses `WEATHER_LAT`/`WEATHER_LON`. Declare each key with a `# POS_KEYS:` header line (see step 1) so `pos entertainment config` lists it and `config set` recognizes it.
+The manual checks above only prove syntax, exec bits, whitespace and dispatch — not behaviour. For tools that need `sudo` or binaries absent from the dev box (samba, usbsrv, …), test them end-to-end with two patterns:
 
-### 3. Deps
-
-`curl` and `jq` are already in `preinstall.sh` PACKAGES (and are what `plugin_have curl`/`plugin_have jq` check). Anything else: guard with `plugin_have <cmd>` and, if apt-available, add to PACKAGES.
-
-### 4. Done
-
-Plugins are not `pos-*` tools, so `make gen`/`make check` don't scan them — verify with `bash -n entertainment/<name>.sh` and a live `pos entertainment send <name> --print` run. Document the plugin in `DOC/POS.md`'s entertainment plugin table.
+- **Env-overridable paths.** Anything that touches a system config location gets an env override whose default is the real path — the seam that lets the tool be exercised against temp files. Precedents: `FLAGS_DIR` (`lib/flags.sh`), and the USB layer used by `pos system backup`: `USB_MOUNT_BASE` (default `/media`, keeps `BACKUP_MOUNT_BASE` as an alias) and `USB_BYID` (default `/dev/disk/by-id`, keeps `BACKUP_USB_BYID` as an alias) — both guarded as `VAR="${VAR:-${BACKUP_…:-default}}"` in `lib/usb-lib.sh` so existing config lines keep working. Pick a short tool-specific name and don't advertise it in `usage()` — it's a test seam, not user-facing. **Gotcha (session-learned):** a `VAR="${XDG…:-…}"` without the leading `VAR:-` *overrides* the seam — the stub run then silently writes to the real `$HOME` path and every assertion passes while the bug hides. The override must be written first, then tested with `VAR=/tmp/x …` and a check that the real path is untouched.
+- **Stub PATH.** Create a temp dir with fake binaries, then run the tool with `PATH="$stubs:$PATH"`: fake `sudo` → `exec "$@"`; fake external tools → echo their args; fake validators → succeed on the temp copy. Assert on output **and** exit codes — happy path plus each failure path (`err` sets rc=1).
+- **Interactive prompts** (`read … </dev/tty`): drive them with a PTY — `printf 'answer\n' | script -qec "cmd" /dev/null` — then assert the side effect (e.g. an encrypted archive lands with the right mode).
 
 ---
 
@@ -318,118 +258,7 @@ Place it in `apps/<category>/<name>.sh`. It auto-appears in the picker — no re
 
 ---
 
-## Convention Lint Gate
-
-`scripts/lint-conventions.sh` is the automated convention gate — it encodes the
-rules in this document so drift is caught by the machine, not the next audit.
-Run it with `make lint` (or `./scripts/lint-conventions.sh`). FAIL = definite
-violation (fix it before committing), WARN = manual review needed. Exit code is
-non-zero when any FAIL exists.
-
-Check classes (all heuristic-based; heredocs, `${...}` brace-counting, `while`
-loop stdin, `/dev/tty` reads and `command -v` fallbacks are excluded):
-
-- **Shebang / strict mode** (FAIL) — every shell file (`bin/*`, `install.sh`,
-  `preinstall.sh`, `postinstall.sh`, `features/*`, `apps/*`, `templates/*`,
-  `scripts/*`) starts with `#!/usr/bin/env bash` and has `set -euo pipefail`
-  (libs are sourced, so they're exempt).
-- **Exec bits** (FAIL) — `bin/pos-*` and `entertainment/*.sh` committed as
-  `100755` (`chmod +x`).
-- **`# POS:` header** (FAIL) — every `bin/pos-*` carries it with the em-dash
-  separator (`# POS: <cat> <cmd> — <desc>`); a header past line ~6 is a WARN.
-- **`-h|--help`** (FAIL) — every `bin/pos-*` handles it via `case`.
-- **Deps guards before help** (FAIL) — the first real guard (`command -v X …
-  || err`, `if ! command -v X …`, multi-line `\` continuation) must sit before
-  the `-h|--help` dispatch, so help errors on a box missing the dependency.
-  Graceful-degradation probes (`if command -v X; then …`) are not guards.
-- **Top-level `local`** (WARN) — `local` at brace-depth 0 outside a function is
-  invalid bash.
-- **stdin ⇄ `INTERACTIVE_CMDS`** (FAIL) — a tool that reads stdin must be in
-  `INTERACTIVE_CMDS` in `bin/pos` (else the logging tee swallows/hangs the
-  prompt); every entry must also have a matching `bin/pos-<entry>` tool.
-- **DOC/POS.md coverage** (WARN) — each `bin/pos-*` referenced in `DOC/POS.md`.
-- **Entertainment plugins** (FAIL) — must carry `# POS_PLUGIN:` and must NOT
-  source `lib/common.sh` (stdout is the message).
-- **Apps** (FAIL) — each `apps/*` script has `uninstall_<name>()` and an
-  `uninstall` dispatch case.
-- **Systemd units** (WARN) — `TimeoutStopSec=` and `[Install] WantedBy=`.
-- **Legacy wrappers** (FAIL/WARN) — `bin/wr-*`, `mp3`, `mp4`, `vbox`,
-  `ssh-load-all` must forward to `pos` (FAIL if not); >12 lines or a `case`
-  statement is a WARN (thin forwarder only).
-- **Secrets** (WARN) — literal `…TOKEN=/…SECRET=/…KEY=…` assignments are
-  flagged for manual review (env guards, config reads and runtime generation
-  are excluded).
-- **Env seams** (WARN) — writes to `/etc/`, `$HOME`, `/usr/local` are flagged
-  unless guarded (`command -v` or `|| echo`), i.e. the write needs a
-  `VAR="${VAR:-path}"` test seam.
-
-If a rule is genuinely wrong for a new case (as happened with
-graceful-degradation probes in system-health), refine the heuristic — never
-weaken it — and note the change in `MAINTENANCE.md`'s lint section.
-
----
-
-## CI: Gitea Actions Gate
-
-`.gitea/workflows/lint.yml` re-runs the four gates on every `push` and
-`pull_request`: `make gen`, `git diff --exit-code` (gen drift), `make check`,
-`make lint`. A red run is a merge-blocker; runs are visible under Gitea →
-Actions.
-
-- **Runner** — act_runner v0.6.1 (`linux-post-install`, labels `ubuntu-latest` →
-  job image `node:20-bullseye`) is registered on the Gitea host and always on:
-  compose project `~/srv/gitea/runner/` (`docker compose up -d`,
-  `restart: unless-stopped`), standalone next to the ScaleTail gitea compose.
-- **Gotchas (session-learned):**
-  - act_runner's `run.sh` `cd`s into `/data` and only reads the config when the
-    `CONFIG_FILE` env var is set — the compose service must pass
-    `CONFIG_FILE=/config.yaml`, not just mount the file.
-  - The job container can't resolve `gitea.skink-platy.ts.net` by itself; pin it
-    with `container.options: "--add-host gitea.skink-platy.ts.net:100.111.241.54"`
-    in `config.yaml`.
-  - Registration tokens are one-time use; the token lives in `runner/.env`
-    (chmod 600) and is burned after the first registration.
-  - Inspecting runs via sqlite: Gitea's status enum is runnerv1-consistent —
-    **1 = success, 2 = failure** (not the old 0/1/2/3 scheme).
-- **Deterministic generators** — any script whose output is committed (gen docs,
-  completions) must sort in byte order: plain `sort` collates differently per
-  locale, and the CI container tripped exactly this (category-less tool keys
-  like `pos-config` start with `|`, which collated after letters under that
-  locale, reordering the generated tables). `scripts/gen-docs.sh` sets
-  `export LC_ALL=C`; keep that in mind for any new generator.
-- **Checking green without SSH** — the workflow reports its own outcome as a
-  lightweight git tag: `ci-ok/<sha>` on success, `ci-fail/<sha>` on failure
-  (pushed with the job's automatic `GITEA_TOKEN`; the workflow only triggers on
-  `push` to `main`, so tag pushes don't re-trigger it). Check from the dev box
-  with plain git — `scripts/ci-status.sh [--wait] [<sha>]` (reads the tags via
-  `git ls-remote`, exit 0/1/2 = green/red/pending). No SSH to the runner, no API
-  tokens.
-- **Limits** — CI proves the *static* gates only; it never runs `make test`
-  (the behaviour suite in `tests/` stays local).
-
----
-
 ## Best Practices
-
-### Alerting
-
-To notify on events, source the shared helper instead of calling a platform tool directly:
-
-```bash
-source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
-notify_send "Backup completed"
-notify_send "**disk full**" --markdown
-```
-
-`notify_send` is deliberately dependency-free (defines only itself, so it never clobbers a tool's own `log`/`warn`/`err`) and **silent-fails**: if no platform is configured it warns and returns 0, never breaking the caller's flow or exit code. Source it opt-in in any tool that should alert; for failure alerts use `trap 'notify_send "..." ERR'`.
-
-**Multi-platform routing:** `notify_send` delivers to every platform listed in `NOTIFY_PLATFORM` (env or `~/.config/linux_post_install/notify.env`, default `telegram`, comma-separated to send to all). Adding a new platform (e.g. Matrix/Synapse) means creating a `bin/pos-communication-<platform>` tool that implements the **sender contract**:
-
-```bash
-pos-communication-<platform> send <value> [--markdown]   # exit 0 on delivery
-```
-
-then listing it in `NOTIFY_PLATFORM`. Platform keys map to tool names via `notify_sender_name()` in `lib/notify.sh` — the telegram platform key stays `telegram` but its tool is `pos-communication-telegram-sender`. `pos-communication-telegram-sender` already follows this (`--markdown` is an alias for `--parse-mode markdown`). No changes to `lib/notify.sh` are needed for a new platform.
 
 ### Confirmation prompts
 
@@ -438,33 +267,6 @@ then listing it in `NOTIFY_PLATFORM`. Platform keys map to tool names via `notif
 ### Idempotency
 
 Check before creating, use `>>` with grep guards, don't overwrite user configs.
-
-### Systemd units
-
-Every unit a tool writes (or `systemd/` ships) sets `TimeoutStopSec=5s` so a
-stuck process can't stall a reboot for the 90s systemd default. Long-polling
-daemons (listeners) also `trap TERM INT` in their loop so a stop returns in
-well under a second — the unit timeout is the backstop. Keep `KillMode=`
-explicit (`control-group`) on the daemons. A oneshot job running at shutdown is
-SIGKILLed 5s after stop begins — fine, `Persistent` timers re-run it next boot.
-Existing installs keep the old unit files until the tool rewrites them (re-run
-the `enable` path), so template changes need a regeneration step on live boxes.
-
-### Managed Config Blocks
-
-To let a tool own a slice of a user/system config file (e.g. Samba shares in `/etc/samba/smb.conf`) without clobbering hand edits, delimit the tool's section with start/end marker lines and rewrite only that slice:
-
-```
-# >>> pos-managed share: <name>
-[media]
-   path = /mnt/hdd
-# <<< end pos-managed share
-```
-
-- Idempotent upsert: one `awk` pass drops the existing block (or nothing if absent), then append the new block; removal uses the same `awk` with only the slice dropped.
-- The block-deletion guard matters: `$0 == s {inblock=1}` … `$0 == e && inblock == 1 {inblock=0; next}` — without the `inblock == 1` check, deleting one block also eats the end markers of other blocks further down the file.
-- Validate before writing: run the config's own checker on a temp copy (`testparm -s` for Samba), then apply with `sudo cp`; hot-reload instead of restarting (`smbcontrol smbd reload-config`).
-- Precedent: `bin/pos-share-smb-server`.
 
 ### Error Handling
 
@@ -497,146 +299,34 @@ run sudo apt install -y git
 
 - Never hardcode secrets — put them in `config/` (gitignored) or, for runtime tool config, `~/.config/linux_post_install/<tool>.env`
 - `chmod 600` for sensitive files
-- Mask secrets in `config` output (see `pos-communication-telegram-sender`'s `mask_token`)
+- Mask secrets in any output that displays them
 - Validate input before shell commands
 - Use `sudo` only where needed
 
 ### Naming
 
 - CLI tools: `bin/pos-<category>-<command>`
-- Legacy wrappers: `bin/wr-*`
 - App installers: `apps/<category>/<name>.sh`
-- Features: `features/<name>.sh`
 - Lowercase with hyphens
 
 ---
 
-## Features & Flags
-
-`features/` holds scripts the user is likely to customize (e.g. `autostart.sh`). Unlike `bin/` (synced on every install), features are installed on demand and **never overwritten without asking**.
-
-### Adding a Feature
-
-Start from the template: `cp templates/feature.sh features/<name>.sh`.
-
-1. Create `features/<name>.sh` following the CLI tool template (shebang, `set -euo pipefail`, `--help`).
-2. Nothing else is registered — `./install.sh --feature` auto-discovers it, copies it to `/usr/local/bin/`, asks before overwriting an existing file, and sets its flag.
-3. If the feature backs a systemd service, gate the service on the flag in `postinstall.sh` (see below).
-
-### Flag System
+## Flags
 
 System-wide flag store at `/usr/local/share/linux_post_install/flags/` (presence = set, content = optional value). Sourced via `lib/flags.sh` (or the installed `/usr/local/bin/flags.sh`):
 
 ```bash
 source "$(dirname "$0")/lib/flags.sh" 2>/dev/null || source "$(dirname "$0")/flags.sh"
 
-flag_set autostart        # green flag
+flag_set myapp            # green flag
 flag_set app "2.1"        # green flag with a value
-flag_is_set autostart     # test (0/1) — the primitive consumers use
+flag_is_set myapp         # test (0/1) — the primitive consumers use
 flag_value app            # → "2.1"
 flag_list                 # names of all set flags
-flag_clear autostart
+flag_clear myapp
 ```
 
-Writes use `run` + `sudo`, so they respect `--dry-run`. CLI equivalents: `flag-reader`, `flag-set`, `flag-clear`.
-
-**Example — service gated on a flag** (in `postinstall.sh`'s systemd loop):
-
-```bash
-if [ "$svc_name" = "myapp.service" ] && ! flag_is_set myapp; then
-    warn "myapp feature not installed — skipping myapp.service"
-    continue
-fi
-```
-
----
-
-## Working with Systemd
-
-Create `systemd/<name>.service` — `postinstall.sh` copies it to `/etc/systemd/system/` and enables it automatically.
-
-```ini
-[Unit]
-Description=My Service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/your-script.sh
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
----
-
-## Working with Config Files
-
-1. Place the file in `config/`
-2. Add copy logic to `postinstall.sh`:
-
-```bash
-if [ -f config/your-config.conf ]; then
-    mkdir -p "$HOME/.config/your-app"
-    cp config/your-config.conf "$HOME/.config/your-app/your-config.conf"
-    chmod 600 "$HOME/.config/your-app/your-config.conf"
-fi
-```
-
----
-
-## Docker Compose / ScaleTail
-
-The installer clones [ScaleTail](https://github.com/tailscale-dev/ScaleTail) templates to `/usr/local/share/linux_post_install/scale-tail/` — 119+ self-hosted services with a Tailscale sidecar pattern. Each service gets a `tail-xxxxx.ts.net` URL via `network_mode: service:tailscale`.
-
-### Config Strategy — Three Layers
-
-Values cascade from least to most specific:
-
-```
-Template .env          (per-service defaults from ScaleTail)
-       ↓
-Global config          (~/.config/linux_post_install/compose.env)
-       ↓
-Per-service .env       (/srv/<service>/.env) — created on first deploy, NEVER overwritten
-```
-
-On first `pos docker compose up <service>`:
-1. Template `.env` is copied to `/srv/<service>/.env`
-2. Matching keys from global config are filled in
-3. If `TS_AUTHKEY` is still empty, you're prompted to enter it
-4. After that, the per-service `.env` is **never touched** — not even by `update`
-
-### Layout
-
-| Path | Purpose | Mutability |
-|------|---------|------------|
-| `/usr/local/share/linux_post_install/scale-tail/services/<name>/` | ScaleTail templates (git repo) | Read-only |
-| `~/.config/linux_post_install/compose.env` | Your global defaults | Edit via `config set` or `config edit` |
-| `/srv/<service>/` | Active deployment | Per-service `.env` preserved forever |
-
-### Key Commands
-
-| Command | Behaviour |
-|---------|-----------|
-| `pos docker compose up <service>` | Deploys to `$SERVICES_BASE/<service>/`, creates `config/` + `data/`, generates `.env` from global defaults |
-| `pos docker compose down <service>` | Stops the stack |
-| `pos docker compose update` | `git pull` templates + refreshes `compose.yaml` for all deployed services (`.env` untouched) |
-| `pos docker compose config set K=V` | Sets a global default in `~/.config/linux_post_install/compose.env` |
-| `pos docker compose config show` | Displays current global config and `SERVICES_BASE` |
-| `pos docker compose config edit` | Opens global config in `$EDITOR` |
-
-### Global Config Keys
-
-| Key | Required | Default | Purpose |
-|-----|----------|---------|---------|
-| `TS_AUTHKEY` | Yes | — | Tailscale auth key for sidecar networking |
-| `TZ` | No | `Europe/Amsterdam` | Timezone for services |
-| `DNS_SERVER` | No | `9.9.9.9` | Custom DNS server |
-| `SERVICES_BASE` | No | `/srv` | Root directory for all deployments |
+Writes use `run` + `sudo`, so they respect `--dry-run`. CLI equivalents: `flag-reader`, `flag-set`, `flag-clear`. The main consumer today is `installed_version` — `install.sh` records the repo version there so a later run can compare it against the installed one.
 
 ---
 
@@ -667,12 +357,6 @@ shellcheck bin/my-script
 for f in bin/* apps/*/*.sh lib/common.sh install.sh preinstall.sh postinstall.sh; do
     bash -n "$f" || echo "FAIL: $f"
 done
-
-# Init submodule
-git submodule update --init
-
-# Pull latest ScaleTail templates
-git submodule update --remote compose/scale-tail
 
 # Test install in Docker
 docker run --rm -it -v $PWD:/repo ubuntu:22.04 bash

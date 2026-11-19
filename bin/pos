@@ -28,9 +28,8 @@ _pos_commands() {
 # ── Category list (sorted, filename-derived) ─────────────────────
 # Nested sub-tools (pos-<cat>-<a>-<b> where pos-<cat>-<a> exists) are
 # omitted from the cheat-sheet line — they are shown under their parent tool.
-# Category-less tools (pos-config, pos-tree) are emitted as their
-# own line with an empty subcommand column; a name already present as a
-# category (pos-ai vs the ai category built from pos-ai-*) is NOT duplicated.
+# Category-less tools (pos-tree) are emitted as their
+# own line with an empty subcommand column.
 _pos_category_list() {
     local -A cats=()
     local cmd cat f
@@ -142,8 +141,7 @@ usage() {
     cat <<EOF
 pos — Personal OS Toolkit
 
-  A unified CLI for network, docker, media, system, SSH,
-  USB, communication, and entertainment tools on Debian/Ubuntu.
+  A unified CLI for network, Docker and system tools on Debian/Ubuntu.
 
 USAGE
   pos <category> <command> [args]
@@ -155,66 +153,18 @@ EXAMPLES
   pos network checkport 10.0.0.1:80       Check if a TCP port is open
   pos network scan 192.168.1.0/24         Fast parallel ping sweep
   pos network hotspot                     Launch wihotspot-gui
-  pos network download add <url>          Enqueue an aria2 download (--tmux = live view)
 
   pos docker ps                           List containers (health, IPs, ports)
-  pos docker compose ls                   List available ScaleTail services
-  pos docker compose up jellyfin          Deploy a service with Tailscale
   pos docker health                       One-glance health dashboard
   pos docker stack                        Containers grouped by compose stack
   pos docker stack -a                     Include stopped/exited containers
 
-  pos media mp3 <url>                     Download audio as MP3
-  pos media mp4 <url>                     Download video as MP4
-  pos media ytsync sync                   Incremental YouTube channel sync
-
   pos system firewall                     Interactive UFW manager
   pos system backup /srv/project          Encrypted (AES-256) folder snapshot
   pos system backup --service             Pick a folder from /srv or ~/srv
-  pos share nfs server share /mnt/hdd      Share a folder via NFS
-  pos share nfs client persist 10.0.0.5:/srv/data /mnt/nfs/data
-                                          Persistent NFS mount (systemd)
-  pos share smb server share /mnt/hdd media --users bob
-                                          Share a folder via SMB (Samba)
-  pos share smb client persist //10.0.0.5/media /mnt/smb/media bob
-                                          Persistent SMB mount (automount)
-
-  pos ssh load-keys                       Load all SSH keys into agent
-
-  pos share usb server --ls               List USB devices + connected clients
-
-  pos communication telegram sender send "Backup done"
-                                          Send a Telegram message
-  pos communication telegram listener     Edit the /command → bash map
-  pos communication telegram listener --enable
-                                          Install the Telegram bot listener
-
-  pos communication matrix sender send "Backup done"
-                                          Send a Matrix room message
-  pos communication matrix sender login --user @me:example.org
-                                          Fetch a Matrix access token
-  pos communication matrix listener       Edit the /command → bash map
-
-  pos entertainment send weather          Fetch Open-Meteo weather → Telegram
-  pos entertainment send joke --print     Preview a joke locally (no send)
-  pos entertainment enable weather 5m     Auto-send weather to Telegram every 5 min
-  pos entertainment status                Show enabled plugins + next run
-
-  pos system schedule list                 Show scheduled jobs + last results
-  pos system schedule enable               Start all job timers (per-job intervals)
-  pos system schedule migrate              Convert old event.env rules to jobs
-
-  pos ai gemini ask "Explain DNS in one line"
-                                          Ask Google Gemini a one-shot question
-  pos ai gemini chat                      Interactive multi-turn chat
-  pos ai gemini models                    List available Gemini models
-
-  pos config telegram                     Edit Telegram config interactively
-  pos config                              Pick a config scope to edit
+  pos system bank run <name>              Run a saved command from the bank
 
   pos tree                                Show the command tree (categories + subcommands)
-
-  pos system bank run <name>              Run a saved command from the bank
 
   pos docker vbox create lab1              Create disposable Docker VM
   pos docker vbox create lab1 --dir .      Create VM using current directory
@@ -225,11 +175,6 @@ HELP
   pos <category> --help    Show a category's commands
   pos help <command>       Show help for a command
   pos --help               Show this help
-
-LEGACY WRAPPERS
-  wr-ip, wr-checkport, wr-scan-ping, wr-docker,
-  wr-compose, wr-ufw, mp3, mp4, vbox, ssh-load-all
-  still work and forward to pos.
 EOF
     exit 0
 }
@@ -274,7 +219,7 @@ MAIN_LOG="$LOG_DIR/pos.log"
 log_cmd() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $* → exit $2" >> "$MAIN_LOG"; }
 
 # Commands that read from stdin interactively — only log invocation
-INTERACTIVE_CMDS="system-bank docker-compose docker-vbox network-hotspot system-firewall media-mp4 media-yt-mp4 media-sync system-backup system-uninstall share-usb-server share-smb-server share-smb-client share-nfs-client share-nfs-server share-webdav share-rclone communication-telegram-listener communication-matrix-listener ai ai-gemini ai-openrouter ai-llamacpp ai-alias system-schedule entertainment-config config"
+INTERACTIVE_CMDS="system-bank docker-vbox network-hotspot system-firewall system-backup system-uninstall"
 
 for ((i=n-1; i>=0; i--)); do
     cmd="pos"

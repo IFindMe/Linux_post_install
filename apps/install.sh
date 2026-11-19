@@ -42,7 +42,6 @@ APPS_DIR="$(dirname "$0")"
 
 # ── Category display names ─────────────────────────────────────
 declare -A CAT_NAMES=(
-    [ai]="AI / ML"
     [browsers]="Browsers"
     [development]="Development"
     [media]="Media"
