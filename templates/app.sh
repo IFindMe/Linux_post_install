@@ -8,7 +8,7 @@ set -euo pipefail
 #     Categories: browsers, development, media, networking,
 #     remote-access, system, utilities.
 #  2. Fill in install_myapp() / uninstall_myapp() (rename to your app).
-#  3. Docs:  add a row to the catalog table in DOC/APPS.md.
+#  3. Docs:  update the app list in README.md if needed.
 #
 # Auto-appears in the `apps/install.sh` picker — no registration.
 # Run as:   bash apps/install.sh <name>        (install)

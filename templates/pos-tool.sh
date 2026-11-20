@@ -6,7 +6,7 @@ set -euo pipefail
 #
 #  1. Copy:     cp templates/pos-tool.sh bin/pos-<category>-<command>
 #  2. Header:   add a `# POS:` line right after the shebang/strict-mode
-#               lines (single source of truth for generated docs):
+#               lines (metadata consumed by pos tree / completion):
 #                 # POS: <category> <command> — one-line description
 #                 # POS_FLAGS: --flag1 --flag2   (flag-style tools only)
 #                 # POS_SUBCMDS: sub1 sub2       (multi-command tools only)
@@ -15,12 +15,9 @@ set -euo pipefail
 #  3. Exec bit: chmod +x bin/pos-<category>-<command>
 #  4. If it reads stdin (password/selection prompts), add it to
 #     INTERACTIVE_CMDS in bin/pos or its prompt breaks under the log tee.
-#  5. Docs:     DOC/POS.md section table + detail block (hand-written).
-#               The AGENT_Context tables + completion flags come from
-#               `make gen` — never hand-edit between GEN markers.
-#  6. Deps:     add apt packages to PACKAGES in preinstall.sh; non-apt
+#  5. Deps:     add apt packages to PACKAGES in preinstall.sh; non-apt
 #               installers → `command -v <bin> || err "install from <URL>"`.
-#  7. Done:     `make gen && make check`
+#  6. Done:     bash -n <file> && bin/pos tree && git diff --check
 #
 # Invoked as:  pos <category> <command> [args]
 # ────────────────────────────────────────────────────────────────
@@ -29,7 +26,7 @@ set -euo pipefail
 # /usr/local/bin after install.sh (which copies lib/common.sh there).
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
 
-# Optional runtime config (see DEV.md "Config files"):
+# Optional runtime config (hand-written file; exported env vars win):
 # CONFIG_FILE="$HOME/.config/linux_post_install/<tool>.env"
 
 usage() {
