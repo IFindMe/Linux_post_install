@@ -39,4 +39,4 @@ There is no build system, test suite, linter, or CI workflow — do not add refe
 ## Docs & process
 
 - `README.md` is the only doc. Update its Introduction, Installation or Convenience sections when behavior changes. Authority on conflict: `templates/*.sh` > this file (process) > code + `# POS:` headers (behavior truth) > `README.md` (user-facing docs).
-- Commits use `feat:`/`fix:`/`docs:`/`chore:`/`refactor:`, one logical change per commit. Move finished work to **Done** (dated) in `AGENT_TODO.md` in the same commit.
+- Commits use `feat:`/`fix:`/`docs:`/`chore:`/`refactor:`, one logical change per commit. Record significant completed work in the commit message; deep history lives in git.
