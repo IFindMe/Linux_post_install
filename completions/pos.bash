@@ -1,64 +1,11 @@
 #!/usr/bin/env bash
 # Bash completion for pos — dynamically discovers pos-* subcommands
 # Install: source this file in ~/.bashrc or place in /etc/bash_completion.d/
-# GEN:START posflags
-declare -A _pos_flags
-_pos_flags[ai-hf]="--branch --gguf --list --output --quant --include --exclude --revision"
-_pos_flags[ai-server]="--port --host --model --ctx --gpu --threads --gpu-layers --gpu-threads --tensor-split --n-gpu-layers --batch-size --ubatch-size --temperature --top-k --top-p --repetition-penalty --mmap --mlock --kv-cache --ctx-size --metrics --health --slots --no-unit"
-_pos_flags[communication-matrix-listener]="--enable --disable --status --run"
-_pos_flags[communication-telegram-listener]="--enable --disable --status --sync-commands --run"
-_pos_flags[communication-telegram-sender]="--type --caption --parse-mode --no-preview --token --chat-id --markdown"
-_pos_flags[docker-stack]="-a --all"
-_pos_flags[docker-vbox]="--dir --gpu --device --port --cpus --memory --network"
-_pos_flags[entertainment-send]="--print --markdown"
-_pos_flags[media-sync]="--mp3 --mp4 --source --dry-run"
-_pos_flags[media-yt-grab]="--audio --video --best --worst --output --no-playlist --cookies --dry-run"
-_pos_flags[media-yt-mp3]="--output --no-playlist --cookies --by-artist --dry-run"
-_pos_flags[media-yt-mp4]="--format --best --worst --output --no-playlist --cookies --dry-run"
-_pos_flags[media-yt-subtitles]="--lang --format --auto-only --output --list-subs --no-playlist --dry-run"
-_pos_flags[media-ytsync]="--dry-run"
-_pos_flags[network-checkport]="--tcp --udp --ping --no-banner --versions --timeout"
-_pos_flags[network-download]="--dir --out --split --seed --force --upload --gid --tmux"
-_pos_flags[network-hotspot]="--foreground"
-_pos_flags[share-usb-server]="--ls --ls-shared --share --unshare --auto-share --callback --close-callback --auto-connect --disconnect --nickname --timeout --port --info --version menu"
-_pos_flags[system-backup]="--service --no-encrypt"
-_pos_flags[system-schedule]="--dry-run"
-_pos_flags[system-uninstall]="--yes --config --data"
-_pos_flags[ai]="--provider --model --session --system --full --last --trust --no-command-execution"
-_pos_flags[tree]="--depth"
-# GEN:END posflags
-# GEN:START possubcmds
-declare -A _pos_subcmds
-_pos_subcmds[ai-alias]="create edit remove list show"
-_pos_subcmds[ai-gemini]="ask chat models sessions capture providers"
-_pos_subcmds[ai-hf]="search download list remove info files cache"
-_pos_subcmds[ai-llamacpp]="ask chat models sessions capture providers"
-_pos_subcmds[ai-openrouter]="ask chat sessions capture models providers"
-_pos_subcmds[ai-server]="start stop status models logs"
-_pos_subcmds[communication-matrix-sender]="send test login"
-_pos_subcmds[communication-scrcpy]="devices record tcpip connect push pull screenshot info"
-_pos_subcmds[communication-telegram-listener]="prefix"
-_pos_subcmds[communication-telegram-sender]="send test"
-_pos_subcmds[docker-compose]="ls installed up down restart logs update config menu"
-_pos_subcmds[docker-vbox]="create enter stop start rm ls menu"
-_pos_subcmds[media-sync]="menu"
-_pos_subcmds[media-ytsync]="add sync list remove"
-_pos_subcmds[media-yt]="mp3 mp4 grab ytsync subtitles"
-_pos_subcmds[network-download]="start stop status add torrent metalink list info files peers pause resume remove purge move limit set watch restart retry replace menu"
-_pos_subcmds[share-nfs-client]="mount unmount list persist unpersist menu"
-_pos_subcmds[share-nfs-server]="status share unshare list reload enable disable menu"
-_pos_subcmds[share-rclone]="remotes show status ls check copy import export"
-_pos_subcmds[share-smb-client]="mount unmount list persist unpersist menu"
-_pos_subcmds[share-smb-server]="status share unshare list adduser deluser reload enable disable menu"
-_pos_subcmds[share-webdav]="status share unshare list enable disable menu"
-_pos_subcmds[system-backup]="menu"
-_pos_subcmds[system-bank]="list add show run edit remove alias"
-_pos_subcmds[system-schedule]="run list config enable disable status migrate menu"
-_pos_subcmds[ai]="ask chat sessions capture models providers llamacpp alias gemini hf openrouter server"
-# GEN:END possubcmds
-# GEN:START posconfigscopes
-declare -a _pos_config_scopes=(ai compose entertainment grab matrix notify scrcpy system telegram ytsync)
-# GEN:END posconfigscopes
+
+# Command names are discovered dynamically below; these maps are optional
+# per-tool flag/subcommand hints (empty = generic completion only).
+declare -A _pos_flags=()
+declare -A _pos_subcmds=()
 
 _pos() {
     local cur prev words cword
@@ -170,21 +117,6 @@ _pos() {
         COMPREPLY=($(compgen -W "--help" -- "$cur"))
     }
 
-    _pos_complete_compose_services() {
-        local scale_dir="/usr/local/share/linux_post_install/scale-tail/services"
-        if [ -d "$scale_dir" ]; then
-            local svcs=()
-            for d in "$scale_dir"/*/; do
-                [ -d "$d" ] && svcs+=("$(basename "$d")")
-            done
-            COMPREPLY=($(compgen -W "${svcs[*]}" -- "$cur"))
-        fi
-    }
-
-    _pos_complete_compose_cmds() {
-        COMPREPLY=($(compgen -W "ls installed up down restart logs update config" -- "$cur"))
-    }
-
     _pos_complete_docker_vbox_cmds() {
         COMPREPLY=($(compgen -W "create enter stop start rm ls" -- "$cur"))
     }
@@ -195,79 +127,22 @@ _pos() {
         COMPREPLY=($(compgen -W "$names" -- "$cur"))
     }
 
-    _pos_entertainment_plugins() {
-        local d f name out=()
-        for d in /usr/local/bin "$pos_dir/../entertainment"; do
-            [ -d "$d" ] || continue
-            for f in "$d"/*.sh; do
-                [ -f "$f" ] || continue
-                name="$(grep -m1 '^# POS_PLUGIN:' "$f" 2>/dev/null | sed 's/^# POS_PLUGIN:[[:space:]]*//;s/[[:space:]]*$//')"
-                [ -n "$name" ] && out+=("$name")
-            done
-        done
-        COMPREPLY=($(compgen -W "${out[*]}" -- "$cur"))
-    }
-
-    # Config scope completion for `pos config <TAB>` — cached at gen time from
-    # the "# POS_CONFIG:" registry (scanning all tools per TAB is too heavy).
-    # Falls back to a live scan only if the cache is missing.
-    _pos_config_scopes() {
-        local scopes=()
-        if declare -p _pos_config_scopes &>/dev/null; then
-            scopes=("${_pos_config_scopes[@]}")
-        else
-            local f line scope
-            for f in "$pos_dir"/pos-*; do
-                [ -x "$f" ] || continue
-                while IFS= read -r line; do
-                    line="${line#*POS_CONFIG:}"
-                    scope="${line%%|*}"
-                    scope="${scope// }"
-                    [ -n "$scope" ] && scopes+=("$scope")
-                done < <(grep '^# POS_CONFIG:' "$f" 2>/dev/null || true)
-            done
-            mapfile -t scopes < <(printf '%s\n' "${scopes[@]}" | sort -u)
-        fi
-        COMPREPLY=($(compgen -W "${scopes[*]} --help" -- "$cur"))
-    }
-
     # ── Dispatch ───────────────────────────────────────────────
     case "${#words[@]}" in
         2)
             _pos_complete_categories
             ;;
         3)
-            case "${words[1]}" in
-                config) _pos_config_scopes ;;
-                *)
-                    if [[ "${words[1]}" == *-* ]]; then
-                        _pos_complete_subcats
-                    else
-                        _pos_complete_tool "${words[1]}"
-                    fi
-                    ;;
-            esac
+            if [[ "${words[1]}" == *-* ]]; then
+                _pos_complete_subcats
+            else
+                _pos_complete_tool "${words[1]}"
+            fi
             ;;
         4)
             case "${words[1]}-${words[2]}" in
-                docker-compose)
-                    case "${words[3]}" in
-                        up|down|restart|logs)
-                            _pos_complete_compose_services
-                            ;;
-                        *)
-                            _pos_complete_compose_cmds
-                            ;;
-                    esac
-                    ;;
                 docker-vbox)
                     _pos_complete_docker_vbox_cmds
-                    ;;
-                entertainment-enable|entertainment-disable)
-                    _pos_entertainment_plugins
-                    ;;
-                entertainment-config)
-                    COMPREPLY=($(compgen -W "set --help" -- "$cur"))
                     ;;
                 *)
                     _pos_complete_tool "${words[1]}-${words[2]}"
@@ -276,13 +151,6 @@ _pos() {
             ;;
         5)
             case "${words[1]}-${words[2]}" in
-                docker-compose)
-                    case "${words[3]}" in
-                        up|down|restart|logs)
-                            _pos_complete_compose_services
-                            ;;
-                    esac
-                    ;;
                 docker-vbox)
                     case "${words[3]}" in
                         create|enter|stop|start|rm)
@@ -297,13 +165,6 @@ _pos() {
             ;;
         6)
             case "${words[1]}-${words[2]}" in
-                docker-compose)
-                    case "${words[3]}" in
-                        up|down|restart|logs)
-                            _pos_complete_compose_services
-                            ;;
-                    esac
-                    ;;
                 docker-vbox)
                     case "${words[3]}" in
                         create|enter|stop|start|rm)
@@ -313,16 +174,6 @@ _pos() {
                     ;;
                 *)
                     _pos_complete_tool "${words[1]}-${words[2]}-${words[3]}-${words[4]}"
-                    ;;
-            esac
-            ;;
-        7)
-            case "${words[1]}-${words[2]}" in
-                communication-telegram)
-                    case "${words[5]}" in
-                        --type) COMPREPLY=($(compgen -W "message file link sticker photo video audio voice animation" -- "$cur")) ;;
-                        --parse-mode) COMPREPLY=($(compgen -W "plain markdown html" -- "$cur")) ;;
-                    esac
                     ;;
             esac
             ;;

@@ -3,18 +3,13 @@ set -euo pipefail
 # POS: system backup — Encrypted (AES-256) folder snapshots (tar + gpg)
 # POS_FLAGS: --service --no-encrypt
 # POS_SUBCMDS: menu
-# POS_CONFIG: notify | notify.env | NOTIFY_PLATFORM=:Comma-separated notify platforms (default telegram) — shared by backup, firewall, share nfs client/server
 # POS_DEPS: tar
 
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
-source "$(dirname "$0")/../lib/notify.sh" 2>/dev/null || source "$(dirname "$0")/notify.sh"
 source "$(dirname "$0")/../lib/usb-lib.sh" 2>/dev/null || source "$(dirname "$0")/usb-lib.sh"
 source "$(dirname "$0")/../lib/menu-lib.sh" 2>/dev/null || source "$(dirname "$0")/menu-lib.sh"
 
-load_system_env
 EFF_ROOTS="${BACKUP_SERVICE_ROOTS:-/srv $HOME/srv}"
-
-trap 'notify_send "Backup FAILED: ${FOLDER:-unknown}"' ERR
 
 usage() {
     cat <<EOF
@@ -105,15 +100,13 @@ usb_copy_offer() {
         warn "USB copy FAILED verification — checksum mismatch:"
         warn "  source: $src_sum  $archive"
         warn "  copy  : $dst_sum  $dest"
-        notify_send "USB copy FAILED for $archive — checksum mismatch on $dest"
         exit 1
     fi
     ok "Transfer verified 100% (sha256 match): $dest"
-    notify_send "Backup copied to USB: $dest (sha256 verified)"
 }
 
 # ── USB detection / mount offer / pick flow ─────────────────────
-# Shared with pos-media-sync: lib/usb-lib.sh (usb_detect /
+# Shared USB layer: lib/usb-lib.sh (usb_detect /
 # usb_related_present / usb_mount_offer / usb_pick_root).
 SERVICE=0
 ENCRYPT=1
@@ -216,12 +209,10 @@ run_backup() {
     fi
     echo
     log "Backup completed: $ARCHIVE"
-    notify_send "Backup completed: $ARCHIVE"
 
     # Optional: detect a USB stick connected after the backup finished, offer to
     # copy the archive to <usb>/backups/, and prove the transfer 100%. From here
     # on a failure is a USB-copy problem, not a backup problem.
-    trap 'notify_send "USB copy FAILED: ${ARCHIVE:-unknown}"' ERR
     usb_copy_offer "$ARCHIVE"
 }
 

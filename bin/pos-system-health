@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# POS: system health — Host health dashboard (disk, RAM, services, backup age, fail2ban, docker); exit 1 if any FAIL
-# POS_CONFIG: system | system.env | BACKUP_SERVICE_ROOTS=:Roots scanned by backup --service and the health backup-age check (default: /srv $HOME/srv) | HEALTH_BACKUP_MAX_AGE_DAYS=num:Max backup age in days before health warns (default 2)
+# POS: system health — Host health dashboard (disk, RAM, backup age, fail2ban, docker); exit 1 if any FAIL
 source "$(dirname "$0")/../lib/common.sh" 2>/dev/null || source "$(dirname "$0")/common.sh"
-
-load_system_env
 
 # Effective dynamic values (environment > system.env > defaults) shown in --help
 EFF_MAX_AGE="${HEALTH_BACKUP_MAX_AGE_DAYS:-2}"
@@ -14,12 +11,12 @@ usage() {
     cat <<EOF
 Usage: pos system health
 
-Host health dashboard: disk, RAM/swap, failed systemd units, backup age,
-fail2ban, docker containers. Prints the report and exits 1 if any check FAILs.
+Host health dashboard: disk, RAM/swap, backup age, fail2ban, docker
+containers. Prints the report and exits 1 if any check FAILs.
 
 The dashboard is meant to be read on a terminal or forwarded by a wrapper
-such as the Telegram listener (map '/status=pos system health'). Sending is
-the wrapper's job — health itself never sends notifications.
+that re-sends its output. Sending is the wrapper's job — health itself
+never sends notifications.
 
 Environment (effective values):
   HEALTH_BACKUP_MAX_AGE_DAYS  ${EFF_MAX_AGE}
@@ -113,21 +110,6 @@ elif [ "$MEM_PCT" -ge 85 ]; then
     report warn "ram" "mem ${MEM_PCT}% used, swap ${SWAP_PCT}%"
 else
     report ok "ram" "mem ${MEM_PCT}% used, swap ${SWAP_PCT}%"
-fi
-
-# ── Failed systemd units ──────────────────────────────────────
-if command -v systemctl >/dev/null 2>&1; then
-    failed_units=()
-    while IFS= read -r u; do
-        [ -n "$u" ] && failed_units+=("${u%% *}")
-    done < <(systemctl --failed --plain --no-legend --no-pager 2>/dev/null || true)
-    if [ "${#failed_units[@]}" -gt 0 ]; then
-        report fail "services" "${#failed_units[@]} failed unit(s): ${failed_units[*]}"
-    else
-        report ok "services" "no failed units"
-    fi
-else
-    report warn "services" "systemd not available"
 fi
 
 # ── Backup age ────────────────────────────────────────────────

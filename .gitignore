@@ -16,10 +16,6 @@ build/
 .DS_Store
 Thumbs.db
 
-# Docker Compose — user's active stacks and secrets
-compose/custom/
-compose/config.env
-
 # Secrets — never commit real keys/certs
 config/authorized_keys
 config/rclone.conf

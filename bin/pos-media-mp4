@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-# POS: media mp4 — Download video as MP4 (smart/interactive format select)
-# -h|--help forwarded via exec below
-exec pos media yt mp4 "$@"

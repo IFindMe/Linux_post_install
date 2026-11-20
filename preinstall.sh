@@ -26,19 +26,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 PACKAGES=(
-    git curl wget aria2 vim nano tmux tree jq
+    git curl wget vim nano tmux tree jq
     unzip zip rsync htop btop telnet
     net-tools iputils-ping traceroute tcpdump nmap
     openssh-client openssh-server ufw fail2ban
-    nfs-common nfs-kernel-server
-    samba cifs-utils smbclient
     hostapd dnsmasq iptables iw
     ca-certificates gnupg lsb-release
     lm-sensors smartmontools nvme-cli hdparm
     sysstat iotop atop vnstat
-    python3 python3-pip rclone
-    ffmpeg
-    libqrencode4 libgtk-3-0 adb
+    python3 python3-pip
+    libqrencode4 libgtk-3-0
     xdotool xclip
 )
 
@@ -62,13 +59,9 @@ for pkg in cpufrequtils linux-cpupower; do
     warn "no cpufreq package candidate ($pkg) — skipping, trying next"
 done
 #spawn "add user to sudo list" usermod -aG sudo $USER
-spawn "Installing yt-dlp" sudo curl -L \
-    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    -o /usr/local/bin/yt-dlp
-run sudo chmod a+rx /usr/local/bin/yt-dlp
 
 log "Verifying installations..."
-for cmd in git yt-dlp; do
+for cmd in git; do
     if command -v "$cmd" &>/dev/null; then
         run "$cmd" --version
     fi

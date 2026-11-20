@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-# POS: media grab — Auto-download URL as audio or video (classify + route)
-# -h|--help forwarded via exec below
-exec pos media yt grab "$@"

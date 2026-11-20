@@ -13,9 +13,7 @@ else
 fi
 
 # ── Config dir (env seam, XDG-aware) ───────────────────────────
-# Canonical definition. Standalone-sourced files (notify.sh,
-# config-ui.sh, the matrix/telegram tools) keep an identical guarded
-# copy — see DEV.md "no shared lib? inline fallbacks".
+# Canonical definition; tools source common.sh to get it.
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}"
 
 # ── Core helpers ───────────────────────────────────────────────
@@ -139,36 +137,23 @@ confirm() {
     esac
 }
 
-# ── User systemd bus pre-flight ────────────────────────────────
-# ensure_user_bus — verify the per-user systemd bus is reachable BEFORE a tool
-# writes a unit file or calls `systemctl --user`. SSH/headless shells often
-# have neither XDG_RUNTIME_DIR nor DBUS_SESSION_BUS_ADDRESS set; systemctl
-# then fails AFTER an orphaned unit was already written. On failure errs with
-# remediation and never returns, so callers abort before writing anything.
-ensure_user_bus() {
-    systemctl --user show-environment &>/dev/null && return 0
-    err "cannot reach the user systemd bus (common in SSH/headless sessions) — systemctl --user failed
-    fix: export XDG_RUNTIME_DIR=/run/user/$(id -u)     (if the directory exists)
-    fix: sudo loginctl enable-linger $(id -un)        (persist the user session so the bus survives logouts)
-    no unit was written — fix the bus and retry"
-}
-
-# ── system.env loader ──────────────────────────────────────────
-# Shared "system" tool config (~/.config/linux_post_install/system.env).
-# Fills only variables that are not already exported — an explicitly-set
-# environment variable always wins (flags > environment > file).
-load_system_env() {
-    local f="$HOME/.config/linux_post_install/system.env" k v
+# ── env-file loader ────────────────────────────────────────────
+# Load KEY=VALUE pairs from a runtime config file into the environment.
+# Accepts a basename (resolved under ~/.config/linux_post_install) or a full
+# path. Fills only variables not already exported — flags > env > file.
+load_env_file() {
+    local f="$1" k v
+    case "$f" in
+        */*) : ;;
+        *) f="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/linux_post_install}/$f" ;;
+    esac
     [ -f "$f" ] || return 0
     while IFS='=' read -r k v; do
         [ -n "$k" ] || continue
-        case "$k" in
-            \#*) continue ;;
-        esac
+        case "$k" in \#*) continue ;; esac
+        v="${v//$'\r'/}"
         v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
-        if [ -z "${!k:-}" ]; then
-            export "$k"="$v"
-        fi
+        [ -z "${!k:-}" ] && export "$k"="$v"
     done < <(grep -E '^[A-Z_]+=' "$f" || true)
 }
 

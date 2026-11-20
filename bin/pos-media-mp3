@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-# POS: media mp3 — Download audio as MP3 (yt-dlp)
-# -h|--help forwarded via exec below
-exec pos media yt mp3 "$@"

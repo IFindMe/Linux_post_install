@@ -9,13 +9,10 @@
 #   reg_categories          sorted unique category names
 #   reg_tools_in <cat>      tool keys in a category
 #   reg_lookup <tool> <field>  field: cat|desc|flags|subcmds|deps|examples
-#   reg_config_scopes       sorted config scope names
-#   reg_config_keys <scope> key|flags|desc lines
-#   reg_config_envfile <scope> env-file basename for a scope
 #   reg_each <callback>     cb(category, tool_key, description)
 #   reg_tool_exists <tool>  exit 0 if registered
 
-# ── common.sh helpers (guarded — mirrors lib/config-ui.sh) ─────
+# ── common.sh helpers (guarded fallbacks) ─────────────────────
 declare -F log  >/dev/null || log()  { echo "[+] $*"; }
 declare -F warn >/dev/null || warn() { echo "[!] $*"; }
 declare -F err  >/dev/null || err()  { echo "ERROR: $*" >&2; exit 1; }
@@ -41,8 +38,6 @@ declare -A _reg_flags=()
 declare -A _reg_subcmds=()
 declare -A _reg_deps=()
 declare -A _reg_examples=()
-declare -a _reg_config_scopes=()
-declare -A _reg_config_keys=()
 
 # ── reg_scan ────────────────────────────────────────────────────
 reg_scan() {
@@ -56,13 +51,6 @@ reg_scan() {
         unset "_reg_cat[$key]" "_reg_desc[$key]" "_reg_flags[$key]"
         unset "_reg_subcmds[$key]" "_reg_deps[$key]" "_reg_examples[$key]"
     done
-    _reg_config_scopes=()
-    for scope in "${!_reg_config_keys[@]}"; do
-        unset "_reg_config_keys[$scope]"
-    done
-
-    local -A scope_seen=()
-
     for f in "$dir"/pos-*; do
         [ -x "$f" ] || continue
         local name="${f##*/pos-}"
@@ -96,26 +84,10 @@ reg_scan() {
         examples="$(sed -n '/^# POS_EXAMPLES: /{s/^# POS_EXAMPLES: //;p}' "$f" 2>/dev/null)"
         _reg_examples["$key"]="$examples"
 
-        # POS_CONFIG: (may appear multiple lines per file)
-        local line
-        while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            line="${line#*POS_CONFIG:}"
-            local scope="${line%%|*}"
-            scope="${scope// }"
-            [ -n "$scope" ] || continue
-            _reg_config_keys["$scope"]+="${_reg_config_keys[$scope]:+$'\n'}$line"
-            if [ -z "${scope_seen[$scope]:-}" ]; then
-                scope_seen["$scope"]=1
-                _reg_config_scopes+=("$scope")
-            fi
-        done < <(grep '^# POS_CONFIG:' "$f" 2>/dev/null || true)
     done
 
     # Sort tools
     mapfile -t _reg_tools < <(printf '%s\n' "${_reg_tools[@]}" | sort)
-    # Sort config scopes
-    mapfile -t _reg_config_scopes < <(printf '%s\n' "${_reg_config_scopes[@]}" | sort -u)
 
     # Restore LC_ALL
     if [ -n "$LC_ALL_PREV" ]; then
@@ -166,23 +138,6 @@ reg_lookup() {
         examples) echo "${_reg_examples[$tool]:-}" ;;
         *)        return 1 ;;
     esac
-}
-
-# ── config scope helpers ────────────────────────────────────────
-reg_config_scopes() { printf '%s\n' "${_reg_config_scopes[@]}"; }
-
-reg_config_keys() {
-    local scope="$1"
-    echo "${_reg_config_keys[$scope]:-}"
-}
-
-reg_config_envfile() {
-    local scope="$1" line
-    line="$(echo "${_reg_config_keys[$scope]:-}" | head -1)"
-    [ -n "$line" ] || return 1
-    line="${line#*|}"   # drop scope
-    local env="${line%%|*}"
-    echo "${env// }"
 }
 
 # ── iteration ───────────────────────────────────────────────────

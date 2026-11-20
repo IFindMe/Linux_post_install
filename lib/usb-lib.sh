@@ -1,5 +1,5 @@
 # lib/usb-lib.sh — shared USB-storage detection + pick flow. Used by
-# pos-system-backup (post-verify USB copy) and pos-media-sync (Music sync).
+# pos-system-backup (post-verify USB copy).
 # Requires common.sh helpers: log/warn/ok/section/confirm/run. Defines ONLY
 # usb_* functions plus the USB_MOUNTED / USB_UNMOUNTED / USB_ROOT globals.
 #

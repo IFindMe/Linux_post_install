@@ -1,6 +1,6 @@
 # lib/menu-lib.sh — category-neutral interactive menu primitives.
 #
-# The generic half of the former share-lib interactive layer (Pattern B),
+# Generic interactive menu primitives (Pattern B),
 # extracted so any `pos` tool can share one interaction vocabulary: a tty
 # guard, a looping boxed menu, a type-to-filter picker and a prompt with
 # optional default. Display goes to stderr, results to stdout; reads are
@@ -10,7 +10,7 @@
 #
 # Contracts (all of them, no exceptions):
 #   * Defines ONLY `menu_*` functions — sourcing never clobbers a tool's own
-#     helpers (same discipline as lib/notify.sh).
+#     helpers (same guarded-helper discipline as lib/common.sh).
 #   * Requires common.sh to be sourced by the CALLER for colored output;
 #     CYAN/RESET get empty guarded fallbacks here so the lib also works
 #     standalone-sourced (plain text instead of color — never an error).

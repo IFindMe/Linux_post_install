@@ -1,85 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
-source "$(dirname "$0")/lib/flags.sh"
 
 log "Running post-install..."
-
-# ── rclone config ──────────────────────────────────────────────
-# Place your rclone.conf in config/ (gitignored) and this will install it.
-# Kept when the user already has one (no clobber — same as entertainment.env).
-if [ -f config/rclone.conf ]; then
-    run mkdir -p "$HOME/.config/rclone"
-    if [ -f "$HOME/.config/rclone/rclone.conf" ]; then
-        log "rclone.conf already exists, keeping it"
-    else
-        run cp config/rclone.conf "$HOME/.config/rclone/rclone.conf"
-        run chmod 600 "$HOME/.config/rclone/rclone.conf"
-        log "Installed rclone.conf"
-    fi
-else
-    warn "config/rclone.conf not found, skipping"
-fi
-
-# ── entertainment config ───────────────────────────────────────
-# Generic template for the weather plugin — copied only if the user
-# has not already created their own entertainment.env (no clobber).
-ENT_DIR="$HOME/.config/linux_post_install"
-if [ -f config/entertainment.env ]; then
-    run mkdir -p "$ENT_DIR"
-    if [ -f "$ENT_DIR/entertainment.env" ]; then
-        log "entertainment.env already exists, keeping it"
-    else
-        run cp config/entertainment.env "$ENT_DIR/entertainment.env"
-        run chmod 600 "$ENT_DIR/entertainment.env"
-        log "Installed entertainment.env — set your location:"
-        cat "$ENT_DIR/entertainment.env"
-    fi
-else
-    warn "config/entertainment.env not found, skipping"
-fi
-
-# ── system + notify config templates ───────────────────────────
-# Copied only if the user has not already created their own (no clobber).
-run mkdir -p "$ENT_DIR"
-for tpl in system.env notify.env ai.env; do
-    if [ -f "config/$tpl" ]; then
-        if [ -f "$ENT_DIR/$tpl" ]; then
-            log "$tpl already exists, keeping it"
-        else
-            run cp "config/$tpl" "$ENT_DIR/$tpl"
-            run chmod 600 "$ENT_DIR/$tpl"
-            log "Installed $tpl — edit $ENT_DIR/$tpl"
-        fi
-    fi
-done
-
-# ── schedule starter jobs (interactive) ────────────────────────
-# config/schedule.d has ready-made example jobs (NVMe health, CPU/disk
-# thresholds, silent log cleanup). Ask before copying — only into an empty
-# schedule.d/ (never overwrite existing jobs). Users with legacy event.env
-# rules are pointed at `pos system schedule migrate` instead.
-if [ -d config/schedule.d ]; then
-    if [ -d "$ENT_DIR/schedule.d" ]; then
-        log "schedule.d already exists, keeping it"
-    elif [ -f "$ENT_DIR/event.env" ] && grep -vE '^[[:space:]]*(#.*)?$' "$ENT_DIR/event.env" >/dev/null 2>&1; then
-        log "legacy event.env rules found — convert them with 'pos system schedule migrate'"
-    elif confirm "Install the starter schedule jobs (NVMe health, CPU/disk thresholds, log cleanup)?"; then
-        if [ "${DRY_RUN:-0}" -eq 1 ]; then
-            log "(dry-run) would copy config/schedule.d/* → $ENT_DIR/schedule.d/"
-        else
-            run mkdir -p "$ENT_DIR/schedule.d"
-            for jf in config/schedule.d/*.env; do
-                [ -f "$jf" ] || continue
-                run cp "$jf" "$ENT_DIR/schedule.d/"
-                run chmod 600 "$ENT_DIR/schedule.d/${jf##*/}"
-            done
-            log "Installed starter schedule jobs — check them with 'pos system schedule list'"
-        fi
-    else
-        log "Skipping starter schedule jobs"
-    fi
-fi
 
 # ── Ensure all bin dirs are in PATH ────────────────────────────
 PATH_LINE='export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin:$PATH"'
@@ -139,40 +62,6 @@ if [ -f "$KEY_FILE" ]; then
     fi
 else
     warn "config/authorized_keys not found, skipping SSH setup"
-fi
-# ── systemd services ───────────────────────────────────────────
-if [ -d systemd ] && [ -n "$(ls -A systemd/*.service 2>/dev/null)" ]; then
-    run sudo cp systemd/*.service /etc/systemd/system/
-    if [ -n "$(ls -A systemd/*.timer 2>/dev/null)" ]; then
-        run sudo cp systemd/*.timer /etc/systemd/system/
-    fi
-    run sudo systemctl daemon-reload
-
-    for svc in systemd/*.service; do
-        svc_name=$(basename "$svc")
-        # autostart.service runs features/autostart.sh — enable only when
-        # the autostart feature flag is green (set by ./install.sh --feature)
-        if [ "$svc_name" = "autostart.service" ] && ! flag_is_set autostart; then
-            warn "autostart feature not installed — skipping autostart.service (run ./install.sh --feature)"
-            continue
-        fi
-        # usb-automount.service runs features/usb-automount.sh — same gating
-        if [ "$svc_name" = "usb-automount.service" ] && ! flag_is_set usb-automount; then
-            warn "usb-automount feature not installed — skipping usb-automount.service (run ./install.sh --feature)"
-            continue
-        fi
-        # ssh-agent.service — gated on ssh-agent flag
-        if [ "$svc_name" = "ssh-agent.service" ] && ! flag_is_set ssh-agent; then
-            warn "ssh-agent feature not installed — skipping ssh-agent.service (run ./install.sh --feature)"
-            continue
-        fi
-        run sudo systemctl enable --now "$svc_name" 2>/dev/null || \
-            run sudo systemctl enable "$svc_name"
-        log "service enabled: $svc_name"
-    done
-    log "Systemd services installed and enabled"
-else
-    warn "No systemd services found, skipping"
 fi
 
 log "Post-install completed."
