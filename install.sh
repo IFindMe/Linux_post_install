@@ -7,12 +7,13 @@ for arg in "$@"; do
     [ "$arg" = "--no-color" ] && NO_COLOR=1
 done
 if [ "$NO_COLOR" -eq 1 ]; then
-    export TERM=dumb
-    unset CYAN GREEN YELLOW RED BLUE BOLD RESET
+    export NO_COLOR=1 TERM=dumb
+    unset CYAN GREEN YELLOW RED BLUE BOLD RESET DIM
 fi
 
 source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/flags.sh"
+source "$(dirname "$0")/lib/ui.sh"
 
 # Return the current install.sh version (e.g. "0.0c174").
 # Derived from git commit count. Empty when .git is absent.
@@ -46,7 +47,7 @@ normalize_steps_spec() {
             from="${BASH_REMATCH[1]}"
             to="${BASH_REMATCH[2]}"
             if [ "$to" -lt "$from" ]; then
-                err "Invalid --steps range '$part' (end < start)"
+                ui_die "Invalid --steps range '$part' (end < start)"
             fi
             for ((p = from; p <= to; p++)); do
                 out="${out:+$out,}$p"
@@ -54,7 +55,7 @@ normalize_steps_spec() {
         elif [[ "$part" =~ ^[0-9]+$ ]]; then
             out="${out:+$out,}$part"
         else
-            err "Invalid --steps value '$part' (expected 1-3, comma list, or N-M range)"
+            ui_die "Invalid --steps value '$part' (expected 1-3, comma list, or N-M range)"
         fi
     done
     IFS="$oldIFS"
@@ -94,23 +95,25 @@ while [[ $# -gt 0 ]]; do
         --dry-run) DRY_RUN=1; shift ;;
         --force) FORCE=1; shift ;;
         --skip)
-            [ -z "${2:-}" ] && err "Missing value for --skip"
+            [ -z "${2:-}" ] && ui_die "Missing value for --skip"
             SKIP_PHASES="${SKIP_PHASES:+$SKIP_PHASES,}$2"
             shift 2
             ;;
         --steps)
-            [ -z "${2:-}" ] && err "Missing value for --steps"
+            [ -z "${2:-}" ] && ui_die "Missing value for --steps"
             STEPS_SPEC="$(normalize_steps_spec "$2")"
             shift 2
             ;;
         --no-color) shift ;;
         -h|--help) usage ;;
-        *) err "Unknown option: $1" ;;
+        *) ui_die "Unknown option: $1" ;;
     esac
 done
 
 # ── Version gate ────────────────────────────────────────────────
 CURRENT_VERSION="$(install_version)"
+ui_header "Linux_post_install" "$CURRENT_VERSION" "Personal bootstrap & homelab toolkit"
+
 if [ "${FORCE:-0}" -ne 1 ] && [ -n "$CURRENT_VERSION" ]; then
     INSTALLED_VERSION="$(flag_value installed_version 2>/dev/null)" || true
     if [ -n "$INSTALLED_VERSION" ]; then
@@ -118,9 +121,9 @@ if [ "${FORCE:-0}" -ne 1 ] && [ -n "$CURRENT_VERSION" ]; then
         installed_num="${INSTALLED_VERSION#0.0c}"
         if [ "$current_num" -eq "$installed_num" ] 2>/dev/null; then
             if [ "${DRY_RUN:-0}" -eq 1 ]; then
-                log "(dry-run) Would skip install: already at version $CURRENT_VERSION"
+                ui_info "(dry-run) Would skip install: already at version $CURRENT_VERSION"
             else
-                log "Already installed ($CURRENT_VERSION). Use --force to re-install."
+                ui_info "Already installed ($CURRENT_VERSION). Use --force to re-install."
             fi
             exit 0
         fi
@@ -148,12 +151,11 @@ should_run() {
     return 0
 }
 
-section "Linux_post_install Bootstrap"
 timer_start
 
 # ── Phase 1: preinstall ────────────────────────────────────────
 if should_run 1 preinstall; then
-    step 1 3 "Installing system packages"
+    ui_section 1 3 "SYSTEM PACKAGES"
     if [ -f preinstall.sh ]; then
         # preinstall.sh owns 'apt update' — no duplicate update here.
         bash preinstall.sh
@@ -162,7 +164,7 @@ fi
 
 # ── Phase 2: install wrappers ──────────────────────────────────
 if should_run 2 scripts; then
-    step 2 3 "Installing wrapper scripts"
+    ui_section 2 3 "WRAPPER SCRIPTS"
     run sudo mkdir -p /usr/local/bin
     count=0
     for f in bin/*; do
@@ -177,7 +179,7 @@ if should_run 2 scripts; then
         lib_count=$((lib_count + 1))
         lib_names+="$lf "
     done
-    log "libs -> /usr/local/bin (644): ${lib_names% }"
+    ui_info "libs -> /usr/local/bin (644): ${lib_names% }"
 
     # ── Precompiled architecture binaries ─────────────────────
     # Manually-compiled binaries (not available on the internet),
@@ -197,24 +199,33 @@ if should_run 2 scripts; then
             bcount=$((bcount + 1))
             bnames+="$(basename "$f") "
         done
-        ok "$bcount $prebuilt_dir binaries -> /usr/local/bin: ${bnames% }"
+        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+            ui_info "(dry-run) would install $bcount $prebuilt_dir binaries -> /usr/local/bin"
+        else
+            ui_success "$bcount $prebuilt_dir binaries -> /usr/local/bin: ${bnames% }"
+        fi
     fi
 
-    ok "$count scripts + $lib_count libs -> /usr/local/bin"
+    if [ "${DRY_RUN:-0}" -eq 1 ]; then
+        ui_info "(dry-run) would install $count scripts + $lib_count libs -> /usr/local/bin"
+    else
+        ui_success "$count scripts + $lib_count libs -> /usr/local/bin"
+    fi
 fi
 
 # ── Phase 3: postinstall ───────────────────────────────────────
 if should_run 3 postinstall; then
-    step 3 3 "Post-install configuration"
+    ui_section 3 3 "POST-INSTALL CONFIGURATION"
     if [ -f postinstall.sh ]; then
         bash postinstall.sh
     fi
 fi
 
-echo
-echo "${GREEN}════════════════════════════════════════════${RESET}"
-echo "${GREEN}  Bootstrap complete ($(timer_stop))${RESET}"
-echo "${GREEN}════════════════════════════════════════════${RESET}"
+if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    ui_info "(dry-run) Bootstrap plan complete" "$(timer_stop)"
+else
+    ui_success "Bootstrap complete" "$(timer_stop)"
+fi
 
 # ── Record installed version ────────────────────────────────────
 if [ "${DRY_RUN:-0}" -ne 1 ] && [ -n "${CURRENT_VERSION:-}" ]; then

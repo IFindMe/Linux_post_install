@@ -1,37 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
+source "$(dirname "$0")/lib/ui.sh"
 
-log "Running post-install..."
+timer_start
+ui_info "Running post-install..."
 
 # ── Ensure all bin dirs are in PATH ────────────────────────────
 PATH_LINE='export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin:$PATH"'
 BASHRC="$HOME/.bashrc"
 
 if grep -qsF "$PATH_LINE" "$BASHRC" 2>/dev/null; then
-    log "PATH already configured"
+    ui_info "PATH already configured"
 else
     run echo "$PATH_LINE" >> "$BASHRC"
-    log "Added PATH to ~/.bashrc"
+    ui_info "Added PATH to ~/.bashrc"
 fi
 
 # ── Bash completion for pos ─────────────────────────────────────
 COMPLETION_LINE='source /usr/local/share/bash-completion/completions/pos.bash 2>/dev/null || true'
 
 if grep -qsF "pos.bash" "$BASHRC" 2>/dev/null; then
-    log "pos completion already configured"
+    ui_info "pos completion already configured"
 else
     run echo "$COMPLETION_LINE" >> "$BASHRC"
-    log "Added pos completion to ~/.bashrc"
+    ui_info "Added pos completion to ~/.bashrc"
 fi
 
 if [ -f completions/pos.bash ]; then
     run sudo mkdir -p /usr/local/share/bash-completion/completions
     run sudo install -m 644 completions/pos.bash \
         /usr/local/share/bash-completion/completions/pos.bash
-    log "Installed pos completion"
+    ui_info "Installed pos completion"
 else
-    warn "completions/pos.bash not found, skipping"
+    ui_warning "completions/pos.bash not found, skipping"
 fi
 
 # ── SSH authorized keys ────────────────────────────────────────
@@ -49,19 +51,23 @@ if [ -f "$KEY_FILE" ]; then
     while IFS= read -r key; do
         [[ -z "$key" || "$key" == \#* ]] && continue
         if grep -qsF "$key" "$AUTH_FILE" 2>/dev/null; then
-            log "SSH key already present"
+            ui_info "SSH key already present"
         else
             run echo "$key" >> "$AUTH_FILE"
             added=$((added + 1))
         fi
     done < "$KEY_FILE"
     if [ "$added" -gt 0 ]; then
-        log "Installed $added SSH key(s)"
+        ui_info "Installed $added SSH key(s)"
     elif ! grep -qE '^[[:space:]]*[^#[:space:]]' "$KEY_FILE"; then
-        log "config/authorized_keys is empty — nothing to add"
+        ui_info "config/authorized_keys is empty — nothing to add"
     fi
 else
-    warn "config/authorized_keys not found, skipping SSH setup"
+    ui_warning "config/authorized_keys not found, skipping SSH setup"
 fi
 
-log "Post-install completed."
+if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    ui_info "(dry-run) Post-install plan complete" "$(timer_stop)"
+else
+    ui_success "Post-install complete" "$(timer_stop)"
+fi

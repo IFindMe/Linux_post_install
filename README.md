@@ -39,6 +39,8 @@ cd Linux_post_install
 
 A version gate compares the installed version flag against the current repo version (`0.0c<commit count>`); on a match it stops unless `--force` is given. Without git or without a stored version, the gate is skipped.
 
+Installer output uses the pure-Bash helpers in `lib/ui.sh` (no Gum or other UI dependency): a compact banner, `[n/3]` section counters with progress bars, timed `✓ / ! / ✗` status lines, and a spinner only on interactive terminals. Package lists are summarized as counts instead of being printed in full; apt output is captured and shown on failure. Set `UI_DEBUG=1` to stream full command output, `UI_NO_COLOR=1` or `--no-color` to disable color, and `UI_SPINNER=0` to disable animation. On non-TTY output the UI falls back to plain, log-friendly lines.
+
 **Phase 1 — preinstall (`preinstall.sh`, needs root)**
 
 `apt update`, then installs the package list in `preinstall.sh` (network tools, `nmap`, `fail2ban`, hotspot dependencies, crypto/archive tools, Python, GTK/Qr libraries for the hotspot GUI). It also tries `cpufrequtils`/`linux-cpupower` opportunistically and verifies a few binaries. Can be run standalone with `--dry-run`.

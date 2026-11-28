@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/../lib/common.sh"
+source "$(dirname "$0")/../lib/ui.sh"
 
 usage() {
     cat <<EOF
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --all) ALL=1; shift ;;
         --uninstall) UNINSTALL=1; shift ;;
         -h|--help) usage ;;
-        -*) err "Unknown option: $1" ;;
+        -*) ui_die "Unknown option: $1" ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
@@ -95,7 +96,7 @@ if [ "${#POSITIONAL[@]}" -gt 0 ]; then
         cat=$(find_app_category "$req" 2>/dev/null) && {
             SELECTED+=("$req")
         } || {
-            warn "Unknown app: $req (skipping)"
+            ui_warning "Unknown app: $req (skipping)"
         }
     done
 
@@ -109,11 +110,11 @@ elif [ "$ALL" -eq 1 ]; then
 
 # ── Mode 3: interactive TUI ───────────────────────────────────
 else
-    section "Optional Applications"
+    ui_header "Optional Applications" "" "Install or uninstall optional desktop applications"
     if [ "$UNINSTALL" -eq 1 ]; then
-        echo "Select apps to uninstall (y/n for each):"
+        ui_info "Select apps to uninstall (y/n for each):"
     else
-        echo "Select apps to install (y/n for each):"
+        ui_info "Select apps to install (y/n for each):"
     fi
     echo
 
@@ -135,13 +136,13 @@ else
 fi
 
 # ── Apply action to selected apps ─────────────────────────────
-[ "${#SELECTED[@]}" -eq 0 ] && { warn "No apps selected"; exit 0; }
+[ "${#SELECTED[@]}" -eq 0 ] && { ui_warning "No apps selected"; exit 0; }
 
 echo
 if [ "$UNINSTALL" -eq 1 ]; then
-    section "Uninstalling ${SELECTED[*]}"
+    ui_section 1 1 "UNINSTALLING ${#SELECTED[@]} APPS"
 else
-    section "Installing ${SELECTED[*]}"
+    ui_section 1 1 "INSTALLING ${#SELECTED[@]} APPS"
 fi
 
 timer_start
@@ -149,7 +150,7 @@ count=1
 total=${#SELECTED[@]}
 for app in "${SELECTED[@]}"; do
     cat=$(find_app_category "$app")
-    step "$count" "$total" "$app"
+    ui_info "[$count/$total] $app"
     if [ "$UNINSTALL" -eq 1 ]; then
         bash "$APPS_DIR/$cat/$app.sh" uninstall
     else
@@ -160,12 +161,10 @@ for app in "${SELECTED[@]}"; do
 done
 
 echo
-if [ "$UNINSTALL" -eq 1 ]; then
-    echo "${GREEN}════════════════════════════════════════════${RESET}"
-    echo "${GREEN}  Apps uninstalled ($(timer_stop))${RESET}"
-    echo "${GREEN}════════════════════════════════════════════${RESET}"
+if [ "${DRY_RUN:-0}" -eq 1 ]; then
+    ui_info "(dry-run) Apps plan complete" "$(timer_stop)"
+elif [ "$UNINSTALL" -eq 1 ]; then
+    ui_success "Apps uninstalled" "$(timer_stop)"
 else
-    echo "${GREEN}════════════════════════════════════════════${RESET}"
-    echo "${GREEN}  Apps installed ($(timer_stop))${RESET}"
-    echo "${GREEN}════════════════════════════════════════════${RESET}"
+    ui_success "Apps installed" "$(timer_stop)"
 fi

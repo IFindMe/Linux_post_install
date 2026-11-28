@@ -1,13 +1,13 @@
-# ── Colors (auto-off when not a TTY) ───────────────────────────
-if [ -t 1 ]; then
-    CYAN=$(tput setaf 6)
-    GREEN=$(tput setaf 2)
-    YELLOW=$(tput setaf 3)
-    RED=$(tput setaf 1)
-    BLUE=$(tput setaf 4)
-    BOLD=$(tput bold)
-    DIM=$(tput dim)
-    RESET=$(tput sgr0)
+# ── Colors (auto-off when not a TTY, NO_COLOR, or TERM=dumb) ───
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+    CYAN=$(tput setaf 6 2>/dev/null || true)
+    GREEN=$(tput setaf 2 2>/dev/null || true)
+    YELLOW=$(tput setaf 3 2>/dev/null || true)
+    RED=$(tput setaf 1 2>/dev/null || true)
+    BLUE=$(tput setaf 4 2>/dev/null || true)
+    BOLD=$(tput bold 2>/dev/null || true)
+    DIM=$(tput dim 2>/dev/null || true)
+    RESET=$(tput sgr0 2>/dev/null || true)
 else
     CYAN=""; GREEN=""; YELLOW=""; RED=""; BLUE=""; BOLD=""; DIM=""; RESET=""
 fi
@@ -42,7 +42,11 @@ step() {
 # ── Dry-run aware executor ─────────────────────────────────────
 run() {
     if [ "${DRY_RUN:-0}" -eq 1 ]; then
-        log "(dry-run) $*"
+        if declare -F ui_info >/dev/null 2>&1; then
+            ui_info "(dry-run) $*"
+        else
+            log "(dry-run) $*"
+        fi
     else
         "$@"
     fi
